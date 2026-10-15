@@ -56,6 +56,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      # O app gráfico (Slint) liga o fontconfig via pkg-config no build.
+      - name: Dependências do sistema
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Ferramentas de empacotamento

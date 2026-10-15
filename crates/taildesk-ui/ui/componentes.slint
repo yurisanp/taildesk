@@ -1,0 +1,202 @@
+import { Tema } from "tema.slint";
+
+export enum Estado { online, relay, sem-app, offline, nao-suportado }
+
+export struct Dispositivo {
+    nome: string,
+    so: string,
+    ip: string,
+    dns: string,
+    estado: Estado,
+    favorito: bool,
+    ultimo-acesso: string,
+    teclado: string,
+}
+
+export global Textos {
+    pure public function estado(e: Estado) -> string {
+        if e == Estado.online { return @tr("online"); }
+        if e == Estado.relay { return @tr("online · via relay"); }
+        if e == Estado.sem-app { return @tr("sem TailDesk aberto"); }
+        if e == Estado.offline { return @tr("offline"); }
+        return @tr("não suportado");
+    }
+    pure public function cor(e: Estado) -> color {
+        if e == Estado.online { return Tema.online; }
+        if e == Estado.relay { return Tema.relay; }
+        return Tema.offline;
+    }
+    pure public function conectavel(e: Estado) -> bool {
+        return e == Estado.online || e == Estado.relay;
+    }
+}
+
+export component Botao inherits Rectangle {
+    in property <string> texto;
+    in property <bool> primario: false;
+    in property <bool> perigo: false;
+    in property <bool> discreto: false;
+    in property <bool> habilitado: true;
+    in property <length> altura: 32px;
+    callback clicado();
+
+    accessible-role: button;
+    accessible-label: texto;
+    accessible-action-default => { if habilitado { clicado(); } }
+    forward-focus: foco;
+
+    min-width: rotulo.preferred-width + 24px;
+    height: altura;
+    border-radius: Tema.raio;
+    background: !habilitado ? Tema.superficie-2
+        : primario ? (toque.pressed ? Tema.primaria-forte : toque.has-hover ? Tema.primaria-forte : Tema.primaria)
+        : (toque.has-hover ? Tema.superficie-2 : discreto ? transparent : Tema.superficie);
+    border-width: (primario || discreto) && !foco.has-focus ? 0px : 1px;
+    border-color: foco.has-focus ? Tema.primaria : Tema.borda;
+
+    toque := TouchArea {
+        mouse-cursor: habilitado ? pointer : default;
+        clicked => { if root.habilitado { root.clicado(); } }
+    }
+    foco := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Return || e.text == " " {
+                if root.habilitado { root.clicado(); }
+                return accept;
+            }
+            reject
+        }
+    }
+    rotulo := Text {
+        width: parent.width;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: root.texto;
+        font-size: Tema.fonte;
+        font-weight: 600;
+        color: !root.habilitado ? Tema.texto-2 : root.primario ? Tema.sobre-primaria : root.perigo ? Tema.perigo : Tema.texto;
+    }
+}
+
+export component PontoStatus inherits Rectangle {
+    in property <Estado> estado;
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    background: Textos.cor(estado);
+}
+
+export component ChipStatus inherits HorizontalLayout {
+    in property <Estado> estado;
+    spacing: 6px;
+    alignment: start;
+    VerticalLayout {
+        alignment: center;
+        PontoStatus { estado: root.estado; }
+    }
+    Text {
+        text: Textos.estado(root.estado);
+        font-size: Tema.fonte-pequena;
+        color: Tema.texto-2;
+        vertical-alignment: center;
+    }
+}
+
+export component ItemNav inherits Rectangle {
+    in property <string> texto;
+    in property <bool> ativo;
+    callback clicado();
+    accessible-role: button;
+    accessible-label: texto;
+    accessible-action-default => { clicado(); }
+    height: 34px;
+    border-radius: Tema.raio;
+    background: ativo ? Tema.superficie-2 : toque.has-hover ? Tema.superficie-2.with-alpha(0.5) : transparent;
+    toque := TouchArea { clicked => { root.clicado(); } }
+    Rectangle {
+        x: 0;
+        width: 3px;
+        height: 16px;
+        border-radius: 2px;
+        background: root.ativo ? Tema.primaria : transparent;
+    }
+    Text {
+        x: 14px;
+        height: parent.height;
+        vertical-alignment: center;
+        text: root.texto;
+        font-size: Tema.fonte;
+        font-weight: root.ativo ? 600 : 400;
+        color: root.ativo ? Tema.texto : Tema.texto-2;
+    }
+}
+
+export component Separador inherits Rectangle {
+    height: 1px;
+    background: Tema.borda;
+}
+
+export component Cartao inherits Rectangle {
+    background: Tema.superficie;
+    border-radius: Tema.raio-grande;
+    border-width: 1px;
+    border-color: Tema.borda;
+}
+
+// Linha "rótulo: valor" com ação opcional, usada nos painéis de detalhe.
+export component LinhaInfo inherits HorizontalLayout {
+    in property <string> rotulo;
+    in property <string> valor;
+    in property <string> acao;
+    callback acionar();
+    spacing: 8px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 2px;
+        Text { text: root.rotulo; font-size: Tema.fonte-pequena; color: Tema.texto-2; }
+        Text { text: root.valor; font-size: Tema.fonte; color: Tema.texto; overflow: elide; }
+    }
+    if root.acao != "": VerticalLayout {
+        alignment: center;
+        Botao { texto: root.acao; discreto: true; altura: 26px; clicado => { root.acionar(); } }
+    }
+}
+
+export component BarraProgresso inherits Rectangle {
+    in property <float> valor;
+    in property <color> cor: Tema.primaria;
+    height: 4px;
+    border-radius: 2px;
+    background: Tema.superficie-2;
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.valor, 0, 1);
+        height: parent.height;
+        border-radius: 2px;
+        background: root.cor;
+    }
+}
+
+export component Toast inherits Rectangle {
+    in property <string> texto;
+    visible: texto != "";
+    width: min(rotulo.preferred-width + 32px, 560px);
+    height: 40px;
+    border-radius: 20px;
+    background: #23262dee;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: Tema.sombra;
+    rotulo := Text {
+        width: parent.width - 32px;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: root.texto;
+        color: #ffffff;
+        font-size: Tema.fonte;
+        overflow: elide;
+    }
+}

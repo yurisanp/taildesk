@@ -1,0 +1,27 @@
+// Design tokens do TailDesk (vindos do protótipo). Cores semânticas para os estados de conexão (levantamento §9).
+import { Palette } from "std-widgets.slint";
+
+export global Tema {
+    in-out property <bool> escuro: Palette.color-scheme == ColorScheme.dark;
+
+    out property <color> fundo: escuro ? #15171c : #f5f6f8;
+    out property <color> superficie: escuro ? #1e2128 : #ffffff;
+    out property <color> superficie-2: escuro ? #282c35 : #eceef2;
+    out property <color> borda: escuro ? #353a45 : #dadee5;
+    out property <color> texto: escuro ? #e9ebef : #1a1d23;
+    out property <color> texto-2: escuro ? #a2a8b4 : #5a6170;
+    out property <color> primaria: escuro ? #5b8cff : #2c5fe0;
+    out property <color> primaria-forte: escuro ? #7aa2ff : #2149b8;
+    out property <color> sobre-primaria: #ffffff;
+    out property <color> online: #1f9d63;
+    out property <color> relay: #d18f00;
+    out property <color> offline: #9aa1ad;
+    out property <color> perigo: escuro ? #ff6b60 : #c93a30;
+    out property <color> sombra: #00000040;
+
+    out property <length> raio: 8px;
+    out property <length> raio-grande: 12px;
+    out property <length> fonte-pequena: 12px;
+    out property <length> fonte: 13px;
+    out property <length> fonte-titulo: 20px;
+}

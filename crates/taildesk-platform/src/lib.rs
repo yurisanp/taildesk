@@ -1,3 +1,68 @@
-//! Código específico de SO: captura (DXGI/WGC, portal+PipeWire, XShm), injeção de input (SendInput, portal/libei, XTest), cursor e segredos.
-//!
-//! Esqueleto: implementação nas fases descritas em `docs/context/10-plano-windows-linux.md`.
+//! Código específico de SO. Hoje: instância única do app ([`instancia`]), detecção da bandeja
+//! do sistema e abrir links. Nas próximas etapas da fase 1 entram captura (DXGI/WGC,
+//! portal+PipeWire, XShm), injeção de input (SendInput, portal/libei, XTest), cursor e segredos
+//! (`docs/context/10-plano-windows-linux.md`).
+
+pub mod instancia;
+
+use std::io;
+use std::process::{Command, Stdio};
+
+/// Se o sistema mostra ícones na bandeja. Quando não mostra, o app deve fechar ao fechar a
+/// janela, em vez de ficar escondido sem ter como voltar.
+///
+/// - Linux: precisa de um StatusNotifierWatcher no D-Bus da sessão (KDE, Xfce, Cinnamon, LXQt,
+///   waybar; GNOME só com a extensão AppIndicator, que o Ubuntu já traz).
+/// - Windows: a área de notificação sempre existe.
+pub fn bandeja_disponivel() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        sni_watcher().unwrap_or(false)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        cfg!(windows)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn sni_watcher() -> zbus::Result<bool> {
+    let sessao = zbus::blocking::Connection::session()?;
+    let dbus = zbus::blocking::fdo::DBusProxy::new(&sessao)?;
+    let nome = zbus::names::BusName::try_from("org.kde.StatusNotifierWatcher")?;
+    Ok(dbus.name_has_owner(nome)?)
+}
+
+/// Abre um link no navegador padrão.
+pub fn abrir_link(url: &str) -> io::Result<()> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "só links http(s)",
+        ));
+    }
+    let programa = if cfg!(windows) {
+        "explorer.exe"
+    } else {
+        "xdg-open"
+    };
+    Command::new(programa)
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|mut filho| {
+            // Recolhe o processo quando ele terminar, sem segurar quem chamou.
+            std::thread::spawn(move || filho.wait());
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn abrir_link_recusa_o_que_nao_e_web() {
+        assert!(super::abrir_link("file:///etc/passwd").is_err());
+        assert!(super::abrir_link("-h").is_err());
+    }
+}
