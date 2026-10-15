@@ -53,9 +53,9 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 
 | Grupo | Mensagens |
 |---|---|
-| Sessão | `Hello`, `HelloAck`, `ConsentResult`, `Close{reason}`, `Ping{t}`/`Pong{t,t_echo}` |
+| Sessão | `Hello`, `HelloAck`, `ConsentResult`, `Close{reason: CloseReason}` (valores abaixo), `Ping{t}`/`Pong{t,t_echo}` |
 | Vídeo | `StartVideo{display_id, wanted, priority}`, `CodecSelected{display_id, stream_id, ...}`, `RequestKeyframe{display}`, `PictureLoss{display, last_good_seq}`, `Nack{display, frame_seq, missing_frag_bitmap}`, `QualityPrefs{fps_max, mode: Auto|Text|Motion|LowBandwidth, chroma444}`, `StopVideo{display_id}`, `SetPriority{display_id, FOCUSED|VISIBLE}`, `VideoStopped{display_id, reason}`, `DisplaysChanged{displays}` (sem `SwitchDisplay`: trocar = Stop + Start) |
-| Input | Teclado: ver `11-teclado.md` §3 (`KeyboardInfo`, `Key`, `KeyShortcut`, `KeyChar`, `KeyboardMode`, `ReleaseAll`), `MouseMove{display_id, x, y (u16 normalizado no monitor) | rel}`, `MouseButton{btn, down}`, `Scroll{dx,dy,precise}`, `Touch{id, phase, x, y, pressure}`, `Gamepad{...}` (futuro) |
+| Input | Teclado: ver `11-teclado.md` §3 (`KeyboardInfo`, `Key`, `KeyShortcut`, `KeyChar`, `KeyboardMode`, `ReleaseAll`), `MouseMove{display_id, x, y (u16 normalizado no monitor) | rel}`, `MouseButton{btn, down}`, `Scroll{dx, dy, precise}` (convenção abaixo), `Touch{id, phase, x, y, pressure}`, `Gamepad{...}` (futuro) |
 | Cursor | `CursorPos{display_id, x, y, visible}`, `CursorShapeRef{hash}` (shape completo no stream de cursor) |
 | Clipboard | `ClipboardOffer{formats}`, `ClipboardData{format, bytes}` (texto/HTML/PNG; arquivos → transferência explícita) |
 | Arquivos (80–89) | `FsRootsRequest`, `FsRoots`, `FsList`, `FsListing`, `FileOffer`, `FileRequest`, `FileAccept`, `FileCancel`, `FileDone`, `FileError` (detalhe em §3.1) |
@@ -64,6 +64,10 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | Chat | `ChatMessage{text}` |
 
 Multi-monitor (`13-multimonitor.md` §3): **um stream de vídeo por monitor**, cada um com encoder, keyframes e `stream_id` próprios, respondido por um `CodecSelected` por `display_id`. Host recusa `StartVideo` acima do seu limite (`Error{TOO_MANY_STREAMS}`; padrão 2 com openh264). Parser: no máximo 16 `DisplayInfo` por mensagem, `name` ≤ 128 bytes.
+
+**`CloseReason`** (`Close.reason`): `UNSPECIFIED = 0`, `BY_CONTROLLER = 1`, `BY_HOST = 2`, `CONSENT_DENIED = 3` (a pessoa no host recusou), `VERSION_MISMATCH = 4`, `PROTOCOL_ERROR = 5`, `CONSENT_TIMEOUT = 6` (ninguém respondeu ao pedido de acesso em 60 s), `NOT_ALLOWED = 7` (o host não aceita conexões deste peer, por configuração ou política). Com `CONSENT_DENIED`, `CONSENT_TIMEOUT` e `NOT_ALLOWED` a UI distingue "recusou", "não respondeu" e "não aceita conexões" (`12-levantamento-ux.md` §5.3).
+
+**`Scroll`**: valores positivos são **para baixo e para a direita**, como no libinput. Com `precise = false`, `dx`/`dy` contam **dentes da roda**; com `precise = true`, são **pixels lógicos** (touchpad). `dx = dy = 0` encerra o gesto do touchpad.
 
 Regras: campos novos sempre opcionais; `proto_version` maior só quando quebrar; mensagens desconhecidas no `oneof` são ignoradas e logadas.
 
