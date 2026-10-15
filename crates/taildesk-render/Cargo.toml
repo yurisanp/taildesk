@@ -8,7 +8,13 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+# A mesma versão que o Slint usa com `unstable-wgpu-30`, para a textura passar direto.
+wgpu = "30.0.1"
 
+[dev-dependencies]
+pollster = "0.4"
+# Spike de duas janelas (`examples/duas_janelas.rs`).
+slint = { version = "=1.18.1", features = ["unstable-wgpu-30", "renderer-femtovg-wgpu"] }
 
 [lints]
 workspace = true
