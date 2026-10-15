@@ -1,0 +1,13 @@
+[
+  {"tag_name": "v9.9.9", "html_url": "https://github.com/yurisanp/taildesk/releases/tag/v9.9.9", "draft": true, "prerelease": false, "assets": []},
+  {"tag_name": "v0.3.0-beta.1", "html_url": "https://github.com/yurisanp/taildesk/releases/tag/v0.3.0-beta.1", "body": "beta", "draft": false, "prerelease": true,
+   "assets": [{"name": "TailDesk-0.3.0-beta.1-x86_64.AppImage", "browser_download_url": "https://example.invalid/a", "size": 10}]},
+  {"tag_name": "v0.2.0", "html_url": "https://github.com/yurisanp/taildesk/releases/tag/v0.2.0", "body": "notas", "draft": false, "prerelease": false,
+   "assets": [
+     {"name": "TailDesk-0.2.0-x86_64.AppImage.zsync", "browser_download_url": "https://example.invalid/z", "size": 1},
+     {"name": "TailDesk-0.2.0-x86_64.AppImage", "browser_download_url": "https://example.invalid/b", "size": 20},
+     {"name": "SHA256SUMS", "browser_download_url": "https://example.invalid/s", "size": 2}
+   ]},
+  {"tag_name": "v0.1.0", "html_url": "https://github.com/yurisanp/taildesk/releases/tag/v0.1.0", "draft": false, "prerelease": false, "assets": []},
+  {"tag_name": "nightly", "html_url": "x", "draft": false, "prerelease": true, "assets": []}
+]

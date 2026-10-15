@@ -1,0 +1,21 @@
+[package]
+name = "taildesk-update"
+description = "Atualização automática: procura a release nova no GitHub, baixa e troca o AppImage."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+# HTTPS com rustls/ring e os certificados do sistema (sem webpki-roots).
+ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "_ring", "platform-verifier", "json"] }
+serde = { version = "1", features = ["derive"] }
+semver = "1"
+sha2 = "0.11"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json = "1"

@@ -63,8 +63,9 @@ cargo run -p taildesk-cli -- --version
 No Linux o build precisa do `fontconfig` e da `libpipewire-0.3` de desenvolvimento e do `libclang`:
 `libfontconfig1-dev libpipewire-0.3-dev libclang-dev` (Ubuntu/Debian),
 `fontconfig-devel pipewire-devel clang-devel` (Fedora) ou `fontconfig pipewire clang` (Arch).
-`cargo run -p taildesk-cli -- portal` testa a sessão do portal e a captura de cada monitor.
-No Windows, `cargo run -p taildesk-cli -- captura-dxgi` lista os monitores e mede a captura de todos.
+`cargo run -p taildesk-cli -- portal [--video]` testa a sessão do portal e a captura de cada monitor; `--video` mede também o encode H.264.
+No Windows, `cargo run -p taildesk-cli -- captura-dxgi [segundos] [--video]` lista os monitores e mede a captura de todos.
+`taildesk-cli atualizar [--pre] [--instalar]` procura a versão nova e, no AppImage, instala.
 O ícone da bandeja é gerado por `packaging/icone-bandeja.py`.
 Toolchain fixa em `rust-toolchain.toml` (1.97, MSRV do crate `tailscale`).
 
