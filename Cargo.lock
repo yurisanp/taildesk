@@ -5252,13 +5252,17 @@ dependencies = [
 name = "taildesk"
 version = "0.1.0"
 dependencies = [
+ "pollster",
  "quinn",
  "slint",
+ "taildesk-codec",
  "taildesk-files",
  "taildesk-keyboard",
+ "taildesk-media",
  "taildesk-overlay",
  "taildesk-platform",
  "taildesk-proto",
+ "taildesk-render",
  "taildesk-session",
  "taildesk-transport",
  "taildesk-tsapi",

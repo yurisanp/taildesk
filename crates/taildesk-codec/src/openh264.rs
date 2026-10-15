@@ -49,8 +49,18 @@ impl EncoderOpenH264 {
     }
 
     fn abrir(&self) -> Result<Encoder, ErroCodec> {
+        // Diagnóstico de desempenho: `TAILDESK_OPENH264_USO=camera` e `TAILDESK_OPENH264_THREADS=n`.
+        let uso = match std::env::var("TAILDESK_OPENH264_USO").as_deref() {
+            Ok("camera") => UsageType::CameraVideoRealTime,
+            _ => UsageType::ScreenContentRealTime,
+        };
+        let threads = std::env::var("TAILDESK_OPENH264_THREADS")
+            .ok()
+            .and_then(|t| t.parse().ok())
+            .unwrap_or(0);
         let cfg = EncoderConfig::new()
-            .usage_type(UsageType::ScreenContentRealTime)
+            .usage_type(uso)
+            .num_threads(threads)
             .rate_control_mode(RateControlMode::Bitrate)
             .bitrate(BitRate::from_bps(self.config.bitrate_bps))
             .max_frame_rate(FrameRate::from_hz(self.config.fps_max))

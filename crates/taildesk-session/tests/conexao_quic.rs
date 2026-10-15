@@ -11,13 +11,14 @@ use taildesk_files::service::Event;
 use taildesk_keyboard::{Inject, Locks, fixtures};
 use taildesk_overlay::PeerIdentity;
 use taildesk_proto::control::{
-    Button, CloseReason, Feature, Hello, Key, MouseButton, Msg, Permissions,
+    Button, CloseReason, CodecSelected, Feature, Hello, Key, MouseButton, Msg, Permissions,
+    StartVideo,
 };
 use taildesk_proto::files::INBOX_ROOT;
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
 use taildesk_session::conexao::host::{
-    ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, FimHost, Identificador, Maquina,
-    servir,
+    CanalMidia, ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, FimHost, Identificador,
+    Maquina, Midia, servir,
 };
 use taildesk_session::{ConsentAnswer, ControllerState, EndReason, HostSettings};
 use taildesk_transport::{Identity, Pin, client_endpoint, server_endpoint};
@@ -75,10 +76,44 @@ impl Entrada for EntradaFalsa {
     }
 }
 
+/// Responde `StartVideo` com `CodecSelected` e um datagrama, como o host de verdade.
+struct MidiaFalsa(Registro, CanalMidia);
+
+impl Midia for MidiaFalsa {
+    async fn mensagem(&mut self, msg: &Msg) {
+        if let Msg::StartVideo(s) = msg {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("vídeo {}", s.display_id));
+            assert!(
+                self.1
+                    .enviar(Msg::CodecSelected(CodecSelected {
+                        display_id: s.display_id,
+                        stream_id: 3,
+                        ..CodecSelected::default()
+                    }))
+                    .await
+            );
+            self.1
+                .conn
+                .send_datagram(vec![0x40, 3, 0, 0].into())
+                .unwrap();
+        }
+    }
+}
+
+impl Drop for MidiaFalsa {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().push("mídia solta".into());
+    }
+}
+
 struct MaquinaFalsa(Registro);
 
 impl Maquina for MaquinaFalsa {
     type Entrada = EntradaFalsa;
+    type Midia = MidiaFalsa;
 
     fn descricao(&self) -> Descricao {
         Descricao {
@@ -90,6 +125,10 @@ impl Maquina for MaquinaFalsa {
 
     async fn entrada(&self) -> Option<EntradaFalsa> {
         Some(EntradaFalsa(self.0.clone()))
+    }
+
+    async fn midia(&self, canal: CanalMidia) -> MidiaFalsa {
+        MidiaFalsa(self.0.clone(), canal)
     }
 }
 
@@ -270,6 +309,7 @@ async fn consentimento_teclado_mouse_e_fim_pelo_controlador() {
             "botão 1 true".to_owned(),
             "Key { hid: 4, down: false }".to_owned(),
             "soltar mouse".to_owned(),
+            "mídia solta".to_owned(),
         ]
     );
 }
@@ -382,4 +422,60 @@ async fn confiavel_entra_direto_e_host_encerra() {
             "soltar mouse"
         ]
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn video_vai_para_a_midia_e_a_resposta_volta() {
+    let mut host = Host::iniciar(true, None);
+    {
+        let mut s = host.settings.lock().unwrap();
+        s.ask_always = false;
+        s.trusted.push(taildesk_session::TrustedDevice {
+            node_stable_id: "nNOTE".into(),
+            name: "notebook".into(),
+        });
+    }
+    let (sessao, mut ev) = conectar(&host, Pin::Sha256(host.fingerprint))
+        .await
+        .unwrap();
+    assert_eq!(estado(&mut ev).await, ControllerState::Connecting);
+    assert!(matches!(
+        estado(&mut ev).await,
+        ControllerState::Live { .. }
+    ));
+    let EventoHost::AoVivo { .. } = host.proximo().await else {
+        panic!("esperava ao vivo")
+    };
+    assert!(
+        sessao
+            .enviar(Msg::StartVideo(StartVideo {
+                display_id: 1,
+                ..StartVideo::default()
+            }))
+            .await
+    );
+    let datagrama = tokio::time::timeout(PRAZO, sessao.conexao().read_datagram())
+        .await
+        .expect("datagrama demorou")
+        .unwrap();
+    assert_eq!(&datagrama[..], [0x40, 3, 0, 0]);
+    loop {
+        match tokio::time::timeout(PRAZO, ev.recv()).await {
+            Ok(Some(EventoControlador::Mensagem(m))) => {
+                let Msg::CodecSelected(c) = *m else { continue };
+                assert_eq!((c.display_id, c.stream_id), (1, 3));
+                break;
+            }
+            Ok(Some(_)) => {}
+            _ => panic!("esperava o CodecSelected"),
+        }
+    }
+    sessao.encerrar().await;
+    let EventoHost::Fim { .. } = host.proximo().await else {
+        panic!("esperava o fim")
+    };
+    // O fim solta a mídia (o que para a captura de verdade).
+    let r = host.registro();
+    assert_eq!(r.first().map(String::as_str), Some("vídeo 1"));
+    assert_eq!(r.last().map(String::as_str), Some("mídia solta"));
 }

@@ -18,8 +18,12 @@ taildesk-overlay.workspace = true
 taildesk-proto.workspace = true
 taildesk-keyboard.workspace = true
 taildesk-files.workspace = true
-quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio"] }
-slint = { version = "=1.18.1", features = ["unstable-winit-030"] }
+taildesk-codec.workspace = true
+taildesk-media.workspace = true
+taildesk-render.workspace = true
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+slint = { version = "=1.18.1", features = ["unstable-winit-030", "unstable-wgpu-30", "renderer-femtovg-wgpu"] }
+pollster = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
