@@ -1,6 +1,7 @@
-//! `taildesk-cli portal [--so-tela]`: abre a sessão do portal (RemoteDesktop + ScreenCast) como o
+//! `taildesk-cli portal [--so-tela] [--video]`: abre a sessão do portal (RemoteDesktop + ScreenCast) como o
 //! host vai abrir, lista os monitores liberados, mede 3 s de captura de cada um e passeia o ponteiro
 //! pelo centro deles. Serve para conferir o portal de cada compositor (KDE, GNOME, wlroots).
+//! `--video` também mede o encode H.264 de cada monitor (`medicao`).
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -11,9 +12,14 @@ use taildesk_platform::wayland::{ErroPortal, SessaoPortal};
 use crate::medicao::Medidor;
 
 /// Captura `segundos` de cada monitor e imprime quadros por segundo, tamanho e formato.
-fn medir(conexao: Conexao, monitores: &[(u32, u32)], segundos: u64) -> std::io::Result<()> {
+fn medir(
+    conexao: Conexao,
+    monitores: &[(u32, u32)],
+    segundos: u64,
+    video: bool,
+) -> std::io::Result<()> {
     let ids: Vec<u32> = monitores.iter().map(|m| m.0).collect();
-    let medidor = Medidor::novo(&ids);
+    let medidor = Medidor::novo(&ids, video);
     let cb = medidor.clone();
     let captura = CapturaPipeWire::iniciar(conexao, monitores, move |q| cb.registrar(q))?;
     std::thread::sleep(Duration::from_secs(segundos));
@@ -22,13 +28,14 @@ fn medir(conexao: Conexao, monitores: &[(u32, u32)], segundos: u64) -> std::io::
     Ok(())
 }
 
-/// `taildesk-cli captura-node <node>`: lê um node do PipeWire do usuário, sem portal.
+/// `taildesk-cli captura-node <node> [--video]`: lê um node do PipeWire do usuário, sem portal.
 pub fn captura_node(args: &[String]) -> ExitCode {
     let Some(node) = args.first().and_then(|a| a.parse().ok()) else {
-        eprintln!("uso: taildesk-cli captura-node <node-id>");
+        eprintln!("uso: taildesk-cli captura-node <node-id> [--video]");
         return ExitCode::from(2);
     };
-    match medir(Conexao::Padrao, &[(0, node)], 3) {
+    let video = args.iter().any(|a| a == "--video");
+    match medir(Conexao::Padrao, &[(0, node)], 3, video) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("erro: {e}");
@@ -39,6 +46,7 @@ pub fn captura_node(args: &[String]) -> ExitCode {
 
 pub fn main(args: &[String]) -> ExitCode {
     let com_input = !args.iter().any(|a| a == "--so-tela");
+    let video = args.iter().any(|a| a == "--video");
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
@@ -49,7 +57,7 @@ pub fn main(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match rt.block_on(rodar(com_input)) {
+    match rt.block_on(rodar(com_input, video)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("erro: {e}");
@@ -58,7 +66,7 @@ pub fn main(args: &[String]) -> ExitCode {
     }
 }
 
-async fn rodar(com_input: bool) -> Result<(), ErroPortal> {
+async fn rodar(com_input: bool, video: bool) -> Result<(), ErroPortal> {
     println!("Escolha os monitores no diálogo do sistema…");
     let sessao = SessaoPortal::abrir(com_input).await?;
     for m in sessao.monitores() {
@@ -87,8 +95,10 @@ async fn rodar(com_input: bool) -> Result<(), ErroPortal> {
         .iter()
         .map(|m| (m.display_id, m.node_id))
         .collect();
-    println!("Capturando 3 s de cada monitor…");
-    let medicao = tokio::task::spawn_blocking(move || medir(Conexao::Portal(fd), &nodes, 3));
+    let segundos = if video { 8 } else { 3 };
+    println!("Capturando {segundos} s de cada monitor…");
+    let medicao =
+        tokio::task::spawn_blocking(move || medir(Conexao::Portal(fd), &nodes, segundos, video));
     match medicao.await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => println!("captura: {e}"),
