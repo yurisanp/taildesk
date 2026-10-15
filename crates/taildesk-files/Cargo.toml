@@ -1,0 +1,13 @@
+[package]
+name = "taildesk-files"
+description = "Transferência de arquivos e confinamento de caminhos."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+
+[lints]
+workspace = true

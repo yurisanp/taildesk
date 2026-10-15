@@ -1,0 +1,13 @@
+[package]
+name = "taildesk-cli"
+description = "CLI do TailDesk: host/connect headless, probe e bench-net."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+taildesk-proto.workspace = true
+
+[lints]
+workspace = true

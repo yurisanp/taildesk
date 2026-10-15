@@ -1,0 +1,13 @@
+[package]
+name = "taildesk-tsapi"
+description = "Cliente da LocalAPI do tailscaled (unix socket / named pipe)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+
+[lints]
+workspace = true

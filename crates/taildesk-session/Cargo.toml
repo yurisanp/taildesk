@@ -1,0 +1,13 @@
+[package]
+name = "taildesk-session"
+description = "Máquina de estados da sessão, autorização e consentimento."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+
+[lints]
+workspace = true

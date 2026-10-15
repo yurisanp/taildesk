@@ -1,0 +1,13 @@
+[package]
+name = "taildesk-transport"
+description = "QUIC (quinn) sobre o Overlay: streams de controle/arquivos e datagramas de mídia."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+
+[lints]
+workspace = true
