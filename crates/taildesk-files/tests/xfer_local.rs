@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use taildesk_files::listing::{EntryKind, list_dir, page, walk};
-use taildesk_files::{Incoming, PathError, Source, XferError};
+use taildesk_files::{Incoming, Source, XferError};
 use taildesk_proto::files::{DataHeader, limits};
 use tokio::io::AsyncWriteExt;
 
@@ -288,7 +288,10 @@ async fn symlink_out_of_root_is_refused() {
     fs::create_dir(&outside).unwrap();
     std::os::unix::fs::symlink(&outside, root.join("sai")).unwrap();
     let err = Incoming::prepare(&root, "sai/x", 1, 0).await.unwrap_err();
-    assert!(matches!(err, XferError::Path(PathError::EscapesRoot)));
+    assert!(matches!(
+        err,
+        XferError::Path(taildesk_files::PathError::EscapesRoot)
+    ));
     // Um .part plantado como link para fora também não pode ser usado.
     std::os::unix::fs::symlink(outside.join("alvo"), root.join("y.part")).unwrap();
     let err = Incoming::prepare(&root, "y", 1, 0).await.unwrap_err();
