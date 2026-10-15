@@ -12,11 +12,14 @@
 // Sem console no Windows: é um app gráfico.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod config;
+mod controlador;
+mod host;
 mod modelo;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, VecModel};
@@ -43,12 +46,24 @@ struct App {
     /// Ícone na bandeja; `None` quando o sistema não tem bandeja.
     bandeja: Option<Bandeja>,
     agora: Arc<Notify>,
+    /// "Este computador": lido do arquivo, mudado pelo diálogo e por "Aceitar conexões".
+    settings: Arc<Mutex<taildesk_session::HostSettings>>,
+    /// Pedido de acesso e faixa de sessão ativa.
+    host: host::Ui,
+    /// Janelas de sessão abertas por este computador.
+    controlador: controlador::Controlador,
+    rt: tokio::runtime::Handle,
 }
 
 thread_local! {
     static APP: RefCell<Option<Rc<App>>> = const { RefCell::new(None) };
     /// Token de ativação para a próxima janela criada (consumido pelo gancho do winit).
     static TOKEN: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Roda `f` com o app agora; só na thread da interface. `None` se o app já fechou.
+fn com_app<R>(f: impl FnOnce(&App) -> R) -> Option<R> {
+    APP.with(|a| a.borrow().clone()).map(|app| f(&app))
 }
 
 /// Roda `f` com o app, na thread da interface (de qualquer thread).
@@ -108,10 +123,10 @@ impl App {
             }
         });
         j.on_conectar(|d| {
-            avisar(format!(
-                "A conexão com {} chega nas próximas etapas da fase 1 (captura e vídeo).",
-                d.nome
-            ));
+            com_app(|app| {
+                app.controlador
+                    .conectar(&app.rt, d.nome.to_string(), d.ip.to_string())
+            });
         });
         let agora = self.agora.clone();
         j.on_verificar(move || agora.notify_one());
@@ -161,6 +176,10 @@ impl App {
     /// Mantém a janela e a bandeja com o mesmo valor de "Aceitar conexões".
     fn definir_aceitando(&self, aceitando: bool) {
         self.aceitando.set(aceitando);
+        self.settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .accept_connections = aceitando;
         if let Some(j) = self.janela.borrow().as_ref() {
             j.set_aceitando(aceitando);
         }
@@ -301,6 +320,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Leitura do Tailscale numa thread própria, para não travar a interface.
     let agora = Arc::new(Notify::new());
+    let mut settings = config::ler().host;
+    settings.accept_connections = aceitando;
+    let settings = Arc::new(Mutex::new(settings));
+    // Rede (Tailscale, sessões) fora da thread da interface.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("taildesk-rede")
+        .enable_all()
+        .build()?;
     let app = Rc::new(App {
         janela: RefCell::new(None),
         todos: RefCell::new(Vec::new()),
@@ -309,14 +337,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         aceitando: Cell::new(aceitando),
         bandeja,
         agora: agora.clone(),
+        settings: settings.clone(),
+        host: host::Ui::default(),
+        controlador: controlador::Controlador::default(),
+        rt: rt.handle().clone(),
     });
     APP.with(|a| *a.borrow_mut() = Some(app.clone()));
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    std::thread::Builder::new()
-        .name("taildesk-tailscale".into())
-        .spawn(move || rt.block_on(acompanhar_tailscale(agora)))?;
+    rt.spawn(acompanhar_tailscale(agora));
+    rt.spawn(host::rodar(settings));
 
     if !(oculto && com_bandeja) {
         app.mostrar(token);
@@ -326,5 +354,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Fecha a janela e tira o ícone da bandeja antes de sair.
     APP.with(|a| a.borrow_mut().take());
+    rt.shutdown_timeout(Duration::from_secs(1));
     Ok(())
 }

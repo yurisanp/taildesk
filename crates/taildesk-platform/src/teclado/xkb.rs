@@ -143,6 +143,79 @@ pub fn locale_da_sessao() -> String {
         .unwrap_or_else(|| "C".into())
 }
 
+/// Layout e variante ativos da sessão, do que o ambiente gravou: KDE (`kxkbrc`), GNOME
+/// (`org.gnome.desktop.input-sources`) ou o padrão do sistema (`localectl`). No Wayland não há
+/// API comum para isso; o primeiro da lista vale (troca de layout no meio da sessão ainda não é
+/// acompanhada).
+pub fn layout_da_sessao() -> Option<(String, String)> {
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".config")));
+    if let Some(dir) = config
+        && let Ok(texto) = std::fs::read_to_string(dir.join("kxkbrc"))
+        && let Some(l) = do_kxkbrc(&texto)
+    {
+        return Some(l);
+    }
+    let gsettings = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.input-sources", "sources"])
+        .output();
+    if let Ok(saida) = gsettings
+        && let Some(l) = do_gsettings(&String::from_utf8_lossy(&saida.stdout))
+    {
+        return Some(l);
+    }
+    let localectl = std::process::Command::new("localectl")
+        .arg("status")
+        .output();
+    if let Ok(saida) = localectl {
+        return do_localectl(&String::from_utf8_lossy(&saida.stdout));
+    }
+    None
+}
+
+fn primeiro(lista: &str) -> &str {
+    lista.split(',').next().unwrap_or("").trim()
+}
+
+/// `LayoutList=br,us` e `VariantList=abnt2,` em `[Layout]`.
+fn do_kxkbrc(texto: &str) -> Option<(String, String)> {
+    let valor = |chave: &str| {
+        texto
+            .lines()
+            .find_map(|l| l.trim().strip_prefix(chave)?.strip_prefix('='))
+            .map(primeiro)
+    };
+    let layout = valor("LayoutList").filter(|l| !l.is_empty())?;
+    Some((
+        layout.to_owned(),
+        valor("VariantList").unwrap_or("").to_owned(),
+    ))
+}
+
+/// `[('xkb', 'br+abnt2'), ('xkb', 'us')]`.
+fn do_gsettings(texto: &str) -> Option<(String, String)> {
+    let i = texto.find("('xkb', '")? + "('xkb', '".len();
+    let fonte = texto[i..].split('\'').next()?;
+    let (layout, variante) = fonte.split_once('+').unwrap_or((fonte, ""));
+    (!layout.is_empty()).then(|| (layout.to_owned(), variante.to_owned()))
+}
+
+/// `X11 Layout: br` e `X11 Variant: abnt2`.
+fn do_localectl(texto: &str) -> Option<(String, String)> {
+    let valor = |chave: &str| {
+        texto
+            .lines()
+            .find_map(|l| l.trim().strip_prefix(chave))
+            .map(|v| primeiro(v.trim()))
+    };
+    let layout = valor("X11 Layout:").filter(|l| !l.is_empty() && *l != "n/a")?;
+    Some((
+        layout.to_owned(),
+        valor("X11 Variant:").unwrap_or("").to_owned(),
+    ))
+}
+
 /// Acento "solto" de uma tecla morta do XKB (`dead_acute` -> `´`).
 fn acento(sym: xkb_keysym_t) -> Option<char> {
     Some(match sym {
@@ -334,6 +407,23 @@ fn composicoes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layout_das_configuracoes() {
+        let par = |l: &str, v: &str| Some((l.to_owned(), v.to_owned()));
+        let kde = "[Layout]\nDisplayNames=,\nLayoutList=br,us\nUse=true\nVariantList=abnt2,intl\n";
+        assert_eq!(do_kxkbrc(kde), par("br", "abnt2"));
+        assert_eq!(do_kxkbrc("[Layout]\nUse=false\n"), None);
+        assert_eq!(
+            do_gsettings("[('xkb', 'us+intl'), ('xkb', 'br')]\n"),
+            par("us", "intl")
+        );
+        assert_eq!(do_gsettings("[('xkb', 'br')]"), par("br", ""));
+        assert_eq!(do_gsettings("@a(ss) []"), None);
+        let lc = "   System Locale: LANG=pt_BR.UTF-8\n       X11 Layout: br\n      X11 Model: pc105\n    X11 Variant: abnt2\n";
+        assert_eq!(do_localectl(lc), par("br", "abnt2"));
+        assert_eq!(do_localectl("   X11 Layout: n/a\n"), None);
+    }
     use taildesk_keyboard::ReverseMap;
 
     /// Só roda onde há libxkbcommon e xkeyboard-config (desktops e o CI do Ubuntu).
