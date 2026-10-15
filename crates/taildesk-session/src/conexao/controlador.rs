@@ -125,6 +125,11 @@ impl Sessao {
         &self.arquivos
     }
 
+    /// A conexão, para quem lê os datagramas de vídeo (`read_datagram`).
+    pub fn conexao(&self) -> &quinn::Connection {
+        &self.conn
+    }
+
     /// Caminho até o host agora (para a faixa de qualidade).
     pub fn rtt(&self) -> Duration {
         self.conn.rtt()

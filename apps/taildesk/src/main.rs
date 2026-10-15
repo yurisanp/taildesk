@@ -16,7 +16,9 @@ mod atualizacao;
 mod config;
 mod controlador;
 mod host;
+mod midia_host;
 mod modelo;
+mod video;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -175,7 +177,7 @@ impl App {
         self.filtrar();
     }
 
-    /// Há sessão aberta, como host ou controlador: o atualizador não instala nem reinicia.
+    /// Há sessão aberta, como host ou como controlador (o atualizador não troca o app no meio).
     fn sessao_ativa(&self) -> bool {
         self.host.ativa() || self.controlador.ativa()
     }
@@ -313,12 +315,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // Coordenadas do mouse e da captura em pixels reais em cada monitor.
+    #[cfg(windows)]
+    taildesk_platform::captura_dxgi::dpi_por_monitor();
+
     // Backend winit nativo (Wayland quando houver, X11 ou Win32), com o token de ativação
-    // aplicado na criação de cada janela.
-    slint::BackendSelector::new()
-        .backend_name("winit".into())
-        .with_winit_window_attributes_hook(com_token)
-        .select()?;
+    // aplicado na criação de cada janela. Com GPU, o renderer `wgpu` com o nosso device (o
+    // vídeo vira textura sem passar pela CPU); sem, o renderer padrão.
+    let com_gpu = video::preparar_gpu().and_then(|cfg| {
+        slint::BackendSelector::new()
+            .backend_name("winit".into())
+            .require_wgpu_30(cfg)
+            .with_winit_window_attributes_hook(com_token)
+            .select()
+            .map_err(|e| eprintln!("taildesk: renderer wgpu indisponível ({e}); vídeo pela CPU"))
+            .ok()
+    });
+    if com_gpu.is_none() {
+        video::sem_gpu();
+        slint::BackendSelector::new()
+            .backend_name("winit".into())
+            .with_winit_window_attributes_hook(com_token)
+            .select()?;
+    }
     slint::set_xdg_app_id(APP_ID)?;
 
     let aceitando = true;
