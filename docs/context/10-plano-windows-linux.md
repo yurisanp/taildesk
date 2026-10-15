@@ -25,6 +25,7 @@ Codinome: **`taildesk`** no lugar de `halyard` (crates `taildesk-*`).
 
 ### 2.1 Rede (Tailscale)
 - **Overlay embutido (`tailscale` =0.6.1) é o padrão** nas duas plataformas: ambas são suportadas pelo tailscale-rs (Linux x86_64/ARM64, Windows x86_64). O usuário não precisa instalar o Tailscale.
+- **Versões de referência (15/10/2026)**: cliente Tailscale / `tailscaled` **1.102** (versão atual, informada pelo Yuri) e crate `tailscale` **0.6.1** (ainda a mais nova no crates.io, conferido hoje). São projetos separados: a crate Rust tem numeração própria e não acompanha a 1.102. O `SystemOverlay` mira o `tailscaled` ≥ 1.102 e os testes de contrato da LocalAPI rodam contra essa versão; ao surgir uma crate nova, reavaliar o pin (em especial conexão direta, `14-selecao-adaptativa.md`).
 - **Overlay sistema (`tailscaled` + LocalAPI)** entra logo depois como alternativa: dá `whois` com **usuário + app capabilities**, que o modo embutido não expõe (Q1 em `08`). LocalAPI: unix socket no Linux, named pipe no Windows — só esses dois clientes, sem o caso macOS.
 - **Autorização no MVP**, enquanto Q1 não se resolve: ACL/grants da tailnet decidem quem alcança `udp:7420`; o host aplica **tags do peer** + **lista local de nós confiáveis** (`node_stable_id`) + **consentimento na tela**. App capabilities por usuário só no modo sistema.
 - **Risco técnico nº 1**: o quinn precisa de um `AsyncUdpSocket` sobre o socket UDP do tailscale-rs. É o primeiro spike (fase 0); se ficar ruim, plano B é QUIC no modo sistema (socket do SO) enquanto se contribui upstream.
