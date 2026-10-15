@@ -18,6 +18,8 @@ Desktop remoto + troca de arquivos em Rust, **Windows x64 e Linux x64** no MVP, 
 9. Não copiar código do RustDesk (AGPL-3.0).
 
 ## Regras
+- Licença MIT OR Apache-2.0. Dependências novas precisam ser compatíveis (MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0); GPL/AGPL só com ADR.
+- Rede: servidor de controle do Tailscale (SaaS); Headscale não é alvo do MVP.
 - Edição 2024, toolchain 1.97. Todo `unsafe` com `// SAFETY:`.
 - Hot path de mídia sem alocação, sem lock contendido, sem `await` em thread de encode/decode; canais bounded "latest-wins".
 - Datagramas ≤ `max_datagram_size()` do quinn; nunca assumir 1500.

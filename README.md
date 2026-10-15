@@ -1,7 +1,7 @@
 # TailDesk
 
 Acesso remoto (desktop remoto + troca de arquivos) em **Rust**, para **Windows e Linux**, usando a
-**tailnet do Tailscale** como rede e identidade. Sem servidor próprio de rendezvous ou relay.
+**tailnet do Tailscale** (servidor de controle do Tailscale) como rede e identidade. Sem servidor próprio de rendezvous ou relay.
 
 > Estado: esqueleto (fase 0). Nada conecta ainda.
 
@@ -39,4 +39,8 @@ cargo run -p taildesk-cli -- --version
 Toolchain fixa em `rust-toolchain.toml` (1.97, MSRV do crate `tailscale`).
 
 ## Licença
-A definir.
+Open-source sob **MIT OR Apache-2.0**, à sua escolha ([`LICENSE-MIT`](LICENSE-MIT), [`LICENSE-APACHE`](LICENSE-APACHE)).
+Contribuições são aceitas sob os mesmos termos.
+
+Dependências com licença própria: Slint (usado sob a Royalty-free License, que pede atribuição na
+tela "Sobre"), OpenH264 (binário da Cisco baixado em runtime). Não copiar código do RustDesk (AGPL-3.0).

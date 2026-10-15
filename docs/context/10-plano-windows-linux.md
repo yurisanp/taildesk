@@ -111,12 +111,12 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 | **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor, clipboard texto/imagem, `SystemOverlay` + `whois` | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
 | **5 — Produção** | Serviço Windows (UAC/login), não-assistido, `restore_token` Wayland, instaladores MSI e .deb/.rpm/AppImage, auditoria | Instalação limpa em máquina nova e acesso sem ninguém na frente (Windows). |
 
-## 6. Decisões que dependem do Yuri
+## 6. Decisões do Yuri (15/10/2026)
 
-1. **Repositório**: nome (`taildesk`?), GitHub pessoal, privado ou público.
-2. **Licença/distribuição (Q4)**: uso pessoal, produto comercial ou open-source. Afeta a licença do Slint (GPLv3, royalty-free com atribuição, ou comercial) e quais codecs SW podem ser distribuídos.
-3. **Servidor de controle (Q5)**: tailnet SaaS do Tailscale, Headscale próprio, ou ambos (o código suporta os dois; muda só a documentação e o provisionamento).
-4. **Nome**: "TailDesk" lembra a marca Tailscale; para uso pessoal não importa, para produto público vale checar.
+1. **Repositório**: `github.com/yurisanp/taildesk`.
+2. **Licença (Q4)**: **open-source, MIT OR Apache-2.0**. Slint entra pela Royalty-free License (atribuição na tela "Sobre"); OpenH264 pelo binário da Cisco baixado em runtime; dependências GPL/AGPL só com ADR. Código do RustDesk continua proibido.
+3. **Servidor de controle (Q5)**: **Tailscale (SaaS)**. Headscale fica fora do MVP; o código não deve impedi-lo (URL de controle configurável), mas não será testado nem documentado agora.
+4. **Nome**: "TailDesk" lembra a marca Tailscale; como o projeto é open-source e público, vale checar as diretrizes de marca do Tailscale antes de divulgar.
 
 ## 7. Riscos específicos deste recorte
 
