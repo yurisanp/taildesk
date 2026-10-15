@@ -61,8 +61,8 @@ fn compose(out: &mut Vec<(char, char, char)>, dead: char, bases: &str, results: 
 
 use Output::{Char as C, Dead as D};
 
-/// Português (Brasil) ABNT2, com o comportamento do Windows (`´` + `c` = `ç`; no Linux o
-/// Compose padrão dá `ć`, a diferença só importa quando o ABNT2 é o controlador).
+/// Português (Brasil) ABNT2, com o comportamento do Windows (conferido no CI contra
+/// `ToUnicodeEx`): `´` + `c` não compõe (sai `´c`), ao contrário do Linux com `pt_BR.UTF-8`.
 pub fn abnt2() -> Keymap {
     let mut keys = Vec::new();
     letters_and_space(&mut keys);
@@ -113,7 +113,7 @@ pub fn abnt2() -> Keymap {
     // Keypad Comma, a tecla extra do numérico do ABNT2: produz `.` (o `,` fica no decimal).
     keys.push((0x85, Level::Base, C('.')));
     let mut comp = Vec::new();
-    compose(&mut comp, '´', "aeiouc", "áéíóúç");
+    compose(&mut comp, '´', "aeiou", "áéíóú");
     compose(&mut comp, '`', "aeiou", "àèìòù");
     compose(&mut comp, '~', "aon", "ãõñ");
     compose(&mut comp, '^', "aeiou", "âêîôû");

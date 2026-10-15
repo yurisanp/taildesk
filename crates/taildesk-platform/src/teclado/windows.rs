@@ -9,8 +9,9 @@ use taildesk_keyboard::codes::{hid_to_scancode, known_hids};
 use taildesk_keyboard::{Hid, Keymap, Level, Output, is_keypad, is_non_printing};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     ActivateKeyboardLayout, GetKeyboardLayout, GetKeyboardLayoutNameW, HKL, KLF_NOTELLSHELL,
-    LoadKeyboardLayoutW, MAPVK_VSC_TO_VK_EX, MapVirtualKeyExW, ToUnicodeEx, VK_CONTROL,
-    VK_LCONTROL, VK_LSHIFT, VK_MENU, VK_NUMLOCK, VK_RMENU, VK_SHIFT, VK_SPACE,
+    LoadKeyboardLayoutW, MAPVK_VSC_TO_VK_EX, MapVirtualKeyExW, ToUnicodeEx, VK_CONTROL, VK_DECIMAL,
+    VK_LCONTROL, VK_LSHIFT, VK_MENU, VK_NUMLOCK, VK_NUMPAD0, VK_NUMPAD1, VK_RMENU, VK_SHIFT,
+    VK_SPACE,
 };
 
 /// Erro ao ler o layout.
@@ -42,17 +43,21 @@ pub fn ler_keymap_ativo() -> Keymap {
 pub fn ler_keymap_da_thread(thread: u32) -> Keymap {
     // SAFETY: sem pré-condições; thread inexistente devolve o layout padrão.
     let hkl = unsafe { GetKeyboardLayout(thread) };
-    // O KLID só sai do layout ativo da thread atual: ativa, lê e volta ao anterior.
+    ler(hkl, klid_de(hkl))
+}
+
+/// KLID de um HKL: o nome só sai do layout ativo da thread atual, então ativa, lê e volta ao
+/// anterior.
+fn klid_de(hkl: HKL) -> String {
     // SAFETY: `hkl` veio do sistema; o anterior é restaurado logo em seguida.
-    let nome = unsafe {
+    unsafe {
         let anterior = ActivateKeyboardLayout(hkl, 0);
         let nome = klid_ativo();
         if !anterior.is_null() {
             ActivateKeyboardLayout(anterior, 0);
         }
         nome
-    };
-    ler(hkl, nome)
+    }
 }
 
 /// Carrega um layout pelo KLID (`"00020409"` = US-Intl, `"00010416"` = ABNT2) e lê.
@@ -60,7 +65,8 @@ pub fn ler_keymap_klid(klid: &str) -> Result<Keymap, ErroLayout> {
     let largo: Vec<u16> = klid.encode_utf16().chain(Some(0)).collect();
     // SAFETY: string UTF-16 terminada em NUL e viva durante a chamada.
     let hkl = unsafe { LoadKeyboardLayoutW(largo.as_ptr(), KLF_NOTELLSHELL) };
-    if hkl.is_null() {
+    // Com KLID desconhecido o Windows devolve o layout padrão em vez de falhar.
+    if hkl.is_null() || !klid_de(hkl).eq_ignore_ascii_case(klid) {
         return Err(ErroLayout::LayoutInvalido);
     }
     Ok(ler(hkl, klid.to_string()))
@@ -167,8 +173,15 @@ fn ler(hkl: HKL, nome: String) -> Keymap {
 
 fn tecla(hid: Hid, level: Level, hkl: HKL) -> Option<Tecla> {
     let scan = u32::from(hid_to_scancode(hid)?);
-    // SAFETY: função pura de tradução; 0 = sem tecla virtual.
-    let vk = unsafe { MapVirtualKeyExW(scan, MAPVK_VSC_TO_VK_EX, hkl) };
+    // O scancode do numérico mapeia para a tecla de navegação (VK_END...); com Num Lock ligado
+    // a tecla virtual é VK_NUMPADn / VK_DECIMAL.
+    let vk = match hid {
+        0x59..=0x61 => u32::from(VK_NUMPAD1) + u32::from(hid - 0x59),
+        0x62 => u32::from(VK_NUMPAD0),
+        0x63 => u32::from(VK_DECIMAL),
+        // SAFETY: função pura de tradução; 0 = sem tecla virtual.
+        _ => unsafe { MapVirtualKeyExW(scan, MAPVK_VSC_TO_VK_EX, hkl) },
+    };
     (vk != 0).then(|| Tecla {
         vk,
         scan: scan & 0xFF,
