@@ -4711,7 +4711,9 @@ dependencies = [
 name = "taildesk-platform"
 version = "0.1.0"
 dependencies = [
+ "taildesk-keyboard",
  "windows-sys 0.61.2",
+ "xkbcommon-dl",
  "zbus",
 ]
 

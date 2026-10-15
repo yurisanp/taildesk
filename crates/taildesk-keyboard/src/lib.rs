@@ -10,7 +10,9 @@
 
 use std::collections::HashMap;
 
+pub mod codes;
 mod controller;
+mod dump;
 pub mod fixtures;
 mod host;
 mod msg;
@@ -18,7 +20,7 @@ mod wire;
 
 pub use controller::Controller;
 pub use host::{Host, Inject};
-pub use msg::{KeyMsg, Locks, Mode, Translation, effective_translation};
+pub use msg::{KeyMsg, Locks, Mode, Translation, effective_translation, layout_tag};
 
 /// Código de tecla no fio: USB HID usage (página 0x07).
 pub type Hid = u16;
@@ -227,11 +229,16 @@ impl ReverseMap {
         }
         let direct = map.clone();
         for &(d, base, result) in &keymap.compose {
-            let (Some(&dk), Some(base_seq)) = (dead.get(&d), direct.get(&base)) else {
+            let Some(&dk) = dead.get(&d) else {
                 continue;
             };
+            // A segunda tecla pode ser um caractere direto ou outra morta (`´` + `´` = `´`).
             let mut seq = vec![dk];
-            seq.extend_from_slice(base_seq);
+            match (direct.get(&base), dead.get(&base)) {
+                (Some(base_seq), _) => seq.extend_from_slice(base_seq),
+                (None, Some(&bk)) => seq.push(bk),
+                (None, None) => continue,
+            }
             offer(&mut map, result, seq);
         }
         ReverseMap { map }

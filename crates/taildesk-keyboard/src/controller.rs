@@ -80,6 +80,7 @@ impl Controller {
 
     /// Um evento de tecla. Repetições do SO chegam como novos `down` e viram novas mensagens.
     pub fn key(&mut self, hid: Hid, down: bool, mods: Mods, out: &mut Vec<KeyMsg>) {
+        let hid = crate::codes::canonical(hid);
         if !down {
             self.key_up(hid, out);
             return;

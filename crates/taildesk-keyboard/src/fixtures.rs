@@ -1,7 +1,9 @@
-//! Layouts de referência para testes, escritos à mão a partir do comportamento do SO.
+//! Layouts de referência para testes.
 //!
-//! Na fase 2 estes dados passam a ser gerados por dump real (`ToUnicodeEx` no Windows,
-//! `xkbcommon` no Linux) e gravados como arquivos; os testes continuam os mesmos.
+//! - `xkb_*`: dump real do libxkbcommon (xkeyboard-config 2.41), gravado em `fixtures/` por
+//!   `cargo run -p taildesk-platform --example dump_teclado -- <layout> <variante> <locale>`.
+//! - os outros: escritos à mão a partir do comportamento do Windows, até entrar o dump de
+//!   `ToUnicodeEx`.
 
 use crate::{Hid, Keymap, Level, Output};
 
@@ -86,7 +88,7 @@ pub fn abnt2() -> Keymap {
             (0x2E, C('='), C('+')),
             (0x2F, D('´'), D('`')),
             (0x30, C('['), C('{')),
-            (0x32, C(']'), C('}')),
+            (0x31, C(']'), C('}')), // ISO 0x32 = a mesma tecla física do 0x31 (`codes::canonical`)
             (0x33, C('ç'), C('Ç')),
             (0x34, D('~'), D('^')),
             (0x35, C('\''), C('"')),
@@ -225,4 +227,23 @@ pub fn us() -> Keymap {
         keys,
         compose: Vec::new(),
     }
+}
+
+fn dump(text: &str) -> Keymap {
+    Keymap::from_text(text).expect("fixture gravado com Keymap::to_text")
+}
+
+/// Linux `br(abnt2)` com a tabela Compose de `pt_BR.UTF-8` (`´` + `c` = `ç`).
+pub fn xkb_br_abnt2() -> Keymap {
+    dump(include_str!("../fixtures/xkb-br-abnt2.txt"))
+}
+
+/// Linux `us`.
+pub fn xkb_us() -> Keymap {
+    dump(include_str!("../fixtures/xkb-us.txt"))
+}
+
+/// Linux `us(intl)` com a tabela Compose de `en_US.UTF-8` (`'` + `c` = `ć`).
+pub fn xkb_us_intl() -> Keymap {
+    dump(include_str!("../fixtures/xkb-us-intl.txt"))
 }

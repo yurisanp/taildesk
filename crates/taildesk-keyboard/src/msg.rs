@@ -80,6 +80,26 @@ pub fn effective_translation(mode: Mode, local_tag: &str, remote_tag: &str) -> T
     }
 }
 
+/// `layout_tag` normalizado a partir do id do SO (`KeyboardInfo.os_layout_id`).
+///
+/// Só layouts que digitam igual ganham a mesma tag; o resto passa sem mudar e conta como
+/// diferente, o que no máximo troca Físico pelo híbrido (que sempre digita certo).
+/// Por isso as teclas mortas separam Windows e Linux: no ABNT2 do Linux `´` + espaço dá `'`
+/// (no Windows dá `´`) e no US-Intl do Linux `'` + `c` dá `ć` (no Windows, `ç`).
+pub fn layout_tag(os_layout_id: &str) -> String {
+    let id = os_layout_id.to_ascii_lowercase();
+    match id.as_str() {
+        "00000409" | "xkb:us" => "us",
+        "00020409" => "us-intl",
+        "xkb:us(intl)" => "us-intl-xkb",
+        "00010416" => "br-abnt2",
+        "xkb:br" | "xkb:br(abnt2)" => "br-abnt2-xkb",
+        "00000416" => "br-abnt",
+        _ => return os_layout_id.to_string(),
+    }
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +109,17 @@ mod tests {
         for bits in 0..4 {
             assert_eq!(Locks::from_bits(bits).bits(), bits);
         }
+    }
+
+    #[test]
+    fn tags() {
+        assert_eq!(layout_tag("00010416"), "br-abnt2");
+        assert_eq!(layout_tag("xkb:br(abnt2)"), "br-abnt2-xkb");
+        assert_eq!(layout_tag("xkb:br"), "br-abnt2-xkb");
+        assert_ne!(layout_tag("xkb:br(abnt2)"), layout_tag("00010416"));
+        assert_eq!(layout_tag("00020409"), "us-intl");
+        assert_ne!(layout_tag("xkb:us(intl)"), layout_tag("00020409"));
+        assert_eq!(layout_tag("xkb:fr(azerty)"), "xkb:fr(azerty)");
     }
 
     #[test]

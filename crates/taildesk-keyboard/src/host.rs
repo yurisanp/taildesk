@@ -83,6 +83,7 @@ impl Host {
                 down,
                 locks: wanted,
             } => {
+                let hid = crate::codes::canonical(hid);
                 if let Some(wanted) = wanted {
                     sync_locks(wanted, locks, hid, down, out);
                 }
