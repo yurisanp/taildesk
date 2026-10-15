@@ -1,0 +1,109 @@
+name: Release
+
+# Publica uma versão: `git tag v0.1.0 && git push origin v0.1.0`.
+# Tags com hífen (v0.1.0-beta.1) saem como pre-release.
+# Em PRs que mexem no empacotamento, gera os pacotes sem publicar (só artefatos do workflow).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "packaging/**"
+      - "apps/taildesk/Cargo.toml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Versão (tag precisa bater com o Cargo.toml)
+        run: |
+          cargo_version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [[ "${tag%%-*}" != "$cargo_version" ]]; then
+              echo "::error::tag $GITHUB_REF_NAME não bate com a versão $cargo_version do Cargo.toml"
+              exit 1
+            fi
+            echo "version=$tag" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$cargo_version-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+  linux:
+    needs: version
+    # Ubuntu mais antigo suportado = glibc mais antiga = AppImage e tar.gz rodam em mais distros.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Ferramentas de empacotamento
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+      - run: cargo build --release --locked -p taildesk -p taildesk-cli
+      - run: packaging/linux/build-packages.sh "${{ needs.version.outputs.version }}" dist
+      - name: Teste rápido do AppImage e do tar.gz
+        run: |
+          APPIMAGE_EXTRACT_AND_RUN=1 ./dist/TailDesk-*.AppImage cli --version
+          tar -xzf dist/taildesk-*-linux-x86_64.tar.gz -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP"/taildesk-*/usr/bin/taildesk-cli --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain; if ($LASTEXITCODE -ne 0) { rustup toolchain install }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p taildesk -p taildesk-cli
+      - name: Pacote .zip
+        shell: pwsh
+        run: |
+          $v = "${{ needs.version.outputs.version }}"
+          $dir = "taildesk-$v-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path $dir, dist | Out-Null
+          Copy-Item target/release/taildesk.exe, target/release/taildesk-cli.exe, LICENSE-MIT, LICENSE-APACHE, README.md $dir
+          Compress-Archive -Path $dir -DestinationPath "dist/$dir.zip"
+          & "$dir/taildesk-cli.exe" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [version, linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Criar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=(--generate-notes --title "TailDesk ${GITHUB_REF_NAME}")
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"

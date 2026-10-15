@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=TailDesk
+GenericName=Remote Desktop
+GenericName[pt_BR]=Área de trabalho remota
+Comment=Remote desktop and file transfer over your Tailscale tailnet
+Comment[pt_BR]=Acesso remoto e troca de arquivos pela sua tailnet do Tailscale
+Exec=taildesk
+Icon=taildesk
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=remote;desktop;vnc;rdp;tailscale;

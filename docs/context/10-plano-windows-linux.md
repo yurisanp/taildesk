@@ -49,7 +49,7 @@ Pedido do Yuri (15/10/2026): **Fedora e Arch Linux** são alvos de primeira clas
 | NVIDIA | Driver proprietário via RPM Fusion (NVENC) | `nvidia` / `nvidia-open` (NVENC) |
 | Segurança | SELinux enforcing: uinput e serviço de sistema precisam de política (fase 5) | Sem MAC por padrão |
 | Pacote | `.rpm` + repositório COPR | `PKGBUILD` no AUR (`taildesk-bin` e `taildesk-git`) |
-| Comum | Flatpak (Flathub) cobre os dois e o Ubuntu, mas só com portal (sem uinput) |
+| Comum | **AppImage** é o pacote universal publicado em toda versão (roda em qualquer distro com glibc ≥ 2.35; build no Ubuntu 22.04). Flatpak (Flathub) fica para depois: só portal, sem uinput |
 
 Dependências de build que entram nas próximas fases (nomes de pacote):
 
@@ -137,7 +137,7 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 | **2 — Controlar** | Input com tradução automática de layouts (`11-teclado.md`: US-Intl ↔ ABNT2 etc.), cursor separado, consentimento, UI Slint com lista de peers da tailnet | Usar o host remoto para trabalho normal de escritório; matriz de teclado de `11-teclado.md` §5 passando; latência < 60 ms em LAN. |
 | **3 — Arquivos** | §3 completo: enviar/receber, navegador remoto, retomada, hash | 10 GB em ambos os sentidos sem travar o vídeo; retomada após queda de rede. |
 | **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor, clipboard texto/imagem, `SystemOverlay` + `whois` | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
-| **5 — Produção** | Serviço Windows (UAC/login), não-assistido, `restore_token` Wayland, instaladores MSI e .deb/.rpm/AppImage, auditoria | Instalação limpa em máquina nova e acesso sem ninguém na frente (Windows). |
+| **5 — Produção** | Serviço Windows (UAC/login), não-assistido, `restore_token` Wayland, instalador MSI assinado, repositório COPR e AUR (os pacotes básicos já saem no Releases, §8), auditoria | Instalação limpa em máquina nova e acesso sem ninguém na frente (Windows). |
 
 ## 6. Decisões do Yuri (15/10/2026)
 
@@ -157,3 +157,11 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 | DXGI DD falha em notebook híbrido | Fallback WGC |
 | openh264 pesado em 1440p/4K | É só ponte; HW na fase 4 |
 | Caractere fora do layout do host em Wayland não tem injeção padrão | Portal `NotifyKeyboardKeysym`; senão aviso no HUD (`11-teclado.md` §2.4) |
+
+## 8. Releases (desde 15/10/2026)
+
+Cada tag `v*` gera, pelo workflow `release.yml`, uma versão na aba Releases do GitHub com:
+AppImage (Linux universal), `.deb` (Ubuntu/Debian), `.rpm` (Fedora), `.tar.gz` (outros Linux e base do
+`taildesk-bin` do AUR) e `.zip` (Windows x64), mais `SHA256SUMS`. Os pacotes Linux são gerados por
+`packaging/linux/build-packages.sh`. Em PRs que mexem no empacotamento o workflow só gera e testa os pacotes, sem publicar.
+Pendente para a fase 5: instalador MSI assinado, repositório COPR, publicação no AUR e assinatura dos binários.

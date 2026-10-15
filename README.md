@@ -31,6 +31,21 @@ Os documentos `00`–`09` usam o codinome antigo `halyard`; leia como `taildesk`
 | `apps/taildesk` | App desktop |
 | `apps/taildesk-cli` | CLI (`host`, `connect`, `probe`, `bench-net`) |
 
+## Downloads
+As builds saem na aba [Releases](https://github.com/yurisanp/taildesk/releases):
+
+| Sistema | Arquivo |
+|---|---|
+| Qualquer Linux x86_64 | `TailDesk-<versão>-x86_64.AppImage` (universal: `chmod +x` e rode; `./TailDesk...AppImage cli --version` abre a CLI) |
+| Ubuntu / Debian | `taildesk_<versão>_amd64.deb` |
+| Fedora | `taildesk-<versão>-1.x86_64.rpm` |
+| Arch Linux | `taildesk-bin` no AUR (modelo em `packaging/arch/PKGBUILD`), ou o AppImage |
+| Outros Linux | `taildesk-<versão>-linux-x86_64.tar.gz` |
+| Windows 10/11 x64 | `taildesk-<versão>-windows-x86_64.zip` (instalador MSI na fase 5) |
+
+`SHA256SUMS` acompanha cada versão. Para publicar uma versão: suba a versão no `Cargo.toml`, faça o merge e
+`git tag v0.1.0 && git push origin v0.1.0`. Tags com hífen (`v0.1.0-beta.1`) saem como pre-release.
+
 ## Desenvolvimento
 ```bash
 cargo xtask check                      # fmt + clippy -D warnings + testes (igual ao CI)

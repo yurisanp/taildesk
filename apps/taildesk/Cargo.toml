@@ -1,6 +1,7 @@
 [package]
 name = "taildesk"
 description = "App desktop do TailDesk (host + controlador)."
+homepage = "https://github.com/yurisanp/taildesk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,3 +13,29 @@ taildesk-proto.workspace = true
 
 [lints]
 workspace = true
+
+[package.metadata.deb]
+name = "taildesk"
+maintainer = "TailDesk contributors"
+copyright = "2026, The TailDesk contributors"
+section = "net"
+priority = "optional"
+extended-description = "Acesso remoto (desktop remoto e troca de arquivos) pela tailnet do Tailscale."
+assets = [
+  ["target/release/taildesk", "usr/bin/", "755"],
+  ["target/release/taildesk-cli", "usr/bin/", "755"],
+  ["../../packaging/linux/taildesk.desktop", "usr/share/applications/", "644"],
+  ["../../packaging/linux/taildesk.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "taildesk"
+summary = "Acesso remoto pela tailnet do Tailscale"
+assets = [
+  { source = "target/release/taildesk", dest = "/usr/bin/taildesk", mode = "755" },
+  { source = "target/release/taildesk-cli", dest = "/usr/bin/taildesk-cli", mode = "755" },
+  { source = "../../packaging/linux/taildesk.desktop", dest = "/usr/share/applications/taildesk.desktop", mode = "644" },
+  { source = "../../packaging/linux/taildesk.svg", dest = "/usr/share/icons/hicolor/scalable/apps/taildesk.svg", mode = "644" },
+  { source = "../../LICENSE-MIT", dest = "/usr/share/licenses/taildesk/LICENSE-MIT", mode = "644", doc = true },
+  { source = "../../LICENSE-APACHE", dest = "/usr/share/licenses/taildesk/LICENSE-APACHE", mode = "644", doc = true },
+]
