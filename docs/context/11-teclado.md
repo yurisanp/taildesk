@@ -33,7 +33,7 @@ Cada lado manda ao outro um `KeyboardInfo` no handshake e um `KeyboardLayoutChan
 
 ### 2.2 Decisão automática
 - **Layouts iguais** (mesmo `layout_tag`, ex.: ABNT2 ↔ ABNT2 no mesmo SO) → **Físico puro**. É o mais fiel: atalhos, jogos e teclas mortas funcionam como no teclado local.
-- **O mesmo layout em SOs diferentes não é igual.** Pelos dumps reais (ToUnicodeEx × libxkbcommon), as teclas mortas divergem: no ABNT2 do Linux `´` + espaço dá `'` e `¨` + espaço dá `"`, no Windows dá `´` e `¨`; no US-Intl do Linux `'` + `c` dá `ć`, no Windows dá `ç`. Por isso o `layout_tag` do Linux leva o sufixo `-xkb` (`br-abnt2-xkb`, `us-intl-xkb`) e Windows ABNT2 ↔ Linux ABNT2 vai pelo **Auto híbrido**, que resolve as teclas mortas no controlador.
+- **O mesmo layout em SOs diferentes não é igual.** Pelos dumps reais (ToUnicodeEx × libxkbcommon), as teclas mortas divergem: no ABNT2 do Linux `´` + espaço dá `'` e `¨` + espaço dá `"`, no Windows dá `´` e `¨`; no US-Intl do Linux `'` + `c` dá `ć`, no Windows dá `ç`. Por isso o `layout_tag` do Linux leva o sufixo `-xkb` (ex.: `br-abnt2-xkb`) e Windows ABNT2 ↔ Linux ABNT2 vai pelo **Auto híbrido**, que resolve as teclas mortas no controlador.
 - **Layouts diferentes** → **Auto híbrido** (abaixo).
 - O usuário pode forçar **Físico** (jogos) ou **Texto** por host; a escolha fica salva para aquele host.
 
