@@ -10,7 +10,8 @@ license.workspace = true
 [dependencies]
 taildesk-proto.workspace = true
 blake3 = { version = "1", default-features = false, features = ["std"] }
-tokio = { version = "1", features = ["fs", "io-util", "rt"] }
+tokio = { version = "1", features = ["fs", "io-util", "rt", "sync"] }
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio"] }
 
 [dev-dependencies]
 taildesk-transport.workspace = true
