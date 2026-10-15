@@ -85,8 +85,18 @@ pub trait VideoDecoder: Send {
 // halyard-platform
 pub trait ScreenCapturer: Send {
     fn displays(&self) -> Result<Vec<DisplayInfo>>;
-    fn start(&mut self, display: DisplayId, opts: CaptureOpts, sink: FrameSink) -> Result<()>; // push model, callback do SO
+    fn start(&mut self, display: DisplayId, opts: CaptureOpts, sink: FrameSink) -> Result<()>; // push model, um por monitor
+    fn pause(&mut self, display: DisplayId);   // ninguém vendo: não capturar nem codificar
+    fn resume(&mut self, display: DisplayId);
+    fn stop(&mut self, display: DisplayId);
+    fn events(&mut self) -> DisplayEvents;     // DisplayEvent::{Added, Removed, Changed} -> DisplaysChanged/VideoStopped
+}
+pub trait AudioCapturer: Send {   // áudio do sistema do host (fase 4): WASAPI loopback (Win), PipeWire -> Pulse (Linux), via cpal
+    fn start(&mut self, sink: AudioSink) -> Result<AudioFormat>;   // desligado = nada capturado
     fn stop(&mut self);
+}
+pub trait AudioPlayer: Send {     // controlador
+    fn play(&mut self, fmt: AudioFormat) -> Result<AudioQueue>;
 }
 pub trait InputInjector: Send {
     fn inject(&mut self, ev: InputEvent) -> Result<()>;   // KeyPhysical{hid,down} | Text(String) | Mouse{..} | Touch{..} | Scroll{..}
@@ -109,6 +119,7 @@ pub trait InputInjector: Send {
         ▼
    quinn::Connection::send_datagram
 ```
+- **Um pipeline por monitor** (captura → encoder → pacer) e **um pacer único** que divide a banda por prioridade: `FOCUSED` ≈ 70% com FPS cheio, `VISIBLE` divide o resto a 5–15 fps, aba escondida = `StopVideo` (zero custo). Limite padrão de 2 streams simultâneos com openh264 (`13-multimonitor.md` §5).
 - Encoder pool **por display**; múltiplos viewers no mesmo display compartilham o encoder (codec = interseção, como no RustDesk), ou encoders separados se as capacidades divergirem muito (config).
 - Sem frames novos (tela estática) → envia nada; a cada 1 s um `Heartbeat` de mídia.
 - **Orçamento de latência** (alvo LAN 1080p60): captura ≤ 2 ms, conversão ≤ 1 ms, encode HW ≤ 4 ms (PyroWave < 0,5), rede ≤ 2 ms, decode ≤ 3 ms, render + vsync ≤ 8 ms → **< 20 ms glass-to-glass**. Internet: rede domina; meta < 80 ms com RTT 40 ms.
@@ -145,5 +156,6 @@ Reconexão: QUIC suporta *connection migration*; se o caminho mudar (direto→DE
 
 ## 8. Concurrency model
 - `tokio` multi-thread para rede/sessão.
+- **Áudio** (`taildesk-media`, `15-audio.md` §6): thread própria de captura+Opus no host; no controlador, jitter buffer com correção de deriva de relógio. O pacer envia áudio sem esperar o vídeo e mantém contadores por `kind`.
 - Threads dedicadas (não-tokio) para: callback de captura, encode, decode, áudio realtime. Comunicação por canais *bounded* de capacidade 1 (latest-wins) ou `triple buffer`.
 - Nunca bloquear o runtime tokio com encode/decode; nunca alocar no hot path (pools de buffers/texturas).

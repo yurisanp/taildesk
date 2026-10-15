@@ -14,16 +14,18 @@ Codinome: **`taildesk`** no lugar de `halyard` (crates `taildesk-*`).
 | Entra no MVP | Fica para depois |
 |---|---|
 | Host e controlador em Windows 10/11 x64 e Linux x64 (Ubuntu/Debian, **Fedora**, **Arch**) | macOS, Android, iOS, Windows ARM64 |
-| Ver e controlar (teclado físico + texto, mouse, scroll, cursor separado) | Áudio, chat, gamepad, toque |
+| Ver e controlar (teclado físico + texto, mouse, scroll, cursor separado) | Microfone do controlador → host, chat, gamepad, toque |
+| Áudio do sistema do host (Opus, fase 4) com liga/desliga que corta captura e tráfego (`15-audio.md`) | |
 | Troca de arquivos nos dois sentidos + navegador de arquivos remoto | Clipboard de arquivos (fase 4), sync automático |
 | H.264 (SW primeiro, HW em seguida) | AV1/HEVC/VP9 (fase 4), PyroWave (pós-MVP) |
-| Multi-monitor (troca de tela, não mosaico) | Monitores virtuais, mosaico |
+| Multi-monitor escolhido pelo controlador: **um por vez** (abas) e **janelas separadas** (`13-multimonitor.md`) | Mosaico (todos numa janela), monitores virtuais |
 | Modo assistido (consentimento na tela do host) | Não-assistido, tela de login/UAC (fase 5) |
 
 ## 2. Decisões ajustadas para Windows + Linux
 
 ### 2.1 Rede (Tailscale)
 - **Overlay embutido (`tailscale` =0.6.1) é o padrão** nas duas plataformas: ambas são suportadas pelo tailscale-rs (Linux x86_64/ARM64, Windows x86_64). O usuário não precisa instalar o Tailscale.
+- **Versões de referência (15/10/2026)**: cliente Tailscale / `tailscaled` **mínimo 1.102** (definido pelo Yuri; estável atual 1.104.1) e crate `tailscale` **0.6.1** (ainda a mais nova no crates.io, conferido hoje). São projetos separados: a crate Rust tem numeração própria e não acompanha a 1.102. O `SystemOverlay` exige `tailscaled` ≥ 1.102 e os testes de contrato da LocalAPI rodam contra a 1.102 e a estável atual; ao surgir uma crate nova, reavaliar o pin (em especial conexão direta, `14-selecao-adaptativa.md`).
 - **Overlay sistema (`tailscaled` + LocalAPI)** entra logo depois como alternativa: dá `whois` com **usuário + app capabilities**, que o modo embutido não expõe (Q1 em `08`). LocalAPI: unix socket no Linux, named pipe no Windows — só esses dois clientes, sem o caso macOS.
 - **Autorização no MVP**, enquanto Q1 não se resolve: ACL/grants da tailnet decidem quem alcança `udp:7420`; o host aplica **tags do peer** + **lista local de nós confiáveis** (`node_stable_id`) + **consentimento na tela**. App capabilities por usuário só no modo sistema.
 - **Risco técnico nº 1**: o quinn precisa de um `AsyncUdpSocket` sobre o socket UDP do tailscale-rs. É o primeiro spike (fase 0); se ficar ruim, plano B é QUIC no modo sistema (socket do SO) enquanto se contribui upstream.
@@ -36,6 +38,7 @@ atuais (Fedora 43, Ubuntu 25.10+) só oferecem sessão Wayland e o KDE caminha p
 - **Host Linux X11** = XShm + XDamage + XFixes + XTest (`x11rb`), como caminho secundário.
 - O **controlador** Linux funciona igual em X11 e Wayland (Slint/winit + wgpu).
 - Sem tela de login em Wayland no MVP (limitação do SO, não do produto).
+- **Multi-monitor no Wayland**: quem escolhe os monitores é a pessoa no host, no diálogo do portal (`SelectSources` com `multiple=true`, um stream PipeWire por monitor). O controlador só escolhe entre os liberados; monitor novo ou fora da seleção exige novo diálogo. Input absoluto vai por stream (`NotifyPointerMotionAbsolute`). Detalhes em `13-multimonitor.md` §4.2.
 
 ### 2.6 Distros Linux-alvo: Ubuntu, Fedora e Arch
 Pedido do Yuri (15/10/2026): **Fedora e Arch Linux** são alvos de primeira classe, ao lado do Ubuntu/Debian.
@@ -49,7 +52,7 @@ Pedido do Yuri (15/10/2026): **Fedora e Arch Linux** são alvos de primeira clas
 | NVIDIA | Driver proprietário via RPM Fusion (NVENC) | `nvidia` / `nvidia-open` (NVENC) |
 | Segurança | SELinux enforcing: uinput e serviço de sistema precisam de política (fase 5) | Sem MAC por padrão |
 | Pacote | `.rpm` + repositório COPR | `PKGBUILD` no AUR (`taildesk-bin` e `taildesk-git`) |
-| Comum | Flatpak (Flathub) cobre os dois e o Ubuntu, mas só com portal (sem uinput) |
+| Comum | **AppImage** é o pacote universal publicado em toda versão (roda em qualquer distro com glibc ≥ 2.35; build no Ubuntu 22.04). Flatpak (Flathub) fica para depois: só portal, sem uinput, e precisa de `--socket=pulseaudio` para o áudio |
 
 Dependências de build que entram nas próximas fases (nomes de pacote):
 
@@ -61,6 +64,7 @@ Dependências de build que entram nas próximas fases (nomes de pacote):
 | X11 | `libxcb-devel` | `libxcb` | `libxcb1-dev` |
 | VA-API | `libva-devel` | `libva` | `libva-dev` |
 | Portal/segredos | `dbus-devel` | `dbus` | `libdbus-1-dev` |
+| Áudio (Opus, ou `cmake` para compilar o embutido) | `opus-devel` | `opus` | `libopus-dev` |
 
 CI: além de `ubuntu-latest` e `windows-latest`, jobs em container `fedora:latest` e `archlinux:latest` rodam clippy e testes.
 Testes manuais de cada fase: Fedora Workstation (GNOME), Fedora KDE, Arch + KDE, Arch + Hyprland, Ubuntu LTS.
@@ -132,12 +136,12 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 
 | Fase | Entrega | Pronto quando |
 |---|---|---|
-| **0 — Fundações** | Workspace, CI, `taildesk-proto`, `EmbeddedOverlay`, spike quinn-sobre-tailscale-rs, `taildesk-cli bench-net` | **Gate G0**: QUIC sobre o overlay embutido entre um Windows e um Linux, conexão direta e via DERP, com números de throughput/RTT/CPU. Meta mínima: 30 Mbit/s estáveis direto. |
-| **1 — Ver** | Captura (DXGI no Windows, portal+PipeWire no Wayland, XShm no X11), openh264, datagramas, janela wgpu | `taildesk-cli connect <host>` mostra a tela remota 1080p30 nos 4 sentidos (Win↔Win, Win↔Linux, Linux↔Linux). |
-| **2 — Controlar** | Input com tradução automática de layouts (`11-teclado.md`: US-Intl ↔ ABNT2 etc.), cursor separado, consentimento, UI Slint com lista de peers da tailnet | Usar o host remoto para trabalho normal de escritório; matriz de teclado de `11-teclado.md` §5 passando; latência < 60 ms em LAN. |
+| **0 — Fundações** | Workspace, CI, `taildesk-proto`, `EmbeddedOverlay`, spike quinn-sobre-tailscale-rs, `taildesk-cli bench-net` | **Gate G0**: QUIC sobre o overlay embutido entre um Windows e um Linux, conexão direta e via DERP, com números de throughput/RTT/CPU. Meta mínima: 30 Mbit/s estáveis direto. O README do tailscale-rs diz que a conexão direta funciona "in many cases", mas cai para relay mais que o cliente oficial e a biblioteca não informa o caminho: o G0 **mede com que frequência o embutido fica direto** (mesma LAN e NAT diferentes) e compara com o `tailscaled`. Decisão do Yuri (`14-selecao-adaptativa.md`): o **modo sistema garante a classe LAN** desde já. |
+| **1 — Ver** | Captura (DXGI no Windows, portal+PipeWire no Wayland, XShm no X11), openh264, datagramas, janela wgpu. **Protocolo por monitor desde já**: um stream de vídeo por monitor, `DisplayInfo` completo, `StartVideo`/`StopVideo` por `display_id`, mouse com `display_id`; Wayland pede `multiple=true`. **Protocolo de áudio reservado** (mensagens de `15-audio.md` §6.5 e `kind=1` com `stream_id` ≥ 0xF0), sem implementação | `taildesk-cli connect <host> --display N` mostra qualquer monitor do host em 1080p30 nos 4 sentidos (Win↔Win, Win↔Linux, Linux↔Linux). |
+| **2 — Controlar** | Input com tradução automática de layouts (`11-teclado.md`: US-Intl ↔ ABNT2 etc.), cursor separado, consentimento, UI Slint com lista de peers da tailnet; multi-monitor **um por vez** (abas e atalhos, input por monitor); **spike de 2 janelas Slint com vídeo wgpu** (2 texturas NV12 a 60 fps) | Usar o host remoto para trabalho normal de escritório; matriz de teclado de `11-teclado.md` §5 passando; troca de monitor < 300 ms em LAN; latência < 60 ms em LAN. |
 | **3 — Arquivos** | §3 completo: enviar/receber, navegador remoto, retomada, hash | 10 GB em ambos os sentidos sem travar o vídeo; retomada após queda de rede. |
-| **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor, clipboard texto/imagem, `SystemOverlay` + `whois` | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
-| **5 — Produção** | Serviço Windows (UAC/login), não-assistido, `restore_token` Wayland, instaladores MSI e .deb/.rpm/AppImage, auditoria | Instalação limpa em máquina nova e acesso sem ninguém na frente (Windows). |
+| **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor em **janelas separadas** (destacar/recolocar aba, prioridades, hotplug, "seguir o mouse", "usar todos os meus monitores"), clipboard texto/imagem, **áudio do sistema** (Opus via `cpal`: WASAPI loopback no Windows, PipeWire/Pulse no Linux) com liga/desliga que corta o tráfego, `SystemOverlay` + `whois` | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
+| **5 — Produção** | Serviço Windows (UAC/login), não-assistido, `restore_token` Wayland, instalador MSI assinado, repositório COPR e AUR (os pacotes básicos já saem no Releases, §8), auditoria | Instalação limpa em máquina nova e acesso sem ninguém na frente (Windows). |
 
 ## 6. Decisões do Yuri (15/10/2026)
 
@@ -156,4 +160,15 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 | Identidade de usuário ausente no modo embutido | Tags + nós confiáveis + consentimento; `whois` no modo sistema |
 | DXGI DD falha em notebook híbrido | Fallback WGC |
 | openh264 pesado em 1440p/4K | É só ponte; HW na fase 4 |
+| Vários monitores ao mesmo tempo multiplicam encode e banda | Qualidade cheia só no monitor em foco; os outros visíveis a 5–15 fps; abas escondidas param de codificar; **máximo de 2 monitores simultâneos com openh264** (até 4 com HW, conforme o probe) |
+| Várias janelas Slint com vídeo wgpu ao mesmo tempo sem exemplo oficial | Spike na fase 2 antes de prometer "janelas separadas"; mesmo `wgpu::Device` em todas as janelas |
+| Portal do KDE ignorava o stream no input absoluto (multimonitor quebrado) | Correção no MR 210 do xdg-desktop-portal-kde; testar Fedora KDE e Arch KDE com a versão das distros |
 | Caractere fora do layout do host em Wayland não tem injeção padrão | Portal `NotifyKeyboardKeysym`; senão aviso no HUD (`11-teclado.md` §2.4) |
+
+## 8. Releases (desde 15/10/2026)
+
+Cada tag `v*` gera, pelo workflow `release.yml`, uma versão na aba Releases do GitHub com:
+AppImage (Linux universal), `.deb` (Ubuntu/Debian), `.rpm` (Fedora), `.tar.gz` (outros Linux e base do
+`taildesk-bin` do AUR) e `.zip` (Windows x64), mais `SHA256SUMS`. Os pacotes Linux são gerados por
+`packaging/linux/build-packages.sh`. Em PRs que mexem no empacotamento o workflow só gera e testa os pacotes, sem publicar.
+Pendente para a fase 5: instalador MSI assinado, repositório COPR, publicação no AUR e assinatura dos binários.
