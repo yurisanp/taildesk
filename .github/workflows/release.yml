@@ -1,12 +1,18 @@
 name: Release
 
-# Publica uma versão: `git tag v0.1.0 && git push origin v0.1.0`.
+# Publica uma versão: `git tag v0.1.0 && git push origin v0.1.0`, ou "Run workflow" (workflow_dispatch)
+# na main com o campo `tag` (ex.: v0.1.0); nesse caso a release cria a tag no commit rodado.
 # Tags com hífen (v0.1.0-beta.1) saem como pre-release.
 # Em PRs que mexem no empacotamento, gera os pacotes sem publicar (só artefatos do workflow).
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag a publicar (ex.: v0.1.0). Vazio = só gera os pacotes."
+        required: false
+        default: ""
   pull_request:
     paths:
       - ".github/workflows/release.yml"
@@ -15,6 +21,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Tag da release: a tag empurrada ou a informada no workflow_dispatch.
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag || '' }}
 
 jobs:
   version:
@@ -27,10 +35,14 @@ jobs:
         name: Versão (tag precisa bater com o Cargo.toml)
         run: |
           cargo_version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            tag="${GITHUB_REF_NAME#v}"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+              echo "::error::tag inválida: $RELEASE_TAG"
+              exit 1
+            fi
+            tag="${RELEASE_TAG#v}"
             if [[ "${tag%%-*}" != "$cargo_version" ]]; then
-              echo "::error::tag $GITHUB_REF_NAME não bate com a versão $cargo_version do Cargo.toml"
+              echo "::error::tag $RELEASE_TAG não bate com a versão $cargo_version do Cargo.toml"
               exit 1
             fi
             echo "version=$tag" >> "$GITHUB_OUTPUT"
@@ -87,7 +99,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
     needs: [version, linux, windows]
     runs-on: ubuntu-latest
     permissions:
@@ -104,6 +116,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          flags=(--generate-notes --title "TailDesk ${GITHUB_REF_NAME}")
-          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
+          flags=(--generate-notes --title "TailDesk ${RELEASE_TAG}" --target "$GITHUB_SHA")
+          [[ "$RELEASE_TAG" == *-* ]] && flags+=(--prerelease)
+          gh release create "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
