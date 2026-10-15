@@ -450,8 +450,9 @@ impl SessaoPortal {
     }
 }
 
-/// Cursor como metadado do PipeWire (o controlador desenha o cursor por cima); embutido no
-/// vídeo se o portal não oferece.
+/// Cursor separado do vídeo, como metadado de cada buffer do PipeWire
+/// ([`crate::captura_pipewire::Cursor`]); o controlador desenha por cima. Embutido no vídeo só se
+/// o portal não oferece metadado.
 async fn modo_cursor(screencast: &Screencast) -> CursorMode {
     match screencast.available_cursor_modes().await {
         Ok(modos) if modos.contains(CursorMode::Metadata) => CursorMode::Metadata,

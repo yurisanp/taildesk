@@ -3,6 +3,8 @@
 //! portal+PipeWire, XShm), injeção de input (SendInput, portal/libei, XTest), cursor e segredos
 //! (`docs/context/10-plano-windows-linux.md`).
 
+#[cfg(target_os = "linux")]
+pub mod captura_pipewire;
 pub mod instancia;
 pub mod mouse;
 pub mod teclado;
