@@ -29,6 +29,7 @@ Codinome usado nos exemplos: **`halyard`** (placeholder — troque à vontade).
 | [`13-multimonitor.md`](13-multimonitor.md) | Multi-monitor: um por vez, janelas separadas, protocolo por monitor, captura por SO. | Ambos |
 | [`14-selecao-adaptativa.md`](14-selecao-adaptativa.md) | Classes de rede, perfis de mídia, troca adaptativa e aba "Teste de conexão". | Ambos |
 | [`15-audio.md`](15-audio.md) | Áudio do sistema (Opus em datagramas, liga/desliga que corta o tráfego). | Ambos |
+| [`16-atualizacao-automatica.md`](16-atualizacao-automatica.md) | Auto update: update information e `.zsync` do AppImage, atualizador no app, outros pacotes. | Ambos |
 | [`09-fontes.md`](09-fontes.md) | Links de referência e versões verificadas. | Ambos |
 
 ## Resumo em 10 linhas
