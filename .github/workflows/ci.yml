@@ -21,7 +21,7 @@ jobs:
       # O Slint liga o fontconfig e a captura liga a libpipewire (bindgen precisa do libclang).
       - name: Dependências do sistema (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libpipewire-0.3-dev libclang-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libpipewire-0.3-dev libclang-dev mesa-vulkan-drivers
       - name: Toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
