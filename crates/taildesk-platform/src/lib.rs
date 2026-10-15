@@ -33,6 +33,27 @@ fn sni_watcher() -> zbus::Result<bool> {
     Ok(dbus.name_has_owner(nome)?)
 }
 
+/// Lê e apaga do ambiente o token de ativação que o lançador passou ao app: `XDG_ACTIVATION_TOKEN`
+/// (xdg-activation, Wayland) ou `DESKTOP_STARTUP_ID` (startup-notification, X11). Com ele a janela
+/// ganha o foco do jeito nativo; apagar evita que processos filhos herdem um token já usado.
+///
+/// # Safety
+///
+/// Mexe no ambiente do processo: chame antes de criar qualquer outra thread.
+pub unsafe fn tomar_token_de_ativacao() -> Option<String> {
+    let mut token = None;
+    for var in ["XDG_ACTIVATION_TOKEN", "DESKTOP_STARTUP_ID"] {
+        if let Ok(valor) = std::env::var(var) {
+            if token.is_none() && !valor.is_empty() {
+                token = Some(valor);
+            }
+            // SAFETY: o chamador garante que não há outras threads lendo o ambiente.
+            unsafe { std::env::remove_var(var) };
+        }
+    }
+    token
+}
+
 /// Abre um link no navegador padrão.
 pub fn abrir_link(url: &str) -> io::Result<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
