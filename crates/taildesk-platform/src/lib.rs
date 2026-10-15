@@ -4,6 +4,8 @@
 //! (`docs/context/10-plano-windows-linux.md`).
 
 pub mod instancia;
+#[cfg(target_os = "linux")]
+pub mod wayland;
 
 use std::io;
 use std::process::{Command, Stdio};

@@ -12,6 +12,10 @@ license.workspace = true
 # Pergunta ao D-Bus se há bandeja (StatusNotifierWatcher). O Slint já traz o zbus para a bandeja.
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"
+# Portais RemoteDesktop e ScreenCast (MIT). Sem tokio: o zbus do Slint usa async-io e os dois
+# têm de concordar no runtime do zbus.
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "remote_desktop", "screencast"] }
+futures-util = { version = "0.3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
