@@ -300,6 +300,116 @@ pub struct BenchReport {
     pub max_datagram: u16,
 }
 
+/// Codificação binária provisória de [`ProbeRequest`] e [`ProbeResult`], usada pelo `bench-net`
+/// enquanto o protobuf não entra. Little-endian; o tamanho das listas é validado antes de alocar.
+pub mod wire {
+    use super::{ProbeRequest, ProbeResult, ProbeStep, limits};
+
+    /// Dados malformados ou fora dos limites.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct WireError;
+
+    impl std::fmt::Display for WireError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("mensagem de sondagem malformada")
+        }
+    }
+
+    impl std::error::Error for WireError {}
+
+    struct Reader<'a>(&'a [u8]);
+
+    impl Reader<'_> {
+        fn u8(&mut self) -> Result<u8, WireError> {
+            let (&b, rest) = self.0.split_first().ok_or(WireError)?;
+            self.0 = rest;
+            Ok(b)
+        }
+
+        fn u32(&mut self) -> Result<u32, WireError> {
+            let (head, rest) = self.0.split_first_chunk::<4>().ok_or(WireError)?;
+            self.0 = rest;
+            Ok(u32::from_le_bytes(*head))
+        }
+
+        fn count(&mut self) -> Result<usize, WireError> {
+            let n = usize::from(self.u8()?);
+            if n > limits::PROBE_STEPS {
+                return Err(WireError);
+            }
+            Ok(n)
+        }
+
+        fn end(&self) -> Result<(), WireError> {
+            if self.0.is_empty() {
+                Ok(())
+            } else {
+                Err(WireError)
+            }
+        }
+    }
+
+    /// Escreve `req` em `out`. Pedidos fora dos limites são recusados.
+    pub fn encode_probe_request(req: &ProbeRequest, out: &mut Vec<u8>) -> Result<(), WireError> {
+        req.validate().map_err(|_| WireError)?;
+        out.extend_from_slice(&req.probe_id.to_le_bytes());
+        out.extend_from_slice(&req.step_ms.to_le_bytes());
+        out.push(req.steps_kbps.len() as u8);
+        for k in &req.steps_kbps {
+            out.extend_from_slice(&k.to_le_bytes());
+        }
+        Ok(())
+    }
+
+    pub fn decode_probe_request(buf: &[u8]) -> Result<ProbeRequest, WireError> {
+        let mut r = Reader(buf);
+        let probe_id = r.u32()?;
+        let step_ms = r.u32()?;
+        let n = r.count()?;
+        let steps_kbps = (0..n).map(|_| r.u32()).collect::<Result<_, _>>()?;
+        r.end()?;
+        let req = ProbeRequest {
+            probe_id,
+            steps_kbps,
+            step_ms,
+        };
+        req.validate().map_err(|_| WireError)?;
+        Ok(req)
+    }
+
+    pub fn encode_probe_result(res: &ProbeResult, out: &mut Vec<u8>) -> Result<(), WireError> {
+        res.validate().map_err(|_| WireError)?;
+        out.extend_from_slice(&res.probe_id.to_le_bytes());
+        out.push(res.steps.len() as u8);
+        for s in &res.steps {
+            for v in [s.sent_kbps, s.recv_kbps, s.loss_ppm, s.owd_delta_us] {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn decode_probe_result(buf: &[u8]) -> Result<ProbeResult, WireError> {
+        let mut r = Reader(buf);
+        let probe_id = r.u32()?;
+        let n = r.count()?;
+        let steps = (0..n)
+            .map(|_| {
+                Ok(ProbeStep {
+                    sent_kbps: r.u32()?,
+                    recv_kbps: r.u32()?,
+                    loss_ppm: r.u32()?,
+                    owd_delta_us: r.u32()?,
+                })
+            })
+            .collect::<Result<_, WireError>>()?;
+        r.end()?;
+        let res = ProbeResult { probe_id, steps };
+        res.validate().map_err(|_| WireError)?;
+        Ok(res)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,5 +492,68 @@ mod tests {
             max_kbps: 10,
         };
         assert_eq!(bench.validate().unwrap_err().field, "duration_ms");
+    }
+
+    #[test]
+    fn probe_request_wire_round_trip() {
+        let req = ProbeRequest {
+            probe_id: 0xabcd_0001,
+            steps_kbps: vec![5_000, 20_000, 200_000],
+            step_ms: 100,
+        };
+        let mut buf = Vec::new();
+        wire::encode_probe_request(&req, &mut buf).unwrap();
+        assert_eq!(buf.len(), 4 + 4 + 1 + 3 * 4);
+        assert_eq!(wire::decode_probe_request(&buf), Ok(req));
+        assert_eq!(
+            wire::decode_probe_request(&buf[..buf.len() - 1]),
+            Err(wire::WireError)
+        );
+        buf.push(0);
+        assert_eq!(wire::decode_probe_request(&buf), Err(wire::WireError));
+    }
+
+    #[test]
+    fn probe_result_wire_round_trip() {
+        let res = ProbeResult {
+            probe_id: 9,
+            steps: vec![
+                ProbeStep {
+                    sent_kbps: 5_000,
+                    recv_kbps: 4_900,
+                    loss_ppm: 0,
+                    owd_delta_us: 120,
+                },
+                ProbeStep {
+                    sent_kbps: 20_000,
+                    recv_kbps: 11_000,
+                    loss_ppm: 40_000,
+                    owd_delta_us: 9_000,
+                },
+            ],
+        };
+        let mut buf = Vec::new();
+        wire::encode_probe_result(&res, &mut buf).unwrap();
+        assert_eq!(wire::decode_probe_result(&buf), Ok(res));
+    }
+
+    #[test]
+    fn wire_rejects_out_of_limit_lists() {
+        // probe_id, step_ms = 100 e uma contagem acima do limite, sem os valores.
+        let mut buf = vec![0, 0, 0, 0, 100, 0, 0, 0, limits::PROBE_STEPS as u8 + 1];
+        assert_eq!(wire::decode_probe_request(&buf), Err(wire::WireError));
+        // step_ms acima do limite com uma lista válida.
+        buf[4..8].copy_from_slice(&10_000u32.to_le_bytes());
+        buf[8] = 0;
+        assert_eq!(wire::decode_probe_request(&buf), Err(wire::WireError));
+        let too_long = ProbeRequest {
+            probe_id: 1,
+            steps_kbps: vec![1; limits::PROBE_STEPS + 1],
+            step_ms: 100,
+        };
+        assert_eq!(
+            wire::encode_probe_request(&too_long, &mut Vec::new()),
+            Err(wire::WireError)
+        );
     }
 }

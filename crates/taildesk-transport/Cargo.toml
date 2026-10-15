@@ -8,7 +8,18 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+taildesk-proto.workspace = true
+taildesk-media.workspace = true
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+ring = "0.17"
+bytes = "1"
+tokio = { version = "1", features = ["rt", "time", "macros", "sync"] }
 
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 
 [lints]
 workspace = true
