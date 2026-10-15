@@ -11,7 +11,13 @@ license.workspace = true
 taildesk-keyboard.workspace = true
 taildesk-overlay.workspace = true
 taildesk-proto.workspace = true
+taildesk-files.workspace = true
+taildesk-transport.workspace = true
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio"] }
+tokio = { version = "1", features = ["rt", "time", "sync", "macros", "io-util"] }
 
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "io-util", "fs"] }
 
 [lints]
 workspace = true

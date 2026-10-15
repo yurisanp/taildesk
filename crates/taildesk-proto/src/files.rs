@@ -44,7 +44,8 @@ pub struct DataHeader {
 
 impl DataHeader {
     pub const LEN: usize = 16;
-    const MAGIC: [u8; 4] = *b"TDF\x01";
+    /// Início do stream (`"TDF"`, versão 1); separa arquivos do stream de cursor.
+    pub const MAGIC: [u8; 4] = *b"TDF\x01";
 
     pub fn encode(&self) -> [u8; Self::LEN] {
         let mut out = [0; Self::LEN];

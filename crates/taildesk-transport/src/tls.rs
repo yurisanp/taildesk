@@ -69,6 +69,41 @@ impl Identity {
         fingerprint(&self.cert)
     }
 
+    /// Certificado e chave em bytes, para guardar no `keyring` (nunca em arquivo nem em log):
+    /// `"TDI1"`, tamanho do certificado (u32 LE), certificado DER, chave PKCS#8 DER.
+    pub fn to_secret(&self) -> Vec<u8> {
+        let cert = self.cert.as_ref();
+        let key = self.key.secret_pkcs8_der();
+        let mut out = Vec::with_capacity(8 + cert.len() + key.len());
+        out.extend_from_slice(Self::MAGIC);
+        out.extend_from_slice(&(cert.len() as u32).to_le_bytes());
+        out.extend_from_slice(cert);
+        out.extend_from_slice(key);
+        out
+    }
+
+    /// Lê o que [`Identity::to_secret`] gravou. `None` se o formato não bate ou a chave não
+    /// corresponde a um certificado utilizável.
+    pub fn from_secret(bytes: &[u8]) -> Option<Identity> {
+        let rest = bytes.strip_prefix(Self::MAGIC)?;
+        let (len, rest) = rest.split_first_chunk::<4>()?;
+        let len = u32::from_le_bytes(*len) as usize;
+        if len > rest.len() || len > Self::MAX_CERT {
+            return None;
+        }
+        let (cert, key) = rest.split_at(len);
+        let id = Identity {
+            cert: CertificateDer::from(cert.to_vec()),
+            key: PrivatePkcs8KeyDer::from(key.to_vec()),
+        };
+        // Confere que chave e certificado formam uma configuração válida.
+        id.server_config().ok()?;
+        Some(id)
+    }
+
+    const MAGIC: &[u8; 4] = b"TDI1";
+    const MAX_CERT: usize = 16 * 1024;
+
     pub(crate) fn server_config(&self) -> Result<rustls::ServerConfig, rustls::Error> {
         let mut cfg = rustls::ServerConfig::builder_with_provider(provider())
             .with_protocol_versions(&[&rustls::version::TLS13])?
@@ -90,6 +125,19 @@ pub enum Pin {
     /// Aceita qualquer certificado. Só para o `bench-net` com `--inseguro`, que não troca
     /// nada além de dados sintéticos; nunca para sessões.
     Insecure,
+    /// Primeiro contato (TOFU, `06-arquitetura.md` §6): aceita o certificado e quem chama lê
+    /// [`peer_fingerprint`] e o grava ligado ao `node_stable_id` vindo de `Overlay::identify()`.
+    /// Da próxima vez conecta com [`Pin::Sha256`].
+    FirstContact,
+}
+
+/// Fingerprint do certificado que o servidor apresentou nesta conexão.
+pub fn peer_fingerprint(conn: &quinn::Connection) -> Option<Fingerprint> {
+    let certs = conn
+        .peer_identity()?
+        .downcast::<Vec<CertificateDer<'static>>>()
+        .ok()?;
+    certs.first().map(fingerprint)
 }
 
 pub(crate) fn provider() -> Arc<CryptoProvider> {
@@ -123,7 +171,7 @@ impl ServerCertVerifier for PinnedVerifier {
         _now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
         match self.pin {
-            Pin::Insecure => Ok(ServerCertVerified::assertion()),
+            Pin::Insecure | Pin::FirstContact => Ok(ServerCertVerified::assertion()),
             Pin::Sha256(expected) if fingerprint(end_entity) == expected => {
                 Ok(ServerCertVerified::assertion())
             }
@@ -182,6 +230,26 @@ mod tests {
         assert_eq!(from_hex(&colons.join(":")), Some(fp));
         assert_eq!(from_hex("abc"), None);
         assert_eq!(from_hex(&"zz".repeat(32)), None);
+    }
+
+    #[test]
+    fn identity_secret_round_trip() {
+        let id = Identity::generate().unwrap();
+        let bytes = id.to_secret();
+        let back = Identity::from_secret(&bytes).unwrap();
+        assert_eq!(back.fingerprint(), id.fingerprint());
+        assert!(Identity::from_secret(&bytes[..bytes.len() - 1]).is_none());
+        assert!(Identity::from_secret(b"TDI1").is_none());
+        let mut errado = bytes.clone();
+        errado[0] = b'X';
+        assert!(Identity::from_secret(&errado).is_none());
+        // Chave de outra identidade não serve com este certificado.
+        let outra = Identity::generate().unwrap().to_secret();
+        let cert_len = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let outra_len = u32::from_le_bytes(outra[4..8].try_into().unwrap()) as usize;
+        let mut misturada = bytes[..8 + cert_len].to_vec();
+        misturada.extend_from_slice(&outra[8 + outra_len..]);
+        assert!(Identity::from_secret(&misturada).is_none());
     }
 
     #[test]

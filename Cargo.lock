@@ -4934,9 +4934,13 @@ dependencies = [
 name = "taildesk-session"
 version = "0.1.0"
 dependencies = [
+ "quinn",
+ "taildesk-files",
  "taildesk-keyboard",
  "taildesk-overlay",
  "taildesk-proto",
+ "taildesk-transport",
+ "tokio",
 ]
 
 [[package]]
