@@ -71,15 +71,13 @@ impl PathKind {
     }
 }
 
-/// Backend do Tailscale em uso. O TailDesk usa só o Tailscale instalado na máquina
-/// (o valor 1, "embutido", fica reservado e não volta a ser usado).
+/// Backend do Tailscale em uso. Só existe o do sistema (ADR-009); o valor 1 era o modo
+/// embutido e fica reservado.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum OverlayMode {
     #[default]
     Unknown = 0,
     System = 2,
-    /// Sockets do SO sem Tailscale, só para desenvolvimento.
-    Lan = 3,
 }
 
 /// Motivo de uma troca de classe. O texto mostrado ao usuário vem do i18n, pelo código.

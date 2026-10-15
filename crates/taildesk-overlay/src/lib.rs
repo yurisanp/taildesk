@@ -1,10 +1,11 @@
 //! Camada de rede da tailnet.
 //!
-//! Todo acesso à rede passa pela trait [`Overlay`]. O TailDesk usa **só o Tailscale instalado
-//! na máquina** (decisão do Yuri em 15/10/2026; sem tailscale-rs embutido):
-//! - [`SystemOverlay`]: `tailscaled` do sistema + LocalAPI (`taildesk-tsapi`). O IP da tailnet é
-//!   uma interface comum do SO, então os sockets são do SO; a LocalAPI dá peers, `whois` e caminho.
-//! - `LanOverlay`: sockets do SO sem Tailscale, só para desenvolvimento.
+//! Todo acesso à rede passa pela trait [`Overlay`] (`docs/context/01-tailscale.md` §3 e
+//! `10-plano-windows-linux.md` §2.1). O TailDesk usa só o Tailscale instalado na máquina
+//! (ADR-009), então há dois backends:
+//! - [`SystemOverlay`]: `tailscaled` ≥ 1.102 + LocalAPI (`taildesk-tsapi`), dá caminho, usuário
+//!   e app caps. É o único em produção.
+//! - `LanOverlay`: sockets do SO, só para desenvolvimento e testes.
 //!
 //! A identidade do peer vem sempre de [`Overlay::identify`], nunca do conteúdo das mensagens.
 
@@ -28,7 +29,7 @@ pub struct PeerInfo {
 pub struct PeerIdentity {
     pub node_stable_id: String,
     pub hostname: String,
-    /// Login do usuário dono do nó. `None` em nós com tag (não têm usuário).
+    /// Login do usuário, do `whois` da LocalAPI. `None` em nó com tag.
     pub user_login: Option<String>,
     pub tags: Vec<String>,
     /// Conteúdo JSON bruto da app capability do TailDesk, quando disponível.

@@ -1,6 +1,6 @@
 [package]
 name = "taildesk-overlay"
-description = "Trait Overlay e backends de rede da tailnet (Tailscale do sistema e LAN de dev)."
+description = "Trait Overlay e backends de rede da tailnet (tailscaled do sistema, LAN de dev)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

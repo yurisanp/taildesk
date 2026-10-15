@@ -40,13 +40,14 @@
 | # | Decisão | Alternativas | Motivo |
 |---|---|---|---|
 | ADR-001 | Tailscale como overlay; sem servidor próprio de rendezvous/relay | RustDesk hbbs/hbbr, iroh, WebRTC+TURN | Identidade, ACL, NAT traversal e relay prontos; self-host via Headscale |
-| ADR-002 | Dois overlays (embutido tailscale-rs + sistema/LocalAPI) atrás de trait | Só um dos dois | Embutido = UX sem instalar Tailscale; sistema = mobile + maturidade |
+| ADR-002 (substituído pelo ADR-009) | Dois overlays (embutido tailscale-rs + sistema/LocalAPI) atrás de trait | Só um dos dois | Embutido = UX sem instalar Tailscale; sistema = mobile + maturidade |
 | ADR-003 | QUIC (quinn) sobre a tailnet: streams + datagramas | TCP único (RustDesk), UDP cru, WebRTC | Sem HOL, CC moderno, multiplexação; WebRTC só p/ cliente web futuro |
 | ADR-004 | Protobuf (prost) no controle; header binário fixo na mídia | postcard/rkyv/flatbuffers | Evolução de schema + hot path sem alocação |
 | ADR-005 | Backends HW nativos por SO; FFmpeg opcional | FFmpeg como base (RustDesk/hwcodec) | Zero-copy, controle fino (LTR, intra refresh), licenças |
 | ADR-006 | Slint para UI + wgpu para vídeo; egui só HUD | GPUI, Makepad, iced, Tauri/Dioxus | Único com 5 plataformas + DSL de design + integração wgpu |
 | ADR-007 | PyroWave como modo LAN opcional | Só codecs inter | Latência sub-ms de codec quando há banda |
 | ADR-008 | Não reutilizar código do RustDesk | Fork AGPL | Licença AGPL-3.0 |
+| ADR-009 (15/10/2026, substitui ADR-002) | **Só o Tailscale instalado na máquina** (`tailscaled` ≥ 1.102 + LocalAPI); sem nó embutido, crate `tailscale` fora do projeto. A trait `Overlay` fica, com `SystemOverlay` em produção e `LanOverlay` em dev | Embutido como padrão (ADR-002) | Decisão do Yuri. Ganha `whois` com usuário e caps, caminho informado, conexão direta madura e uma dependência pre-1.0 a menos; custa exigir o Tailscale instalado |
 
 ## 3. Riscos
 
@@ -64,7 +65,7 @@
 
 ## 4. Perguntas em aberto
 
-- **Q1** — O `tailscale` crate expõe (ou vai expor) *peer capabilities*/perfil de usuário do peer conectado (equivalente ao `whois`)? Existe crate interno `ts_peercapability`; abrir issue upstream se necessário.
+- **Q1** — *(resolvida pelo ADR-009: o `whois` da LocalAPI dá usuário e caps)* O `tailscale` crate expõe (ou vai expor) *peer capabilities*/perfil de usuário do peer conectado (equivalente ao `whois`)? Existe crate interno `ts_peercapability`; abrir issue upstream se necessário.
 - **Q2** — Overhead de QUIC/TLS sobre WireGuard em 200 Mbit/s: aceitável ou usar UDP cru com autenticação leve no modo LAN?
 - **Q3** — Usar um único `VkDevice` compartilhado entre wgpu, Vulkan Video (`gpu-video`) e PyroWave? (simplifica zero-copy, mas acopla versões).
 - **Q4** — Modelo de distribuição: produto interno (Aglets), comercial, ou open-source? Afeta licença do Slint, escolha de codecs SW e AGPL.

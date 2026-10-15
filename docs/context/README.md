@@ -16,7 +16,7 @@ Codinome usado nos exemplos: **`halyard`** (placeholder — troque à vontade).
 |---|---|---|
 | [`AGENTS.md`](AGENTS.md) | Regras curtas e decisões travadas para agentes de código (Claude Code, Codex etc.). Copie para a raiz do repo (e/ou como `CLAUDE.md`). | Agente |
 | [`00-relatorio-executivo.md`](00-relatorio-executivo.md) | Relatório: o que foi estudado, conclusões, recomendações, riscos. | Humano |
-| [`01-tailscale.md`](01-tailscale.md) | Como o Tailscale funciona, `tailscale-rs` (Rust oficial), LocalAPI, ACL/grants, app capabilities, Headscale. | Ambos |
+| [`01-tailscale.md`](01-tailscale.md) | Como o Tailscale funciona, LocalAPI (modo sistema, o único adotado), tailscale-rs (avaliado e descartado), ACL/grants, app capabilities, Headscale. | Ambos |
 | [`02-rustdesk.md`](02-rustdesk.md) | Engenharia reversa do RustDesk: arquitetura, protocolo protobuf, codecs, QoS, captura, input, licença. | Ambos |
 | [`03-codecs.md`](03-codecs.md) | AV1, H.265, H.264, VP9, VP8, PyroWave: características, crates, HW accel, negociação, bitstream. | Ambos |
 | [`04-plataformas.md`](04-plataformas.md) | Contexto agnóstico de plataforma: captura, input, áudio, clipboard, HW codec, permissões, rede, empacotamento por SO. | Ambos |
@@ -34,8 +34,8 @@ Codinome usado nos exemplos: **`halyard`** (placeholder — troque à vontade).
 ## Resumo em 10 linhas
 
 1. **Rede**: o Tailscale vira a camada de conectividade + identidade. Sem servidor de rendezvous/relay próprio (o que o RustDesk precisa), sem senha de sessão como mecanismo primário.
-2. **Dois modos de rede** atrás de uma trait `Overlay`: *embutido* (`tailscale` crate 0.6.x, userspace, nó próprio por app) e *sistema* (usa o `tailscaled`/app oficial já instalado e consulta a LocalAPI).
-3. `tailscale-rs` passou por auditoria de cripto e já faz conexão direta (NAT traversal) em Linux/Windows/macOS — **mas não suporta Android/iOS**; no mobile usa-se o app oficial do Tailscale (modo sistema).
+2. **Rede pelo Tailscale instalado** (decisão de 15/10/2026, ADR-009): o app usa o `tailscaled`/app oficial já instalado (≥ 1.102) e consulta a LocalAPI, atrás da trait `Overlay`. Não há nó embutido.
+3. O `whois` da LocalAPI dá usuário + app capabilities do peer; o `status` diz se o caminho é direto ou DERP. No mobile (futuro) vale o mesmo: app oficial do Tailscale.
 4. **Autorização** via tailnet: tags + grants + *app capabilities* (`seudominio.com/cap/remote`), não via senha.
 5. **Codecs** atrás de traits `VideoEncoder`/`VideoDecoder` com negociação por capacidade (modelo do RustDesk) e cadeia de fallback HW → SW.
 6. **PyroWave** = modo "LAN/ultra-baixa latência" (intra-only, 100–200+ Mbit/s, GPU, Vulkan + Metal). AV1/H.265/H.264 = modo internet. VP8/VP9 = compatibilidade/SW.

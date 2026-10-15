@@ -125,7 +125,7 @@ pub fn transport_rules(class: NetClass, rtt: Duration, loss_ppm: u32) -> Transpo
 }
 
 /// Limiares e tempos do adaptador. Os padrões são os de `14-selecao-adaptativa.md`; o simulador
-/// e o gate G0 vão calibrá-los.
+/// e as medidas do gate G0 (Tailscale do sistema) vão calibrá-los.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AdaptConfig {
     pub lan_min_kbps: u32,
