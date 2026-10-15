@@ -174,4 +174,5 @@ Cada tag `v*` gera, pelo workflow `release.yml`, uma versão na aba Releases do 
 AppImage (Linux universal), `.deb` (Ubuntu/Debian), `.rpm` (Fedora), `.tar.gz` (outros Linux e base do
 `taildesk-bin` do AUR) e `.zip` (Windows x64), mais `SHA256SUMS`. Os pacotes Linux são gerados por
 `packaging/linux/build-packages.sh`. Em PRs que mexem no empacotamento o workflow só gera e testa os pacotes, sem publicar.
+O AppImage carrega a update information (`gh-releases-zsync`) e cada release publica o `.zsync`, para auto update (`16-atualizacao-automatica.md`); o atualizador dentro do app entra na fase 1 com o app gráfico.
 Pendente para a fase 5: instalador MSI assinado, repositório COPR, publicação no AUR e assinatura dos binários.

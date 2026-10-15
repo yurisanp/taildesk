@@ -4,8 +4,8 @@
 #   cargo build --release --locked -p taildesk -p taildesk-cli
 #   packaging/linux/build-packages.sh <versão> <pasta de saída>
 #
-# Saída: .tar.gz, .AppImage, .deb e .rpm (x86_64). Precisa de cargo-deb e cargo-generate-rpm
-# no PATH; o appimagetool é baixado se não existir (APPIMAGETOOL aponta para um já baixado).
+# Saída: .tar.gz, .AppImage (+ .zsync), .deb e .rpm (x86_64). Precisa de cargo-deb,
+# cargo-generate-rpm e zsyncmake no PATH; o appimagetool é baixado se não existir (APPIMAGETOOL aponta para um já baixado).
 set -euo pipefail
 
 version="${1:?uso: build-packages.sh <versão> <pasta de saída>}"
@@ -52,8 +52,20 @@ if [[ ! -x "$tool" ]]; then
   curl -fsSL -o "$tool" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
   chmod 755 "$tool"
 fi
-# Sem FUSE no CI: extrair e rodar.
-APPIMAGE_EXTRACT_AND_RUN=1 ARCH=$arch "$tool" --no-appstream "$appdir" "$out/TailDesk-$version-$arch.AppImage"
+# Update information (spec do AppImage, seção ELF .upd_info): AppImageUpdate, Gear Lever e o
+# próprio TailDesk acham a versão nova pelo .zsync da release mais recente no GitHub.
+# Build de pre-release (versão com "-") segue latest-all: a mais nova, estável ou pre-release. TAILDESK_UPDATE_INFO="" desliga.
+channel=latest
+[[ "$version" == *-* ]] && channel=latest-all
+updinfo="${TAILDESK_UPDATE_INFO-gh-releases-zsync|yurisanp|taildesk|$channel|TailDesk-*$arch.AppImage.zsync}"
+updargs=()
+if [[ -n "$updinfo" ]]; then
+  command -v zsyncmake >/dev/null || { echo "falta zsyncmake (pacote zsync) para gerar o .zsync" >&2; exit 1; }
+  updargs=(--updateinformation "$updinfo")
+fi
+# Sem FUSE no CI: extrair e rodar. O .zsync sai na pasta atual, por isso o cd.
+(cd "$out" && APPIMAGE_EXTRACT_AND_RUN=1 ARCH=$arch "$tool" --no-appstream "${updargs[@]}" \
+  "$appdir" "$out/TailDesk-$version-$arch.AppImage")
 
 # 3. .deb e 4. .rpm (metadados em apps/taildesk/Cargo.toml)
 # Pre-release usa "~" (0.1.0~beta.1): ordena antes de 0.1.0 no dpkg e no rpm, que não aceita "-".
