@@ -6,14 +6,24 @@
 
 use std::io;
 
-use taildesk_keyboard::Inject;
 use taildesk_keyboard::codes::hid_to_scancode;
+use taildesk_keyboard::{Inject, Locks};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-    KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, SendInput,
+    GetKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, SendInput, VK_CAPITAL, VK_NUMLOCK,
 };
 
 use super::InjetorTeclado;
+
+/// Caps Lock e Num Lock ligados agora (para o host sincronizar no modo Físico).
+pub fn travas() -> Locks {
+    // SAFETY: sem pré-condições; o bit 0 é o estado de alternância.
+    let ligado = |vk| unsafe { GetKeyState(i32::from(vk)) } & 1 != 0;
+    Locks {
+        caps: ligado(VK_CAPITAL),
+        num: ligado(VK_NUMLOCK),
+    }
+}
 
 /// Injetor do Windows. Só funciona na sessão interativa do usuário (fase 5 trata o serviço).
 #[derive(Default)]

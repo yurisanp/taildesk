@@ -12,8 +12,17 @@ license.workspace = true
 taildesk-ui.workspace = true
 taildesk-platform.workspace = true
 taildesk-tsapi.workspace = true
+taildesk-session.workspace = true
+taildesk-transport.workspace = true
+taildesk-overlay.workspace = true
+taildesk-proto.workspace = true
+taildesk-keyboard.workspace = true
+taildesk-files.workspace = true
 slint = { version = "=1.18.1", features = ["unstable-winit-030"] }
-tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [lints]
 workspace = true

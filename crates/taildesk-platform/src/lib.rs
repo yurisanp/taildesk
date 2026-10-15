@@ -11,6 +11,7 @@ pub mod captura_pipewire;
 mod forma_cursor_dxgi;
 pub mod instancia;
 pub mod mouse;
+pub mod segredos;
 pub mod teclado;
 #[cfg(target_os = "linux")]
 pub mod wayland;
@@ -62,6 +63,39 @@ pub unsafe fn tomar_token_de_ativacao() -> Option<String> {
         }
     }
     token
+}
+
+/// Pasta de downloads do usuário (`XDG_DOWNLOAD_DIR` no Linux, `%USERPROFILE%\Downloads` no
+/// Windows), onde fica a pasta de entrada `TailDesk`.
+pub fn pasta_downloads() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join("Downloads"))
+    }
+    #[cfg(not(windows))]
+    {
+        let home = PathBuf::from(std::env::var_os("HOME")?);
+        // `user-dirs.dirs`: XDG_DOWNLOAD_DIR="$HOME/Baixados"
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".config"));
+        let xdg = std::fs::read_to_string(config.join("user-dirs.dirs"))
+            .ok()
+            .and_then(|t| {
+                t.lines().find_map(|l| {
+                    let v = l
+                        .trim()
+                        .strip_prefix("XDG_DOWNLOAD_DIR=")?
+                        .trim_matches('"');
+                    Some(match v.strip_prefix("$HOME") {
+                        Some(resto) => home.join(resto.trim_start_matches('/')),
+                        None => PathBuf::from(v),
+                    })
+                })
+            });
+        Some(xdg.unwrap_or_else(|| home.join("Downloads")))
+    }
 }
 
 /// Abre um link no navegador padrão.

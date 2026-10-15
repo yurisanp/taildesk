@@ -1,0 +1,134 @@
+// Lado do host: pedido de acesso (`12-levantamento-ux.md` §5.4) e faixa de sessão ativa (§5.5).
+import { CheckBox } from "std-widgets.slint";
+import { Tema } from "tema.slint";
+import { Botao } from "componentes.slint";
+
+// "notebook-yuri quer acessar este computador". Sempre por cima, foco inicial em Recusar.
+export component JanelaPedido inherits Window {
+    in property <string> peer;
+    // "Usuário: yuri@ · 100.64.1.7"
+    in property <string> detalhe;
+    // Segundos até recusar sozinho.
+    in property <int> restante: 60;
+    // O que o host pode liberar (as caixas só aparecem para o que foi oferecido).
+    in property <bool> oferece-controle;
+    in property <bool> oferece-arquivos;
+    in-out property <bool> controlar: true;
+    in-out property <bool> arquivos: true;
+    in-out property <bool> lembrar: false;
+
+    callback permitir();
+    callback recusar();
+
+    title: @tr("Pedido de acesso · TailDesk");
+    icon: @image-url("icones/taildesk-64.png");
+    always-on-top: true;
+    background: Tema.superficie;
+    min-width: 420px;
+    forward-focus: botao-recusar;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 14px;
+
+        Text {
+            text: @tr("{} quer acessar este computador", root.peer);
+            font-size: Tema.fonte-titulo;
+            font-weight: 700;
+            color: Tema.texto;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.detalhe;
+            font-size: Tema.fonte;
+            color: Tema.texto-2;
+            wrap: word-wrap;
+        }
+        VerticalLayout {
+            spacing: 4px;
+            CheckBox {
+                text: @tr("Ver a tela");
+                checked: true;
+                enabled: false;
+            }
+            if root.oferece-controle: CheckBox {
+                text: @tr("Controlar mouse e teclado");
+                checked <=> root.controlar;
+            }
+            if root.oferece-arquivos: CheckBox {
+                text: @tr("Trocar arquivos");
+                checked <=> root.arquivos;
+            }
+        }
+        CheckBox {
+            text: @tr("Lembrar deste dispositivo");
+            checked <=> root.lembrar;
+        }
+        Text {
+            text: @tr("Só permita se você sabe quem está pedindo. Recusa sozinho em {} s.", root.restante);
+            font-size: Tema.fonte-pequena;
+            color: Tema.texto-2;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: end;
+            botao-recusar := Botao {
+                texto: @tr("Recusar");
+                clicado => { root.recusar(); }
+            }
+            Botao {
+                texto: @tr("Permitir");
+                primario: true;
+                clicado => { root.permitir(); }
+            }
+        }
+    }
+}
+
+// "notebook-yuri controla este PC · [Pausar controle] [Encerrar]". Pequena e sempre por cima.
+export component JanelaFaixa inherits Window {
+    in property <string> texto;
+    in property <bool> pode-pausar;
+    in-out property <bool> pausado: false;
+
+    callback pausar(bool);
+    callback encerrar();
+
+    title: @tr("Sessão ativa · TailDesk");
+    icon: @image-url("icones/taildesk-64.png");
+    always-on-top: true;
+    background: Tema.superficie;
+
+    HorizontalLayout {
+        padding: 8px;
+        padding-left: 14px;
+        spacing: 10px;
+        Rectangle {
+            width: 10px;
+            height: 10px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 5px;
+            background: root.pausado ? Tema.relay : Tema.perigo;
+        }
+        Text {
+            text: root.pausado ? @tr("{} · controle pausado", root.texto) : root.texto;
+            font-size: Tema.fonte;
+            color: Tema.texto;
+            vertical-alignment: center;
+        }
+        if root.pode-pausar: Botao {
+            texto: root.pausado ? @tr("Retomar controle") : @tr("Pausar controle");
+            discreto: true;
+            clicado => {
+                root.pausado = !root.pausado;
+                root.pausar(root.pausado);
+            }
+        }
+        Botao {
+            texto: @tr("Encerrar");
+            perigo: true;
+            clicado => { root.encerrar(); }
+        }
+    }
+}
