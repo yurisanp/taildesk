@@ -7,9 +7,8 @@
 //! - [`probe`]: rajada de sondagem e recepção pelos datagramas;
 //! - [`bench`]: o teste do `taildesk-cli bench-net` (RTT + banda nos dois sentidos).
 //!
-//! Ainda falta o adaptador `AsyncUdpSocket` sobre o socket do `Overlay` embutido (spike do
-//! gate G0). Com socket do SO, isto já funciona sobre o Tailscale do sistema, cujo IP da
-//! tailnet é uma interface comum do SO.
+//! O TailDesk usa só o Tailscale instalado na máquina (ADR-009): o IP da tailnet é uma
+//! interface comum do SO, então o socket UDP do SO é o transporte definitivo.
 
 pub mod bench;
 pub mod endpoint;
