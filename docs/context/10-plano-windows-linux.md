@@ -94,13 +94,15 @@ O pacote só tinha `FileOffer/FileAccept/FileCancel/FileProgress`. Proposta comp
 2. **Navegador remoto** (painel lateral tipo RustDesk): listar, baixar e enviar dentro das **raízes permitidas** pelo host.
 
 **Fio**
-- Metadados e comandos no stream de controle (protobuf):
-  `FsList{path}` → `FsListing{entries[name, kind, size, mtime]}`,
-  `FileOffer{xfer_id, rel_path, size, mtime, blake3?}`, `FileRequest{xfer_id, path, offset}`,
-  `FileAccept{xfer_id, offset}` (offset > 0 = retomada), `FileCancel`, `FileDone{xfer_id, blake3}`, `FileError{code}`.
-- Dados: **um stream QUIC unidirecional por arquivo**, cabeçalho curto (`xfer_id`, `offset`) e bytes crus em blocos de 256 KiB. O controle de fluxo do QUIC faz o resto; vídeo continua em datagramas, então arquivo grande não trava a tela (no máximo disputa banda, e o pacer dá prioridade ao vídeo).
+- Metadados e comandos no stream de controle (protobuf, tags 80–89; detalhe em `07-protocolo.md` §3.1):
+  `FsRootsRequest` → `FsRoots{roots[id, name, access: Read|Write|ReadWrite]}` (raiz 0 = pasta de entrada de quem recebe),
+  `FsList{root, path, start}` → `FsListing{entries[name, kind, size, mtime], more}` paginado (até 512 itens ou 40 KiB de nomes por página, para caber no frame de 64 KiB),
+  `FileOffer{xfer_id, root, rel_path, size, mtime}`, `FileRequest{xfer_id, root, path}` (sem offset),
+  `FileAccept{xfer_id, offset, prefix_blake3}`, `FileCancel`, `FileDone{xfer_id, blake3}`, `FileError{xfer_id, code}`.
+- Fluxo: envio = `FileOffer` → `FileAccept` → dados → `FileDone`; download = `FileRequest` → `FileOffer` → `FileAccept` → dados → `FileDone`.
+- Dados: **um stream QUIC unidirecional por arquivo**, cabeçalho de 16 bytes `files::DataHeader` (`"TDF"` v1, `xfer_id` u32, `offset` u64, little-endian) e bytes crus em blocos de 256 KiB. O controle de fluxo do QUIC faz o resto; vídeo continua em datagramas, então arquivo grande não trava a tela (no máximo disputa banda, e o pacer dá prioridade ao vídeo).
 - Pastas = lista de `FileOffer` com `rel_path`; até 4 arquivos em paralelo.
-- Integridade: **BLAKE3** calculado em streaming, conferido no `FileDone`. Escrita em `nome.part` e rename atômico no fim; retomada pelo tamanho do `.part`.
+- Integridade: **BLAKE3** calculado em streaming, conferido no `FileDone`. Escrita em `nome.part` e rename atômico no fim; retomada pelo tamanho do `.part`, com o BLAKE3 do prefixo no `FileAccept`; prefixo diferente = `FileError(RESUME_MISMATCH)` e recomeça do zero.
 
 **Segurança**
 - Permissão `files` vem da policy (tags/caps) e do consentimento; pode ser só-envio ou só-recebimento.
