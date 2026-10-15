@@ -5,8 +5,10 @@
 //! - [`media`]: header binário fixo de 16 bytes dos datagramas de mídia (`07-protocolo.md` §4).
 //! - [`probe`]: payload dos datagramas de sondagem de banda (`14-selecao-adaptativa.md` §3.2).
 //! - [`net`]: mensagens e limites da seleção adaptativa (`14-selecao-adaptativa.md` §4).
+//! - [`files`]: cabeçalho do stream de dados e limites da troca de arquivos (`10-plano` §3).
 
 pub mod control;
+pub mod files;
 pub mod media;
 pub mod net;
 pub mod probe;
