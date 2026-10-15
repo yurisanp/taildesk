@@ -1,5 +1,5 @@
 // Tela inicial: lista de dispositivos da tailnet (levantamento §5.2), transferências (§5.8) e configurações (§5.9).
-import { LineEdit, ScrollView, Switch, ListView } from "std-widgets.slint";
+import { AboutSlint, LineEdit, ScrollView, Switch, ListView } from "std-widgets.slint";
 import { Tema } from "tema.slint";
 import { Botao, Cartao, ChipStatus, Dispositivo, Estado, ItemNav, LinhaInfo, PontoStatus, Separador, Textos, Toast, BarraProgresso } from "componentes.slint";
 
@@ -328,6 +328,10 @@ component SecaoConfiguracoes inherits ScrollView {
                 LinhaInfo { rotulo: @tr("Diagnóstico"); valor: @tr("Versão 0.0.1 · sem erros"); acao: @tr("Copiar relatório"); }
             }
         }
+
+        // Atribuição exigida pela licença royalty-free do Slint para apps desktop.
+        Text { text: @tr("Sobre"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        AboutSlint { }
     }
 }
 
