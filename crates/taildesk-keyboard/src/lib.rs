@@ -3,11 +3,21 @@
 //! Lógica pura, sem SO: os leitores de layout (`ToUnicodeEx` no Windows, `xkbcommon` no Linux)
 //! ficam em `taildesk-platform` e produzem um [`Keymap`]. Aqui ficam:
 //! - [`classify`]: no controlador, decide se a tecla vai como física, atalho ou caractere;
-//! - [`ReverseMap`]: no host, descobre quais teclas do layout local produzem um caractere.
+//! - [`ReverseMap`]: no host, descobre quais teclas do layout local produzem um caractere;
+//! - [`Controller`]: no controlador, transforma eventos de tecla em [`KeyMsg`] (teclas mortas já
+//!   resolvidas);
+//! - [`Host`]: no host, transforma [`KeyMsg`] em teclas a injetar ([`Inject`]) no layout local.
 
 use std::collections::HashMap;
 
+mod controller;
 pub mod fixtures;
+mod host;
+mod msg;
+
+pub use controller::Controller;
+pub use host::{Host, Inject};
+pub use msg::{KeyMsg, Locks, Mode, Translation, effective_translation};
 
 /// Código de tecla no fio: USB HID usage (página 0x07).
 pub type Hid = u16;
@@ -59,9 +69,37 @@ pub fn is_non_printing(hid: Hid) -> bool {
         | 0x58               // Keypad Enter
         | 0x65..=0x66        // Application (menu), Power
         | 0x68..=0x73        // F13-F24
-        | 0x74..=0x86        // Execute..Volume, Keypad = (AS/400)
+        | 0x74..=0x84        // Execute..Volume, LockingNumLock, LockingScrollLock
+        | 0x86               // Keypad = (AS/400). 0x85 (Keypad Comma) produz texto no ABNT2.
         | 0xE0..=0xE7        // modificadores
     )
+}
+
+/// Teclas do teclado numérico (dependem do Num Lock ou ficam em posição fixa em todo layout).
+pub fn is_keypad(hid: Hid) -> bool {
+    matches!(hid, 0x54..=0x63 | 0x67 | 0x85)
+}
+
+/// Modificadores sozinhos (Ctrl, Shift, Alt, Meta, esquerdo e direito).
+pub fn is_modifier(hid: Hid) -> bool {
+    matches!(hid, 0xE0..=0xE7)
+}
+
+/// Tecla de navegação que uma tecla do teclado numérico vira com o Num Lock desligado.
+pub fn keypad_nav(hid: Hid) -> Option<Hid> {
+    Some(match hid {
+        0x59 => 0x4D, // 1 -> End
+        0x5A => 0x51, // 2 -> Down
+        0x5B => 0x4E, // 3 -> PageDown
+        0x5C => 0x50, // 4 -> Left
+        0x5E => 0x4F, // 6 -> Right
+        0x5F => 0x4A, // 7 -> Home
+        0x60 => 0x52, // 8 -> Up
+        0x61 => 0x4B, // 9 -> PageUp
+        0x62 => 0x49, // 0 -> Insert
+        0x63 => 0x4C, // . -> Delete
+        _ => return None,
+    })
 }
 
 /// Classificação do modo Auto (`11-teclado.md` §2.3).
@@ -94,6 +132,25 @@ pub enum Level {
 }
 
 impl Level {
+    /// Nível a partir de Shift e AltGr.
+    pub fn from_mods(mods: Mods) -> Level {
+        match (mods.contains(Mods::SHIFT), mods.contains(Mods::ALTGR)) {
+            (false, false) => Level::Base,
+            (true, false) => Level::Shift,
+            (false, true) => Level::AltGr,
+            (true, true) => Level::ShiftAltGr,
+        }
+    }
+
+    /// Troca base por Shift (efeito do Caps Lock em letras). AltGr não muda.
+    pub fn caps_flipped(self) -> Level {
+        match self {
+            Level::Base => Level::Shift,
+            Level::Shift => Level::Base,
+            other => other,
+        }
+    }
+
     fn cost(self) -> u32 {
         match self {
             Level::Base => 0,
@@ -135,7 +192,10 @@ pub struct ReverseMap {
 }
 
 fn sequence_cost(seq: &[Stroke]) -> u32 {
-    seq.iter().map(|s| 10 + s.level.cost()).sum()
+    // O teclado numérico só digita com o Num Lock ligado no host: fica como última opção.
+    seq.iter()
+        .map(|s| 10 + s.level.cost() + if is_keypad(s.hid) { 20 } else { 0 })
+        .sum()
 }
 
 impl ReverseMap {
@@ -186,6 +246,35 @@ fn offer(map: &mut HashMap<char, Vec<Stroke>>, c: char, seq: Vec<Stroke>) {
 /// Desempate determinístico entre sequências de mesmo custo.
 fn seq_key(seq: &[Stroke]) -> Vec<(Level, Hid)> {
     seq.iter().map(|s| (s.level, s.hid)).collect()
+}
+
+impl Keymap {
+    /// O que a tecla produz no nível, se produz algo.
+    pub fn output(&self, hid: Hid, level: Level) -> Option<Output> {
+        self.keys
+            .iter()
+            .find_map(|&(h, l, o)| (h == hid && l == level).then_some(o))
+    }
+
+    /// A tecla muda com o Caps Lock: o nível base é uma letra com maiúscula no nível Shift.
+    pub fn caps_affects(&self, hid: Hid) -> bool {
+        match (
+            self.output(hid, Level::Base),
+            self.output(hid, Level::Shift),
+        ) {
+            (Some(Output::Char(b)), Some(Output::Char(s))) => {
+                b.is_alphabetic() && b != s && b.to_uppercase().eq(std::iter::once(s))
+            }
+            _ => false,
+        }
+    }
+
+    /// Resultado da composição de `dead` com `base`.
+    pub fn compose(&self, dead: char, base: char) -> Option<char> {
+        self.compose
+            .iter()
+            .find_map(|&(d, b, r)| (d == dead && b == base).then_some(r))
+    }
 }
 
 /// Caractere que uma tecla produz no nível base, para atalhos (`KeyShortcut.base_char`).
