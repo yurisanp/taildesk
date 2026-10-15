@@ -4,9 +4,9 @@
 //! (`docs/context/10-plano-windows-linux.md`).
 
 pub mod instancia;
+pub mod teclado;
 #[cfg(target_os = "linux")]
 pub mod wayland;
-pub mod teclado;
 
 use std::io;
 use std::process::{Command, Stdio};
