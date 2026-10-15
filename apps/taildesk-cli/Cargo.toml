@@ -14,7 +14,7 @@ taildesk-transport.workspace = true
 taildesk-overlay.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
 taildesk-platform.workspace = true
 
 [lints]

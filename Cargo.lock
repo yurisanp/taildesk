@@ -4900,6 +4900,7 @@ dependencies = [
  "pipewire",
  "taildesk-keyboard",
  "taildesk-proto",
+ "windows",
  "windows-sys 0.61.2",
  "xkbcommon-dl",
  "zbus",
