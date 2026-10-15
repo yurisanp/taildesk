@@ -1,0 +1,503 @@
+// Janela principal do app: dispositivos da tailnet (levantamento §5.2) e configurações (§5.9),
+// com o estado real do Tailscale deste computador (§5.1 e "Tailscale parou durante o uso").
+import { AboutSlint, LineEdit, ScrollView, Switch, ListView } from "std-widgets.slint";
+import { Tema } from "tema.slint";
+import { Botao, Cartao, ChipStatus, Dispositivo, Estado, ItemNav, LinhaInfo, PontoStatus, Separador, Textos, Toast } from "componentes.slint";
+
+// Como está o Tailscale deste computador, lido pela LocalAPI.
+export enum EstadoTailscale {
+    verificando,
+    // Sem resposta no socket da LocalAPI: não instalado ou serviço parado.
+    nao-encontrado,
+    // A LocalAPI recusou este usuário.
+    sem-permissao,
+    // Rodando, mas sem login ou desligado (NeedsLogin, Stopped).
+    desconectado,
+    conectado,
+}
+
+// Copia para a área de transferência usando um campo de texto escondido.
+component Copiador inherits TextInput {
+    visible: false;
+    width: 0;
+    height: 0;
+    read-only: true;
+    public function copiar(t: string) {
+        self.text = t;
+        self.select-all();
+        self.copy();
+    }
+}
+
+// Comando de terminal com botão Copiar.
+component Comando inherits Rectangle {
+    in property <string> texto;
+    callback copiar(string);
+    height: 36px;
+    border-radius: Tema.raio;
+    background: Tema.superficie-2;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 6px;
+        spacing: 8px;
+        Text {
+            horizontal-stretch: 1;
+            text: "$ " + root.texto;
+            font-family: "DejaVu Sans Mono";
+            font-size: Tema.fonte-pequena;
+            color: Tema.texto;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            Botao { texto: @tr("Copiar"); discreto: true; altura: 26px; clicado => { root.copiar(root.texto); } }
+        }
+    }
+}
+
+// Faixa no topo quando o Tailscale não está pronto: diz o motivo e o que fazer.
+component FaixaTailscale inherits Rectangle {
+    in property <EstadoTailscale> estado;
+    in property <bool> linux;
+    in property <bool> versao-antiga;
+    in property <string> versao;
+    in property <string> detalhe;
+    callback abrir-link(string);
+    callback copiar(string);
+    callback verificar();
+
+    property <bool> grave: estado != EstadoTailscale.conectado && estado != EstadoTailscale.verificando;
+    background: grave ? Tema.perigo.with-alpha(0.12) : Tema.relay.with-alpha(0.16);
+
+    VerticalLayout {
+        padding: 12px;
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                font-weight: 600;
+                color: Tema.texto;
+                font-size: Tema.fonte;
+                text: root.estado == EstadoTailscale.verificando ? @tr("Procurando o Tailscale deste computador…")
+                    : root.estado == EstadoTailscale.nao-encontrado ? @tr("O Tailscale não foi encontrado. O TailDesk usa o Tailscale instalado neste computador (versão 1.102 ou mais nova) para achar e conectar suas máquinas.")
+                    : root.estado == EstadoTailscale.sem-permissao ? @tr("O Tailscale está rodando, mas não deixa este usuário consultar o estado dele.")
+                    : root.estado == EstadoTailscale.desconectado ? @tr("O Tailscale está instalado, mas não está conectado à sua tailnet. As conexões voltam quando ele reconectar.")
+                    : @tr("O Tailscale deste computador ({}) é mais antigo que o recomendado (1.102). Atualize para conexões estáveis.", root.versao);
+            }
+            if root.estado == EstadoTailscale.nao-encontrado || root.versao-antiga: VerticalLayout {
+                alignment: center;
+                Botao { texto: @tr("Baixar o Tailscale"); primario: true; altura: 28px; clicado => { root.abrir-link("https://tailscale.com/download"); } }
+            }
+            if root.grave: VerticalLayout {
+                alignment: center;
+                Botao { texto: @tr("Verificar de novo"); altura: 28px; clicado => { root.verificar(); } }
+            }
+        }
+        if root.linux && root.estado == EstadoTailscale.nao-encontrado: VerticalLayout {
+            spacing: 6px;
+            Text { text: @tr("Se ele já está instalado, ligue o serviço:"); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+            Comando { texto: "sudo systemctl enable --now tailscaled"; copiar(t) => { root.copiar(t); } }
+        }
+        if root.linux && root.estado == EstadoTailscale.desconectado: VerticalLayout {
+            spacing: 6px;
+            Text { text: @tr("Entre na sua tailnet pelo terminal (o navegador abre a página de login):"); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+            Comando { texto: "sudo tailscale up"; copiar(t) => { root.copiar(t); } }
+        }
+        if !root.linux && root.estado == EstadoTailscale.desconectado: Text {
+            text: @tr("Abra o Tailscale pela bandeja do Windows e faça login.");
+            color: Tema.texto-2;
+            font-size: Tema.fonte-pequena;
+        }
+        if root.linux && root.estado == EstadoTailscale.sem-permissao: VerticalLayout {
+            spacing: 6px;
+            Text { text: @tr("Deixe seu usuário operar o Tailscale:"); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+            Comando { texto: "sudo tailscale set --operator=$USER"; copiar(t) => { root.copiar(t); } }
+        }
+        if root.grave && root.detalhe != "": Text {
+            text: root.detalhe;
+            color: Tema.texto-2;
+            font-size: Tema.fonte-pequena;
+            wrap: word-wrap;
+        }
+    }
+}
+
+component ItemDispositivo inherits Rectangle {
+    in property <Dispositivo> d;
+    in property <bool> selecionado;
+    callback selecionar();
+    callback conectar();
+
+    accessible-role: list-item;
+    accessible-label: d.nome + ", " + d.so + ", " + Textos.estado(d.estado);
+    height: 60px;
+    border-radius: Tema.raio;
+    background: selecionado ? Tema.superficie-2 : toque.has-hover ? Tema.superficie-2.with-alpha(0.5) : transparent;
+
+    toque := TouchArea {
+        clicked => { root.selecionar(); }
+        double-clicked => { if Textos.conectavel(root.d.estado) { root.conectar(); } }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.d.nome;
+                font-size: 14px;
+                font-weight: 600;
+                color: root.d.estado == Estado.nao-suportado ? Tema.texto-2 : Tema.texto;
+            }
+            Text { text: root.d.so; font-size: Tema.fonte-pequena; color: Tema.texto-2; }
+        }
+        VerticalLayout {
+            alignment: center;
+            width: 150px;
+            ChipStatus { estado: root.d.estado; }
+        }
+        VerticalLayout {
+            alignment: center;
+            width: 120px;
+            if Textos.conectavel(root.d.estado): Botao {
+                texto: @tr("Conectar");
+                primario: true;
+                clicado => { root.conectar(); }
+            }
+        }
+    }
+}
+
+component PainelDetalhe inherits Rectangle {
+    in property <Dispositivo> d;
+    callback conectar();
+    callback copiar(string);
+    background: Tema.superficie;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 14px;
+        alignment: start;
+        VerticalLayout {
+            spacing: 4px;
+            Text { text: root.d.nome; font-size: 18px; font-weight: 700; color: Tema.texto; wrap: word-wrap; }
+            Text { text: root.d.so; font-size: Tema.fonte; color: Tema.texto-2; }
+        }
+        ChipStatus { estado: root.d.estado; }
+        Botao {
+            texto: @tr("Conectar");
+            primario: true;
+            habilitado: Textos.conectavel(root.d.estado);
+            clicado => { root.conectar(); }
+        }
+        Separador { }
+        LinhaInfo {
+            rotulo: @tr("Endereço na tailnet");
+            valor: root.d.ip;
+            acao: root.d.ip != "" ? @tr("Copiar") : "";
+            acionar => { root.copiar(root.d.ip); }
+        }
+        LinhaInfo {
+            rotulo: @tr("MagicDNS");
+            valor: root.d.dns;
+            acao: root.d.dns != "" ? @tr("Copiar") : "";
+            acionar => { root.copiar(root.d.dns); }
+        }
+        LinhaInfo { rotulo: @tr("Visto por último"); valor: root.d.ultimo-acesso; }
+        if root.d.estado == Estado.nao-suportado: Text {
+            wrap: word-wrap;
+            text: @tr("O TailDesk ainda não roda neste sistema. Por enquanto: Windows e Linux.");
+            font-size: Tema.fonte-pequena;
+            color: Tema.texto-2;
+        }
+    }
+}
+
+component SecaoDispositivos inherits Rectangle {
+    in property <[Dispositivo]> dispositivos;
+    in property <int> total;
+    in property <bool> pronto;
+    in-out property <int> selecionado;
+    in-out property <string> busca;
+    callback busca-mudou(string);
+    callback conectar(Dispositivo);
+    callback copiar(string);
+
+    HorizontalLayout {
+        VerticalLayout {
+            horizontal-stretch: 1;
+            padding: 20px;
+            spacing: 14px;
+            HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: @tr("Dispositivos");
+                    font-size: Tema.fonte-titulo;
+                    font-weight: 700;
+                    color: Tema.texto;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                LineEdit {
+                    width: 260px;
+                    placeholder-text: @tr("Buscar dispositivos");
+                    text <=> root.busca;
+                    edited(t) => { root.busca-mudou(t); }
+                }
+            }
+            if root.pronto && root.total == 0: Text {
+                text: @tr("Nenhum outro dispositivo na sua tailnet ainda. Instale o Tailscale e o TailDesk em outro computador e ele aparece aqui.");
+                color: Tema.texto-2;
+                font-size: Tema.fonte;
+                wrap: word-wrap;
+            }
+            if root.total > 0 && root.dispositivos.length == 0: Text {
+                text: @tr("Nenhum dispositivo encontrado para “{}”.", root.busca);
+                color: Tema.texto-2;
+                font-size: Tema.fonte;
+            }
+            ListView {
+                vertical-stretch: 1;
+                for d[i] in root.dispositivos: ItemDispositivo {
+                    d: d;
+                    selecionado: i == root.selecionado;
+                    selecionar => { root.selecionado = i; }
+                    conectar => { root.conectar(d); }
+                }
+            }
+        }
+        Rectangle { width: 1px; background: Tema.borda; }
+        if root.dispositivos.length > 0: PainelDetalhe {
+            width: 300px;
+            d: root.dispositivos[min(root.selecionado, root.dispositivos.length - 1)];
+            conectar => { root.conectar(self.d); }
+            copiar(t) => { root.copiar(t); }
+        }
+    }
+}
+
+component OpcaoConfig inherits HorizontalLayout {
+    in property <string> titulo;
+    in property <string> descricao;
+    in-out property <bool> ligado;
+    callback mudou(bool);
+    spacing: 16px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 3px;
+        Text { text: root.titulo; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+        Text { text: root.descricao; color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+    }
+    VerticalLayout {
+        alignment: center;
+        Switch { checked <=> root.ligado; toggled => { root.mudou(self.checked); } }
+    }
+}
+
+component SecaoConfiguracoes inherits ScrollView {
+    in-out property <bool> aceitando;
+    in property <string> tailscale;
+    in property <string> versao-app;
+    in property <bool> bandeja;
+    callback aceitando-mudou(bool);
+    callback abrir-link(string);
+    VerticalLayout {
+        padding: 20px;
+        spacing: 14px;
+        alignment: start;
+        Text { text: @tr("Configurações"); font-size: Tema.fonte-titulo; font-weight: 700; color: Tema.texto; }
+
+        Text { text: @tr("Este computador"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        Cartao {
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                OpcaoConfig {
+                    titulo: @tr("Aceitar conexões");
+                    descricao: @tr("Outros dispositivos da sua tailnet podem pedir acesso a este computador. Nada acontece sem você permitir.");
+                    ligado <=> root.aceitando;
+                    mudou(v) => { root.aceitando-mudou(v); }
+                }
+                Separador { }
+                LinhaInfo {
+                    rotulo: @tr("Ao fechar a janela");
+                    valor: root.bandeja ? @tr("O TailDesk continua na bandeja do sistema. Para sair, use Sair no menu do ícone.") : @tr("O sistema não tem bandeja: fechar a janela encerra o TailDesk.");
+                }
+            }
+        }
+
+        Text { text: @tr("Rede"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        Cartao {
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                LinhaInfo { rotulo: @tr("Tailscale deste computador"); valor: root.tailscale; }
+                Separador { }
+                LinhaInfo {
+                    rotulo: @tr("Conta, login e saída da tailnet");
+                    valor: @tr("Ficam com o próprio Tailscale; o TailDesk não muda nada nele.");
+                    acao: @tr("Painel do Tailscale");
+                    acionar => { root.abrir-link("https://login.tailscale.com/admin/machines"); }
+                }
+            }
+        }
+
+        // Atribuição exigida pela licença royalty-free do Slint para apps desktop.
+        Text { text: @tr("Sobre"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        Cartao {
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                LinhaInfo {
+                    rotulo: @tr("TailDesk {}", root.versao-app);
+                    valor: @tr("Código aberto, MIT OR Apache-2.0");
+                    acao: @tr("Abrir no GitHub");
+                    acionar => { root.abrir-link("https://github.com/yurisanp/taildesk"); }
+                }
+            }
+        }
+        AboutSlint { }
+    }
+}
+
+export component JanelaPrincipal inherits Window {
+    title: "TailDesk";
+    icon: @image-url("icones/taildesk-64.png");
+    preferred-width: 1040px;
+    preferred-height: 660px;
+    min-width: 760px;
+    min-height: 480px;
+    background: Tema.fundo;
+    default-font-family: "Inter";
+
+    // Lista já filtrada pela busca; `total` é o tamanho sem filtro.
+    in property <[Dispositivo]> dispositivos;
+    in property <int> total;
+    in-out property <int> selecionado: 0;
+    in-out property <string> busca;
+    in-out property <int> secao: 0;
+    in property <string> este-pc;
+    in-out property <bool> aceitando: true;
+    in-out property <string> toast;
+    in property <EstadoTailscale> tailscale: EstadoTailscale.verificando;
+    in property <string> tailscale-resumo;
+    in property <string> tailscale-detalhe;
+    in property <string> versao-tailscale;
+    in property <bool> versao-antiga;
+    in property <bool> linux;
+    in property <string> versao-app;
+    in property <bool> bandeja;
+
+    callback busca-mudou(string);
+    callback conectar(Dispositivo);
+    callback abrir-link(string);
+    callback verificar();
+    callback aceitando-mudou(bool);
+
+    function copiar(t: string) {
+        copiador.copiar(t);
+        root.toast = @tr("Copiado: {}", t);
+    }
+
+    copiador := Copiador { }
+
+    HorizontalLayout {
+        Rectangle {
+            width: 200px;
+            background: Tema.superficie;
+            VerticalLayout {
+                padding: 14px;
+                spacing: 4px;
+                HorizontalLayout {
+                    padding-bottom: 14px;
+                    spacing: 8px;
+                    Image { width: 26px; height: 26px; source: @image-url("../../../packaging/linux/taildesk.svg"); }
+                    Text { text: "TailDesk"; font-size: 17px; font-weight: 700; color: Tema.texto; vertical-alignment: center; }
+                }
+                ItemNav { texto: @tr("Dispositivos"); ativo: root.secao == 0; clicado => { root.secao = 0; } }
+                ItemNav { texto: @tr("Configurações"); ativo: root.secao == 1; clicado => { root.secao = 1; } }
+                Rectangle { vertical-stretch: 1; }
+                Separador { }
+                VerticalLayout {
+                    padding-top: 10px;
+                    padding-bottom: 6px;
+                    spacing: 4px;
+                    Text {
+                        text: root.este-pc != "" ? root.este-pc + @tr(" (este PC)") : @tr("Este PC");
+                        font-size: Tema.fonte-pequena;
+                        font-weight: 600;
+                        color: Tema.texto;
+                        overflow: elide;
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        VerticalLayout { alignment: center; PontoStatus { estado: root.aceitando ? Estado.online : Estado.offline; } }
+                        Text {
+                            text: root.aceitando ? @tr("Aceitando conexões") : @tr("Não aceita conexões");
+                            font-size: Tema.fonte-pequena;
+                            color: Tema.texto-2;
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle { width: 1px; background: Tema.borda; }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            if root.tailscale != EstadoTailscale.conectado || root.versao-antiga: FaixaTailscale {
+                estado: root.tailscale;
+                linux: root.linux;
+                versao-antiga: root.versao-antiga;
+                versao: root.versao-tailscale;
+                detalhe: root.tailscale-detalhe;
+                abrir-link(u) => { root.abrir-link(u); }
+                copiar(t) => { root.copiar(t); }
+                verificar => { root.verificar(); }
+            }
+            if root.secao == 0: SecaoDispositivos {
+                vertical-stretch: 1;
+                opacity: root.tailscale == EstadoTailscale.conectado ? 1 : 0.5;
+                dispositivos: root.dispositivos;
+                total: root.total;
+                pronto: root.tailscale == EstadoTailscale.conectado;
+                selecionado <=> root.selecionado;
+                busca <=> root.busca;
+                busca-mudou(t) => { root.busca-mudou(t); }
+                conectar(d) => { root.conectar(d); }
+                copiar(t) => { root.copiar(t); }
+            }
+            if root.secao == 1: SecaoConfiguracoes {
+                vertical-stretch: 1;
+                aceitando <=> root.aceitando;
+                tailscale: root.tailscale-resumo;
+                versao-app: root.versao-app;
+                bandeja: root.bandeja;
+                aceitando-mudou(v) => { root.aceitando-mudou(v); }
+                abrir-link(u) => { root.abrir-link(u); }
+            }
+        }
+    }
+
+    Toast {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 20px;
+        texto: root.toast;
+    }
+    Timer {
+        interval: 4s;
+        running: root.toast != "";
+        triggered => { root.toast = ""; }
+    }
+}

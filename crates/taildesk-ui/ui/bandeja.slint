@@ -1,0 +1,33 @@
+// Ícone do TailDesk na bandeja do sistema: estado, abrir a janela, aceitar conexões e sair.
+// Linux: StatusNotifierItem (KDE, GNOME com AppIndicator, Xfce...); Windows: área de notificação.
+export component Bandeja inherits SystemTrayIcon {
+    // Linha de estado no topo do menu (ex.: "yuri-notebook · 2 dispositivos online").
+    in property <string> estado;
+    in-out property <bool> aceitando: true;
+
+    callback abrir();
+    callback aceitando-mudou(bool);
+    callback sair();
+
+    icon: @image-url("icones/taildesk-64.png");
+    title: "TailDesk";
+    tooltip: "TailDesk · " + root.estado;
+    clicked => { root.abrir(); }
+
+    Menu {
+        MenuItem { title: root.estado; enabled: false; }
+        MenuSeparator { }
+        MenuItem { title: @tr("Abrir o TailDesk"); activated => { root.abrir(); } }
+        // Texto da ação em vez de marca: a bandeja do Linux (StatusNotifierItem) no Slint 1.18
+        // não mostra itens marcáveis.
+        MenuItem {
+            title: root.aceitando ? @tr("Parar de aceitar conexões") : @tr("Aceitar conexões");
+            activated => {
+                root.aceitando = !root.aceitando;
+                root.aceitando-mudou(root.aceitando);
+            }
+        }
+        MenuSeparator { }
+        MenuItem { title: @tr("Sair"); activated => { root.sair(); } }
+    }
+}

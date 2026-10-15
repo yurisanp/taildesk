@@ -64,6 +64,8 @@ pub struct PeerStatus {
     pub relay: String,
     pub online: bool,
     pub tags: Option<Vec<String>>,
+    /// Última vez visto pelo servidor de controle (RFC 3339; ano 1 quando nunca).
+    pub last_seen: String,
 }
 
 impl PeerStatus {
@@ -81,15 +83,36 @@ impl PeerStatus {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase", default)]
 pub struct Status {
-    /// "Running" quando conectado.
+    /// Versão do `tailscaled` (ex.: "1.104.1-t…").
+    pub version: String,
+    /// "Running" quando conectado; "NeedsLogin", "Stopped", "Starting" etc. nos outros casos.
     pub backend_state: String,
+    /// Tailnet atual; ausente quando não há login.
+    pub current_tailnet: Option<TailnetStatus>,
     #[serde(rename = "Self")]
     pub self_node: PeerStatus,
     /// Peers, indexados pela chave pública.
     pub peer: Option<std::collections::BTreeMap<String, PeerStatus>>,
 }
 
+/// Tailnet atual (subconjunto de `ipnstate.TailnetStatus`).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase", default)]
+pub struct TailnetStatus {
+    pub name: String,
+    #[serde(rename = "MagicDNSSuffix")]
+    pub magic_dns_suffix: String,
+}
+
 impl Status {
+    /// Versão do `tailscaled` como (maior, menor), quando dá para ler.
+    pub fn version_major_minor(&self) -> Option<(u32, u32)> {
+        let mut partes = self.version.split(['.', '-']);
+        let maior = partes.next()?.parse().ok()?;
+        let menor = partes.next()?.parse().ok()?;
+        Some((maior, menor))
+    }
+
     pub fn peers(&self) -> impl Iterator<Item = &PeerStatus> {
         self.peer.iter().flat_map(|m| m.values())
     }
@@ -260,8 +283,9 @@ mod tests {
     use super::*;
 
     const STATUS: &str = r#"{
-      "Version": "1.104.1",
+      "Version": "1.104.1-t2f6a1b0c3-g4d5e6f7a8",
       "BackendState": "Running",
+      "CurrentTailnet": {"Name": "yuri@github", "MagicDNSSuffix": "tail1234.ts.net", "MagicDNSEnabled": true},
       "Self": {"ID": "nSelf", "HostName": "notebook-yuri", "DNSName": "notebook-yuri.tail1234.ts.net.",
                "OS": "linux", "TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"], "Online": true,
                "CurAddr": "", "Relay": "sao"},
@@ -272,7 +296,7 @@ mod tests {
                        "RxBytes": 10, "Unknown": {"x": 1}},
         "nodekey:bb": {"ID": "nB", "HostName": "servidor", "DNSName": "servidor.tail1234.ts.net.",
                        "OS": "linux", "TailscaleIPs": ["100.64.0.3"], "Addrs": null,
-                       "CurAddr": "", "Relay": "mia", "Online": false}
+                       "CurAddr": "", "Relay": "mia", "Online": false, "LastSeen": "2026-10-14T21:03:00Z"}
       }
     }"#;
 
@@ -280,6 +304,12 @@ mod tests {
     fn parses_status_subset() {
         let s: Status = serde_json::from_str(STATUS).unwrap();
         assert_eq!(s.backend_state, "Running");
+        assert_eq!(s.version_major_minor(), Some((1, 104)));
+        assert_eq!(s.current_tailnet.as_ref().unwrap().name, "yuri@github");
+        assert_eq!(
+            s.peer_by_name("servidor").unwrap().last_seen,
+            "2026-10-14T21:03:00Z"
+        );
         assert_eq!(s.self_node.short_name(), "notebook-yuri");
         assert_eq!(s.peers().count(), 2);
         let casa = s.peer_by_name("desktop-casa").unwrap();

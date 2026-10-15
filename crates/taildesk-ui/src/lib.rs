@@ -1,3 +1,9 @@
-//! Interface em Slint (lista de peers, janela de sessão, consentimento). Slint entra sob a Royalty-free License (atribuição na tela "Sobre"), compatível com MIT/Apache-2.0.
+//! Interface do app TailDesk em Slint. Reaproveita os tokens e componentes do protótipo
+//! (`apps/taildesk-prototipo`, levantamento de UX em `docs/design/12-levantamento-ux.md`), agora
+//! com dados reais: o app preenche as propriedades e trata os callbacks.
 //!
-//! Esqueleto: implementação nas fases descritas em `docs/context/10-plano-windows-linux.md`.
+//! Slint entra pela Royalty-free License; a atribuição fica em Configurações → Sobre.
+
+#![allow(missing_debug_implementations, clippy::all)]
+
+slint::include_modules!();
