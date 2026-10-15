@@ -1,0 +1,478 @@
+// Tela inicial: lista de dispositivos da tailnet (levantamento §5.2), transferências (§5.8) e configurações (§5.9).
+import { AboutSlint, LineEdit, ScrollView, Switch, ListView } from "std-widgets.slint";
+import { Tema } from "tema.slint";
+import { Botao, Cartao, ChipStatus, Dispositivo, Estado, ItemNav, LinhaInfo, PontoStatus, Separador, Textos, Toast, BarraProgresso } from "componentes.slint";
+
+component ItemDispositivo inherits Rectangle {
+    in property <Dispositivo> d;
+    in property <bool> selecionado;
+    callback selecionar();
+    callback conectar();
+    callback como-instalar();
+
+    accessible-role: list-item;
+    accessible-label: d.nome + ", " + d.so + ", " + Textos.estado(d.estado);
+    height: 60px;
+    border-radius: Tema.raio;
+    background: selecionado ? Tema.superficie-2 : toque.has-hover ? Tema.superficie-2.with-alpha(0.5) : transparent;
+
+    toque := TouchArea {
+        clicked => { root.selecionar(); }
+        double-clicked => { if Textos.conectavel(root.d.estado) { root.conectar(); } }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        Text {
+            width: 14px;
+            vertical-alignment: center;
+            text: root.d.favorito ? "★" : "";
+            color: Tema.relay;
+            font-size: 14px;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.d.nome;
+                font-size: 14px;
+                font-weight: 600;
+                color: root.d.estado == Estado.nao-suportado ? Tema.texto-2 : Tema.texto;
+            }
+            Text { text: root.d.so; font-size: Tema.fonte-pequena; color: Tema.texto-2; }
+        }
+        VerticalLayout {
+            alignment: center;
+            width: 150px;
+            ChipStatus { estado: root.d.estado; }
+        }
+        VerticalLayout {
+            alignment: center;
+            width: 120px;
+            if Textos.conectavel(root.d.estado): Botao {
+                texto: @tr("Conectar");
+                primario: true;
+                clicado => { root.conectar(); }
+            }
+            if root.d.estado == Estado.sem-app: Botao {
+                texto: @tr("Como instalar");
+                clicado => { root.como-instalar(); }
+            }
+        }
+    }
+}
+
+component PainelDetalhe inherits Rectangle {
+    in property <Dispositivo> d;
+    callback conectar();
+    callback testar();
+    callback enviar-arquivo();
+    callback copiar(string);
+    background: Tema.superficie;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 14px;
+        alignment: start;
+        VerticalLayout {
+            spacing: 4px;
+            Text { text: root.d.nome; font-size: 18px; font-weight: 700; color: Tema.texto; }
+            Text { text: root.d.so; font-size: Tema.fonte; color: Tema.texto-2; }
+        }
+        ChipStatus { estado: root.d.estado; }
+        HorizontalLayout {
+            spacing: 8px;
+            Botao {
+                horizontal-stretch: 1;
+                texto: @tr("Conectar");
+                primario: true;
+                habilitado: Textos.conectavel(root.d.estado);
+                clicado => { root.conectar(); }
+            }
+            Botao {
+                horizontal-stretch: 1;
+                texto: @tr("Testar conexão");
+                habilitado: Textos.conectavel(root.d.estado);
+                clicado => { root.testar(); }
+            }
+        }
+        Botao {
+            texto: @tr("Enviar arquivo");
+            habilitado: Textos.conectavel(root.d.estado);
+            clicado => { root.enviar-arquivo(); }
+        }
+        Separador { }
+        LinhaInfo {
+            rotulo: @tr("Endereço na tailnet");
+            valor: root.d.ip;
+            acao: @tr("Copiar");
+            acionar => { root.copiar(root.d.ip); }
+        }
+        LinhaInfo {
+            rotulo: @tr("MagicDNS");
+            valor: root.d.dns;
+            acao: @tr("Copiar");
+            acionar => { root.copiar(root.d.dns); }
+        }
+        LinhaInfo { rotulo: @tr("Último acesso"); valor: root.d.ultimo-acesso; }
+        LinhaInfo { rotulo: @tr("Teclado do dispositivo"); valor: root.d.teclado; }
+        if root.d.estado == Estado.sem-app: Text {
+            wrap: word-wrap;
+            text: @tr("Este dispositivo está na sua tailnet, mas não tem o TailDesk aberto. Instale e abra o TailDesk nele para conectar.");
+            font-size: Tema.fonte-pequena;
+            color: Tema.texto-2;
+        }
+        if root.d.estado == Estado.nao-suportado: Text {
+            wrap: word-wrap;
+            text: @tr("O TailDesk ainda não roda neste sistema. Por enquanto: Windows e Linux.");
+            font-size: Tema.fonte-pequena;
+            color: Tema.texto-2;
+        }
+    }
+}
+
+component SecaoDispositivos inherits Rectangle {
+    in property <[Dispositivo]> dispositivos;
+    in-out property <int> selecionado;
+    in-out property <string> busca;
+    callback busca-mudou(string);
+    callback conectar(Dispositivo);
+    callback testar(Dispositivo);
+    callback enviar-arquivo(Dispositivo);
+    callback copiar(string);
+    callback como-instalar();
+
+    HorizontalLayout {
+        VerticalLayout {
+            horizontal-stretch: 1;
+            padding: 20px;
+            spacing: 14px;
+            HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: @tr("Dispositivos");
+                    font-size: Tema.fonte-titulo;
+                    font-weight: 700;
+                    color: Tema.texto;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                LineEdit {
+                    width: 260px;
+                    placeholder-text: @tr("Buscar dispositivos");
+                    text <=> root.busca;
+                    edited(t) => { root.busca-mudou(t); }
+                }
+            }
+            if root.dispositivos.length == 0: Text {
+                text: @tr("Nenhum dispositivo encontrado para “{}”.", root.busca);
+                color: Tema.texto-2;
+                font-size: Tema.fonte;
+            }
+            ListView {
+                vertical-stretch: 1;
+                for d[i] in root.dispositivos: ItemDispositivo {
+                    d: d;
+                    selecionado: i == root.selecionado;
+                    selecionar => { root.selecionado = i; }
+                    conectar => { root.conectar(d); }
+                    como-instalar => { root.como-instalar(); }
+                }
+            }
+        }
+        Rectangle { width: 1px; background: Tema.borda; }
+        if root.dispositivos.length > 0: PainelDetalhe {
+            width: 300px;
+            d: root.dispositivos[root.selecionado];
+            conectar => { root.conectar(self.d); }
+            testar => { root.testar(self.d); }
+            enviar-arquivo => { root.enviar-arquivo(self.d); }
+            copiar(t) => { root.copiar(t); }
+        }
+    }
+}
+
+component LinhaTransferencia inherits HorizontalLayout {
+    in property <string> nome;
+    in property <string> detalhe;
+    in property <bool> verificado;
+    in property <bool> retomavel;
+    spacing: 12px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 3px;
+        Text { text: root.nome; font-weight: 600; color: Tema.texto; font-size: Tema.fonte; }
+        Text { text: root.detalhe; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+    }
+    VerticalLayout {
+        alignment: center;
+        Text {
+            text: root.verificado ? @tr("✓ conferido") : root.retomavel ? @tr("interrompido") : "";
+            color: root.verificado ? Tema.online : Tema.relay;
+            font-size: Tema.fonte-pequena;
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        Botao { texto: root.retomavel ? @tr("Retomar") : @tr("Abrir pasta"); altura: 28px; }
+    }
+}
+
+component SecaoTransferencias inherits VerticalLayout {
+    padding: 20px;
+    spacing: 14px;
+    alignment: start;
+    Text { text: @tr("Transferências"); font-size: Tema.fonte-titulo; font-weight: 700; color: Tema.texto; }
+    Text {
+        text: @tr("Tudo o que este computador enviou ou recebeu, de todas as sessões.");
+        color: Tema.texto-2;
+        font-size: Tema.fonte;
+    }
+    Cartao {
+        VerticalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            LinhaTransferencia {
+                nome: "relatorio-trimestral.pdf";
+                detalhe: @tr("Recebido de desktop-casa · 2,4 MB · hoje 14:02 · Downloads/TailDesk");
+                verificado: true;
+            }
+            Separador { }
+            LinhaTransferencia {
+                nome: "fotos-viagem/ (42 arquivos)";
+                detalhe: @tr("Enviado para servidor-homelab · 1,8 de 3,1 GB · conexão caiu às 13:40");
+                retomavel: true;
+            }
+            Separador { }
+            LinhaTransferencia {
+                nome: "notas (1).txt";
+                detalhe: @tr("Recebido de desktop-casa · 4 KB · renomeado: já existia notas.txt");
+                verificado: true;
+            }
+        }
+    }
+}
+
+component OpcaoConfig inherits HorizontalLayout {
+    in property <string> titulo;
+    in property <string> descricao;
+    in-out property <bool> ligado;
+    spacing: 16px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 3px;
+        Text { text: root.titulo; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+        Text { text: root.descricao; color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+    }
+    VerticalLayout {
+        alignment: center;
+        Switch { checked <=> root.ligado; }
+    }
+}
+
+component SecaoConfiguracoes inherits ScrollView {
+    in-out property <bool> aceitando;
+    callback diagnostico();
+    VerticalLayout {
+        padding: 20px;
+        spacing: 14px;
+        alignment: start;
+        Text { text: @tr("Configurações"); font-size: Tema.fonte-titulo; font-weight: 700; color: Tema.texto; }
+
+        Text { text: @tr("Este computador"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        Cartao {
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                OpcaoConfig {
+                    titulo: @tr("Aceitar conexões");
+                    descricao: @tr("Outros dispositivos da sua tailnet podem pedir acesso a este computador.");
+                    ligado <=> root.aceitando;
+                }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Pedir minha permissão a cada conexão");
+                    descricao: @tr("Desligado, só os dispositivos confiáveis abaixo entram sem perguntar. O aviso de sessão ativa aparece sempre.");
+                    ligado: true;
+                }
+                Separador { }
+                LinhaInfo { rotulo: @tr("Dispositivos confiáveis"); valor: "desktop-casa"; acao: @tr("Revogar"); }
+                Separador { }
+                LinhaInfo { rotulo: @tr("Pastas que outros podem navegar"); valor: "~/Documentos, ~/Downloads"; acao: @tr("Alterar"); }
+                Separador { }
+                LinhaInfo { rotulo: @tr("Pasta de entrada"); valor: "~/Downloads/TailDesk"; acao: @tr("Alterar"); }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Permitir que quem se conecta ouça o som deste computador");
+                    descricao: @tr("A pessoa ainda pode desmarcar o som no pedido de acesso.");
+                    ligado: true;
+                }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Permitir testes de conexão");
+                    descricao: @tr("Testes não mostram a tela nem controlam nada; ficam no registro de auditoria.");
+                    ligado: true;
+                }
+            }
+        }
+
+        Text { text: @tr("Sessão"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        Cartao {
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                LinhaInfo { rotulo: @tr("Qualidade"); valor: @tr("Automática · economizar dados desligado"); acao: @tr("Alterar"); }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Som do computador remoto");
+                    descricao: @tr("Ligado por padrão ao conectar. Desligado, nenhum áudio é transmitido.");
+                    ligado: true;
+                }
+                Separador { }
+                LinhaInfo { rotulo: @tr("Teclado"); valor: @tr("Automático (traduz entre layouts diferentes)"); acao: @tr("Alterar"); }
+                Separador { }
+                LinhaInfo { rotulo: @tr("Monitores do host"); valor: @tr("Um por vez, em abas (arraste uma aba para abrir em janela)"); acao: @tr("Alterar"); }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Seguir o mouse");
+                    descricao: @tr("Troca de aba quando o cursor muda de monitor no host.");
+                    ligado: false;
+                }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Usar todos os meus monitores");
+                    descricao: @tr("Ao abrir monitores em janelas, distribui cada um em tela cheia num monitor deste PC.");
+                    ligado: false;
+                }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Abrir em tela cheia");
+                    descricao: @tr("A sessão ocupa a tela inteira ao conectar.");
+                    ligado: false;
+                }
+            }
+        }
+
+        Text { text: @tr("Rede"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        Cartao {
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                LinhaInfo { rotulo: @tr("Tailnet"); valor: "yuri@github · Tailscale embutido"; acao: @tr("Sair"); }
+                Separador { }
+                LinhaInfo { rotulo: @tr("Diagnóstico"); valor: @tr("Versão 0.0.1 · sem erros"); acao: @tr("Abrir teste de conexão"); acionar => { root.diagnostico(); } }
+            }
+        }
+
+        // Atribuição exigida pela licença royalty-free do Slint para apps desktop.
+        Text { text: @tr("Sobre"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        AboutSlint { }
+    }
+}
+
+export component JanelaPrincipal inherits Window {
+    title: "TailDesk";
+    preferred-width: 1040px;
+    preferred-height: 660px;
+    min-width: 820px;
+    min-height: 500px;
+    background: Tema.fundo;
+    default-font-family: "Inter";
+
+    in property <[Dispositivo]> dispositivos;
+    in-out property <int> selecionado: 0;
+    in-out property <string> busca;
+    in-out property <int> secao: 0;
+    in property <string> este-pc: "notebook-yuri";
+    in-out property <bool> aceitando: true;
+    in-out property <string> toast;
+
+    callback busca-mudou(string);
+    callback conectar(Dispositivo);
+    callback testar(Dispositivo);
+    callback enviar-arquivo(Dispositivo);
+    callback simular-pedido();
+    callback diagnostico();
+
+    HorizontalLayout {
+        Rectangle {
+            width: 210px;
+            background: Tema.superficie;
+            VerticalLayout {
+                padding: 14px;
+                spacing: 4px;
+                HorizontalLayout {
+                    padding-bottom: 14px;
+                    spacing: 8px;
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 7px;
+                        background: Tema.primaria;
+                        Text { text: "T"; color: Tema.sobre-primaria; font-weight: 800; font-size: 15px; }
+                    }
+                    Text { text: "TailDesk"; font-size: 17px; font-weight: 700; color: Tema.texto; vertical-alignment: center; }
+                }
+                ItemNav { texto: @tr("Dispositivos"); ativo: root.secao == 0; clicado => { root.secao = 0; } }
+                ItemNav { texto: @tr("Transferências"); ativo: root.secao == 1; clicado => { root.secao = 1; } }
+                ItemNav { texto: @tr("Configurações"); ativo: root.secao == 2; clicado => { root.secao = 2; } }
+                Rectangle { vertical-stretch: 1; }
+                Separador { }
+                VerticalLayout {
+                    padding-top: 10px;
+                    padding-bottom: 6px;
+                    spacing: 4px;
+                    Text { text: root.este-pc + @tr(" (este PC)"); font-size: Tema.fonte-pequena; font-weight: 600; color: Tema.texto; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        VerticalLayout { alignment: center; PontoStatus { estado: root.aceitando ? Estado.online : Estado.offline; } }
+                        Text {
+                            text: root.aceitando ? @tr("Aceitando conexões") : @tr("Não aceita conexões");
+                            font-size: Tema.fonte-pequena;
+                            color: Tema.texto-2;
+                        }
+                    }
+                }
+                Botao {
+                    texto: @tr("Simular pedido recebido");
+                    discreto: true;
+                    altura: 28px;
+                    clicado => { root.simular-pedido(); }
+                }
+            }
+        }
+        Rectangle { width: 1px; background: Tema.borda; }
+        if root.secao == 0: SecaoDispositivos {
+            horizontal-stretch: 1;
+            dispositivos: root.dispositivos;
+            selecionado <=> root.selecionado;
+            busca <=> root.busca;
+            busca-mudou(t) => { root.busca-mudou(t); }
+            conectar(d) => { root.conectar(d); }
+            testar(d) => { root.testar(d); }
+            enviar-arquivo(d) => { root.enviar-arquivo(d); }
+            copiar(t) => { root.toast = @tr("Copiado: {}", t); }
+            como-instalar => { root.toast = @tr("Instale o TailDesk nesse dispositivo e abra o app; ele aparece aqui sozinho."); }
+        }
+        if root.secao == 1: SecaoTransferencias { horizontal-stretch: 1; }
+        if root.secao == 2: SecaoConfiguracoes { horizontal-stretch: 1; aceitando <=> root.aceitando; diagnostico => { root.diagnostico(); } }
+    }
+
+    Toast {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 20px;
+        texto: root.toast;
+    }
+    Timer {
+        interval: 3s;
+        running: root.toast != "";
+        triggered => { root.toast = ""; }
+    }
+}

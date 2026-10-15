@@ -1,0 +1,818 @@
+// Janela da sessão no controlador (levantamento §5.3, §5.6 e §5.7). A "tela remota" é um desenho estático.
+import { Slider } from "std-widgets.slint";
+import { Tema } from "tema.slint";
+import { Botao, Separador, BarraProgresso, Toast, Cartao } from "componentes.slint";
+
+export enum Etapa { procurando, esperando, conectada, reconectando, recusada, sem-resposta }
+export enum ModoTeclado { auto, fisico, texto }
+
+export struct Monitor {
+    nome: string,
+    resolucao: string,
+    principal: bool,
+    liberado: bool,
+    destacado: bool,
+}
+
+// Desenho de um desktop remoto, só para dar contexto às sobreposições. Cada monitor tem um conteúdo.
+component TelaRemotaFalsa inherits Rectangle {
+    in property <string> texto-digitado;
+    in property <int> variante;
+    background: variante == 2 ? @linear-gradient(135deg, #312e81 0%, #7c3aed 100%)
+        : @linear-gradient(135deg, #1d4ed8 0%, #0ea5e9 55%, #a5f3fc 100%);
+    clip: true;
+
+    if root.variante == 1: Rectangle {
+        x: parent.width * 0.10;
+        y: parent.height * 0.10;
+        width: parent.width * 0.78;
+        height: parent.height * 0.70;
+        background: #ffffff;
+        border-radius: 8px;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000055;
+        clip: true;
+        Rectangle {
+            y: 0;
+            height: 34px;
+            background: #107c41;
+            Text { x: 12px; text: "orcamento-2026.xlsx - Excel"; color: #fff; font-size: 12px; vertical-alignment: center; height: parent.height; }
+        }
+        for linha in 14: Rectangle {
+            y: 44px + linha * 26px;
+            height: 1px;
+            background: #e2e2e2;
+        }
+        for coluna in 7: Rectangle {
+            x: 40px + coluna * 110px;
+            y: 34px;
+            width: 1px;
+            background: #e2e2e2;
+        }
+        Text { x: 50px; y: 50px; text: "Mês        Receita      Despesa      Saldo"; color: #222; font-size: 13px; font-family: "DejaVu Sans Mono"; }
+        Text { x: 50px; y: 76px; text: "Jan        12.400       9.820        2.580"; color: #222; font-size: 13px; font-family: "DejaVu Sans Mono"; }
+        Text { x: 50px; y: 102px; text: "Fev        11.950       10.110       1.840"; color: #222; font-size: 13px; font-family: "DejaVu Sans Mono"; }
+    }
+    if root.variante == 2: Rectangle {
+        x: parent.width * 0.12;
+        y: parent.height * 0.14;
+        width: parent.width * 0.62;
+        height: parent.height * 0.56;
+        background: #1e1e2e;
+        border-radius: 8px;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000077;
+        Text {
+            x: 16px;
+            y: 16px;
+            text: "yuri@homelab:~$ systemctl status nginx\n● nginx.service - A high performance web server\n     Active: active (running) since seg 2026-10-13\nyuri@homelab:~$ ▏";
+            color: #cdd6f4;
+            font-family: "DejaVu Sans Mono";
+            font-size: 14px;
+        }
+    }
+    if root.variante == 0: Rectangle {
+        x: parent.width * 0.16;
+        y: parent.height * 0.12;
+        width: parent.width * 0.58;
+        height: parent.height * 0.62;
+        background: #ffffff;
+        border-radius: 8px;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000055;
+        Rectangle {
+            y: 0;
+            height: 34px;
+            background: #f3f3f3;
+            border-radius: 8px;
+            Text { x: 12px; text: "Sem título - Bloco de Notas"; color: #222; font-size: 12px; vertical-alignment: center; height: parent.height; }
+            Text { x: parent.width - 80px; text: "—   ▢   ✕"; color: #444; font-size: 12px; vertical-alignment: center; height: parent.height; }
+        }
+        Text {
+            x: 16px;
+            y: 48px;
+            width: parent.width - 32px;
+            text: root.texto-digitado + "▏";
+            color: #111;
+            font-family: "DejaVu Sans Mono";
+            font-size: 15px;
+            wrap: word-wrap;
+        }
+    }
+    Rectangle {
+        y: parent.height - 44px;
+        height: 44px;
+        background: #f2f4f8e6;
+        HorizontalLayout {
+            alignment: center;
+            spacing: 10px;
+            padding: 8px;
+            for c in [#1d4ed8, #f59e0b, #10b981, #6366f1, #ef4444]: Rectangle {
+                width: 28px;
+                border-radius: 6px;
+                background: c;
+            }
+        }
+        Text { x: parent.width - 70px; height: parent.height; vertical-alignment: center; text: "14:32"; color: #222; font-size: 12px; }
+    }
+}
+
+component ItemMenu inherits Rectangle {
+    in property <string> titulo;
+    in property <string> descricao;
+    in property <bool> marcado;
+    callback clicado();
+    accessible-role: button;
+    accessible-label: titulo;
+    height: descricao == "" ? 34px : 50px;
+    border-radius: 6px;
+    background: toque.has-hover ? Tema.superficie-2 : transparent;
+    toque := TouchArea { clicked => { root.clicado(); } }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        Text { width: 14px; text: root.marcado ? "✓" : ""; color: Tema.primaria; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.titulo; color: Tema.texto; font-size: Tema.fonte; }
+            if root.descricao != "": Text { text: root.descricao; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        }
+    }
+}
+
+component BotaoBarra inherits Rectangle {
+    in property <string> texto;
+    in property <bool> ativo;
+    in property <bool> perigo;
+    callback clicado();
+    accessible-role: button;
+    accessible-label: texto;
+    width: rotulo.preferred-width + 20px;
+    height: 30px;
+    border-radius: 6px;
+    background: ativo ? Tema.primaria.with-alpha(0.18) : toque.has-hover ? Tema.superficie-2 : transparent;
+    toque := TouchArea { clicked => { root.clicado(); } }
+    rotulo := Text {
+        text: root.texto;
+        color: root.perigo ? Tema.perigo : root.ativo ? Tema.primaria : Tema.texto;
+        font-size: Tema.fonte;
+        font-weight: 500;
+    }
+}
+
+component AbaMonitor inherits Rectangle {
+    in property <int> indice;
+    in property <Monitor> m;
+    in property <bool> ativa;
+    in property <bool> pode-destacar;
+    callback selecionar();
+    callback destacar();
+    accessible-role: tab;
+    accessible-label: @tr("Monitor {} {}", indice + 1, m.nome);
+    width: linha.preferred-width;
+    height: 30px;
+    border-radius: 6px;
+    background: ativa ? Tema.primaria.with-alpha(0.18) : toque.has-hover ? Tema.superficie-2 : transparent;
+    toque := TouchArea { clicked => { root.selecionar(); } }
+    linha := HorizontalLayout {
+        padding-left: 10px;
+        padding-right: root.ativa && root.pode-destacar && !root.m.destacado ? 4px : 10px;
+        spacing: 6px;
+        Text {
+            vertical-alignment: center;
+            text: (root.indice + 1) + " · " + root.m.nome + (root.m.principal ? " ★" : "");
+            color: !root.m.liberado || root.m.destacado ? Tema.texto-2 : root.ativa ? Tema.primaria : Tema.texto;
+            font-size: Tema.fonte;
+            font-weight: root.ativa ? 600 : 400;
+            font-italic: root.m.destacado;
+        }
+        if root.m.destacado: Text { vertical-alignment: center; text: @tr("em janela"); color: Tema.texto-2; font-size: 11px; }
+        if !root.m.liberado: Text { vertical-alignment: center; text: @tr("não liberado"); color: Tema.texto-2; font-size: 11px; }
+        // "Abrir em janela": no app real também dá para arrastar a aba para fora.
+        if root.ativa && root.pode-destacar && !root.m.destacado: Rectangle {
+            width: 22px;
+            border-radius: 4px;
+            accessible-role: button;
+            accessible-label: @tr("Abrir em janela");
+            background: toque-destacar.has-hover ? Tema.primaria.with-alpha(0.25) : transparent;
+            toque-destacar := TouchArea { clicked => { root.destacar(); } }
+            Text { text: "⧉"; color: Tema.primaria; font-size: 14px; }
+        }
+    }
+}
+
+component Divisor inherits Rectangle {
+    width: 1px;
+    height: 18px;
+    background: Tema.borda;
+}
+
+component LinhaArquivo inherits VerticalLayout {
+    vertical-stretch: 0;
+    in property <string> nome;
+    in property <string> detalhe;
+    in property <float> progresso: 1;
+    in property <bool> concluido;
+    in property <string> acao;
+    spacing: 4px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    HorizontalLayout {
+        spacing: 8px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text { text: root.nome; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; overflow: elide; }
+            Text { text: root.detalhe; color: root.concluido ? Tema.online : Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+        }
+        if root.acao != "": VerticalLayout {
+            alignment: center;
+            Botao { texto: root.acao; altura: 26px; discreto: true; }
+        }
+    }
+    if !root.concluido: BarraProgresso { valor: root.progresso; }
+}
+
+component ItemNavegador inherits Rectangle {
+    in property <string> nome;
+    in property <string> info;
+    in property <bool> pasta;
+    in property <bool> bloqueado;
+    height: 40px;
+    border-radius: 6px;
+    background: toque.has-hover && !bloqueado ? Tema.superficie-2 : transparent;
+    toque := TouchArea { }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        Text { width: 18px; text: root.pasta ? "▸" : "·"; color: Tema.texto-2; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text { text: root.nome; color: root.bloqueado ? Tema.texto-2 : Tema.texto; font-size: Tema.fonte; overflow: elide; }
+            Text { text: root.info; color: Tema.texto-2; font-size: 11px; }
+        }
+        if !root.pasta && !root.bloqueado: VerticalLayout {
+            alignment: center;
+            Botao { texto: @tr("Baixar"); altura: 26px; discreto: true; }
+        }
+    }
+}
+
+component PainelArquivos inherits Rectangle {
+    in-out property <int> aba: 0;
+    in property <string> host;
+    callback fechar();
+    background: Tema.superficie;
+    drop-shadow-blur: 16px;
+    drop-shadow-color: Tema.sombra;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            Text { text: @tr("Arquivos"); font-size: 16px; font-weight: 700; color: Tema.texto; horizontal-stretch: 1; vertical-alignment: center; }
+            Botao { texto: "✕"; discreto: true; altura: 28px; clicado => { root.fechar(); } }
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            BotaoBarra { texto: @tr("Transferências"); ativo: root.aba == 0; clicado => { root.aba = 0; } }
+            BotaoBarra { texto: @tr("Navegar no host"); ativo: root.aba == 1; clicado => { root.aba = 1; } }
+        }
+        Separador { }
+        if root.aba == 0: VerticalLayout {
+            alignment: start;
+            spacing: 4px;
+            vertical-stretch: 1;
+            Rectangle {
+                height: 64px;
+                border-radius: Tema.raio;
+                border-width: 1px;
+                border-color: Tema.borda;
+                background: Tema.fundo;
+                Text {
+                    width: parent.width - 24px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    text: @tr("Arraste arquivos para a janela para enviar a {}", root.host);
+                    color: Tema.texto-2;
+                    font-size: Tema.fonte-pequena;
+                }
+            }
+            LinhaArquivo {
+                nome: "relatorio-trimestral.pdf";
+                detalhe: @tr("✓ Salvo em Downloads/TailDesk");
+                concluido: true;
+                acao: @tr("Abrir pasta");
+            }
+            Separador { }
+            LinhaArquivo {
+                nome: "fotos-viagem/ (42 arquivos)";
+                detalhe: @tr("Enviando · 1,9 de 3,1 GB · 38 MB/s · 4 em paralelo");
+                progresso: 0.61;
+                acao: @tr("Pausar");
+            }
+            Separador { }
+            LinhaArquivo {
+                nome: "notas (1).txt";
+                detalhe: @tr("✓ Recebido. Renomeado porque já existia notas.txt");
+                concluido: true;
+                acao: @tr("Abrir pasta");
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+        if root.aba == 1: VerticalLayout {
+            spacing: 2px;
+            vertical-stretch: 1;
+            Text { text: "Documentos  /  Projetos"; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+            Text { text: @tr("Só as pastas que {} liberou aparecem aqui.", root.host); color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+            Rectangle { height: 6px; }
+            ItemNavegador { nome: "taildesk"; info: @tr("pasta · ontem"); pasta: true; }
+            ItemNavegador { nome: "orcamento-2026.xlsx"; info: "84 KB · 12/10/2026"; }
+            ItemNavegador { nome: "apresentacao.pptx"; info: "12,3 MB · 09/10/2026"; }
+            ItemNavegador { nome: "build-windows.zip"; info: "220 MB · hoje 11:20"; }
+            ItemNavegador { nome: "C:\\Windows"; info: @tr("Sem permissão"); pasta: true; bloqueado: true; }
+            Rectangle { vertical-stretch: 1; }
+            Botao { texto: @tr("Enviar daqui para lá…"); }
+        }
+    }
+}
+
+export component JanelaSessao inherits Window {
+    title: root.destacada ? @tr("{} · Monitor {} · TailDesk", root.host, root.monitor-unico + 1) : root.host + " · TailDesk";
+    preferred-width: 1280px;
+    preferred-height: 760px;
+    min-width: 800px;
+    min-height: 500px;
+    background: #000000;
+    default-font-family: "Inter";
+
+    in property <string> host: "desktop-casa";
+    in property <string> so-host: "Windows 11";
+    in property <string> teclado-local: "ABNT2";
+    in property <string> teclado-host: "US-Intl";
+    in property <[Monitor]> monitores: [
+        { nome: "DELL U2720Q", resolucao: "2560×1440", principal: true, liberado: true, destacado: false },
+        { nome: "LG 24MK600", resolucao: "1920×1080", principal: false, liberado: true, destacado: false },
+    ];
+    // Quantos monitores liberados ainda estão em abas (não destacados); a última aba não pode sair.
+    in property <int> monitores-em-abas: 2;
+    // >= 0: esta janela mostra só esse monitor, destacado da janela principal da sessão.
+    in property <int> monitor-unico: -1;
+    in property <bool> host-wayland: false;
+    in-out property <bool> seguir-mouse: false;
+    // Áudio (15-audio.md §8): desligar corta o tráfego; o volume é só local.
+    in-out property <bool> som: true;
+    in-out property <float> volume: 70;
+    in-out property <int> perfil-som: 0;
+    in property <bool> som-permitido: true;
+    in-out property <Etapa> etapa: Etapa.procurando;
+    in-out property <bool> via-relay: false;
+    in-out property <ModoTeclado> modo-teclado: ModoTeclado.auto;
+    in-out property <int> monitor: 0;
+    in-out property <bool> barra-fixada: true;
+    in-out property <bool> hud: false;
+    in-out property <bool> painel-arquivos: false;
+    in-out property <int> aba-arquivos: 0;
+    in-out property <bool> ajustar: true;
+    in-out property <string> toast;
+    // Quando verdadeiro, as etapas avançam sozinhas (demonstração interativa).
+    in property <bool> simular: true;
+
+    callback desconectar();
+    callback destacar(int);
+    callback voltar-para-abas();
+    callback diagnostico();
+
+    public function abrir-menu-monitores() { menu-monitores.show(); }
+    public function abrir-menu-som() { menu-som.show(); }
+
+    property <int> monitor-exibido: root.monitor-unico >= 0 ? root.monitor-unico : root.monitor;
+    property <bool> destacada: root.monitor-unico >= 0;
+
+    property <bool> layouts-iguais: root.teclado-local == root.teclado-host;
+    property <string> rotulo-teclado:
+        root.modo-teclado == ModoTeclado.fisico ? @tr("Teclado: físico")
+        : root.modo-teclado == ModoTeclado.texto ? @tr("Teclado: texto")
+        : root.layouts-iguais ? @tr("Teclado: {} (iguais)", root.teclado-host)
+        : @tr("Teclado: {} → {}", root.teclado-local, root.teclado-host);
+    property <bool> barra-visivel: root.barra-fixada || area-topo.has-hover || toque-barra.has-hover;
+
+    Timer {
+        interval: 1200ms;
+        running: root.simular && root.etapa == Etapa.procurando;
+        triggered => { root.etapa = Etapa.esperando; }
+    }
+    Timer {
+        interval: 2500ms;
+        running: root.simular && root.etapa == Etapa.esperando;
+        triggered => {
+            root.etapa = Etapa.conectada;
+            if !root.layouts-iguais {
+                root.toast = @tr("Teclado: {} → {} (tradução automática)", root.teclado-local, root.teclado-host);
+            }
+        }
+    }
+    Timer {
+        interval: 3s;
+        running: root.simular && root.etapa == Etapa.reconectando;
+        triggered => { root.etapa = Etapa.conectada; root.toast = @tr("Reconectado."); }
+    }
+    Timer {
+        interval: 4s;
+        running: root.toast != "";
+        triggered => { root.toast = ""; }
+    }
+
+    TelaRemotaFalsa {
+        variante: root.monitor-exibido;
+        texto-digitado: "Ação, café e pão. Olá, mundo! ç Ç á é ã õ ü / ?";
+        opacity: root.etapa == Etapa.conectada || root.etapa == Etapa.reconectando ? 1 : 0.15;
+        width: root.ajustar ? parent.width : 1600px;
+        height: root.ajustar ? parent.height : 900px;
+    }
+
+    // Faixa invisível no topo: passar o mouse revela a barra quando ela não está fixada.
+    area-topo := TouchArea {
+        y: 0;
+        height: 10px;
+    }
+
+    if root.etapa == Etapa.conectada || root.etapa == Etapa.reconectando: Rectangle {
+        // Alça visível quando a barra está recolhida.
+        x: (parent.width - 64px) / 2;
+        y: 4px;
+        width: 64px;
+        height: 6px;
+        border-radius: 3px;
+        background: #ffffffaa;
+        visible: !root.barra-visivel;
+    }
+
+    barra := Rectangle {
+        visible: root.barra-visivel && (root.etapa == Etapa.conectada || root.etapa == Etapa.reconectando);
+        // Centralizada no espaço que sobra ao lado do painel de arquivos.
+        x: (parent.width - (root.painel-arquivos ? 340px : 0px) - self.width) / 2;
+        y: 8px;
+        width: linha-barra.preferred-width;
+        height: 42px;
+        border-radius: 10px;
+        background: Tema.superficie;
+        drop-shadow-blur: 14px;
+        drop-shadow-color: Tema.sombra;
+        toque-barra := TouchArea { }
+        linha-barra := HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 6px;
+            spacing: 4px;
+            alignment: center;
+            VerticalLayout {
+                alignment: center;
+                Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.via-relay ? Tema.relay : Tema.online; }
+            }
+            VerticalLayout {
+                alignment: center;
+                padding-left: 4px;
+                padding-right: 6px;
+                Text { text: root.host; color: Tema.texto; font-size: Tema.fonte; font-weight: 700; }
+            }
+            VerticalLayout { alignment: center; Divisor { } }
+            if root.destacada: VerticalLayout {
+                alignment: center;
+                padding-left: 6px;
+                padding-right: 6px;
+                Text {
+                    text: @tr("Monitor {} · {}", root.monitor-unico + 1, root.monitores[root.monitor-unico].nome);
+                    color: Tema.texto;
+                    font-size: Tema.fonte;
+                }
+            }
+            if root.destacada: VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: @tr("Voltar para abas"); clicado => { root.voltar-para-abas(); } }
+            }
+            if !root.destacada && root.monitores.length > 1: HorizontalLayout {
+                spacing: 2px;
+                for m[i] in root.monitores: VerticalLayout {
+                    alignment: center;
+                    AbaMonitor {
+                        indice: i;
+                        m: m;
+                        ativa: i == root.monitor;
+                        pode-destacar: root.monitores-em-abas > 1;
+                        selecionar => {
+                            if !m.liberado {
+                                root.toast = @tr("O monitor {} não foi liberado em {}. Pedir acesso abre o diálogo do sistema lá.", i + 1, root.host);
+                            } else if m.destacado {
+                                root.toast = @tr("O monitor {} está aberto em outra janela.", i + 1);
+                            } else {
+                                root.monitor = i;
+                            }
+                        }
+                        destacar => { root.destacar(i); }
+                    }
+                }
+            }
+            if !root.destacada && root.monitores.length > 1: VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: "▾"; clicado => { menu-monitores.show(); } }
+            }
+            if !root.destacada && root.monitores.length > 1: VerticalLayout { alignment: center; Divisor { } }
+            VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: root.rotulo-teclado + "  ▾"; clicado => { menu-teclado.show(); } }
+            }
+            if !root.destacada: VerticalLayout {
+                alignment: center;
+                BotaoBarra {
+                    texto: !root.som-permitido ? @tr("Sem som") : root.som ? @tr("Som ▾") : @tr("Som desligado ▾");
+                    ativo: root.som && root.som-permitido;
+                    clicado => {
+                        if root.som-permitido { menu-som.show(); } else { root.toast = @tr("O computador remoto desligou o som."); }
+                    }
+                }
+            }
+            if !root.destacada: VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: @tr("Arquivos"); ativo: root.painel-arquivos; clicado => { root.painel-arquivos = !root.painel-arquivos; } }
+            }
+            VerticalLayout {
+                alignment: center;
+                BotaoBarra {
+                    texto: root.barra-fixada ? @tr("Recolher barra") : @tr("Fixar barra");
+                    clicado => { root.barra-fixada = !root.barra-fixada; }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: "⋯"; clicado => { menu-mais.show(); } }
+            }
+            VerticalLayout { alignment: center; Divisor { } }
+            VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: @tr("Desconectar"); perigo: true; clicado => { root.desconectar(); } }
+            }
+        }
+    }
+
+    menu-monitores := PopupWindow {
+        x: barra.x + 120px;
+        y: barra.y + barra.height + 6px;
+        width: 410px;
+        Rectangle {
+            background: Tema.superficie;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tema.borda;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Tema.sombra;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                Text { text: @tr("Monitores de {}", root.host); color: Tema.texto; font-size: Tema.fonte; font-weight: 700; }
+                // Miniatura do layout do host: clicar num retângulo troca de monitor.
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: center;
+                    for m[i] in root.monitores: Rectangle {
+                        width: m.principal ? 120px : 96px;
+                        height: m.principal ? 68px : 54px;
+                        border-radius: 4px;
+                        border-width: i == root.monitor ? 2px : 1px;
+                        border-color: i == root.monitor ? Tema.primaria : Tema.borda;
+                        background: !m.liberado ? Tema.superficie-2 : Tema.primaria.with-alpha(0.08);
+                        TouchArea { clicked => { if m.liberado && !m.destacado { root.monitor = i; } } }
+                        VerticalLayout {
+                            alignment: center;
+                            Text { horizontal-alignment: center; text: i + 1; font-size: 16px; font-weight: 700; color: m.liberado ? Tema.texto : Tema.texto-2; }
+                            Text { horizontal-alignment: center; text: m.liberado ? m.resolucao : @tr("não liberado"); font-size: 10px; color: Tema.texto-2; }
+                        }
+                    }
+                }
+                Separador { }
+                ItemMenu {
+                    titulo: @tr("Um por vez (abas)");
+                    descricao: @tr("Clique numa aba para trocar de monitor.");
+                    marcado: true;
+                }
+                ItemMenu {
+                    titulo: @tr("Abrir monitor {} em janela", root.monitor + 1);
+                    descricao: @tr("Ou arraste a aba para fora da barra.");
+                    clicado => { if root.monitores-em-abas > 1 { root.destacar(root.monitor); } }
+                }
+                ItemMenu {
+                    titulo: @tr("Seguir o mouse");
+                    descricao: @tr("Troca de aba quando o cursor muda de monitor no host.");
+                    marcado: root.seguir-mouse;
+                    clicado => { root.seguir-mouse = !root.seguir-mouse; }
+                }
+                if root.host-wayland: Text {
+                    wrap: word-wrap;
+                    text: @tr("{} usa Wayland: só aparecem os monitores que a pessoa liberou no diálogo do sistema. Pedir outro monitor abre esse diálogo de novo lá.", root.host);
+                    color: Tema.texto-2;
+                    font-size: Tema.fonte-pequena;
+                }
+            }
+        }
+    }
+
+    menu-som := PopupWindow {
+        x: barra.x + barra.width - 560px;
+        y: barra.y + barra.height + 6px;
+        width: 360px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Tema.superficie;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tema.borda;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Tema.sombra;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                Text { text: @tr("Som do computador remoto"); color: Tema.texto; font-size: Tema.fonte; font-weight: 700; }
+                ItemMenu {
+                    titulo: root.som ? @tr("Ligado") : @tr("Desligado");
+                    descricao: root.som ? @tr("Clique para desligar: nenhum áudio é transmitido.") : @tr("Desligado: nenhum áudio é transmitido.");
+                    marcado: root.som;
+                    clicado => { root.som = !root.som; }
+                }
+                Text { text: @tr("Volume (continua recebendo áudio)"); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+                Slider { minimum: 0; maximum: 100; value <=> root.volume; enabled: root.som; }
+                Text { text: @tr("Perfil"); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+                HorizontalLayout {
+                    spacing: 4px;
+                    BotaoBarra { texto: @tr("Automático"); ativo: root.perfil-som == 0; clicado => { root.perfil-som = 0; } }
+                    BotaoBarra { texto: @tr("Voz"); ativo: root.perfil-som == 1; clicado => { root.perfil-som = 1; } }
+                    BotaoBarra { texto: @tr("Música"); ativo: root.perfil-som == 2; clicado => { root.perfil-som = 2; } }
+                }
+            }
+        }
+    }
+
+    menu-teclado := PopupWindow {
+        x: barra.x + (root.monitores.length > 1 && !root.destacada ? 430px : 180px);
+        y: barra.y + barra.height + 6px;
+        width: 340px;
+        Rectangle {
+            background: Tema.superficie;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tema.borda;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Tema.sombra;
+            VerticalLayout {
+                padding: 6px;
+                Text {
+                    text: @tr("Este PC: {}  ·  {}: {}", root.teclado-local, root.host, root.teclado-host);
+                    color: Tema.texto-2;
+                    font-size: Tema.fonte-pequena;
+                    horizontal-alignment: left;
+                }
+                Rectangle { height: 4px; }
+                ItemMenu {
+                    titulo: @tr("Automático (recomendado)");
+                    descricao: @tr("Digita o que você vê no seu teclado e mantém os atalhos.");
+                    marcado: root.modo-teclado == ModoTeclado.auto;
+                    clicado => { root.modo-teclado = ModoTeclado.auto; }
+                }
+                ItemMenu {
+                    titulo: @tr("Físico");
+                    descricao: @tr("Envia a posição das teclas. Para jogos.");
+                    marcado: root.modo-teclado == ModoTeclado.fisico;
+                    clicado => { root.modo-teclado = ModoTeclado.fisico; }
+                }
+                ItemMenu {
+                    titulo: @tr("Texto");
+                    descricao: @tr("Envia só caracteres. Atalhos podem não funcionar.");
+                    marcado: root.modo-teclado == ModoTeclado.texto;
+                    clicado => { root.modo-teclado = ModoTeclado.texto; }
+                }
+            }
+        }
+    }
+
+    menu-mais := PopupWindow {
+        x: barra.x + barra.width - 290px;
+        y: barra.y + barra.height + 6px;
+        width: 290px;
+        Rectangle {
+            background: Tema.superficie;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tema.borda;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Tema.sombra;
+            VerticalLayout {
+                padding: 6px;
+                ItemMenu { titulo: @tr("Enviar Ctrl+Alt+Del"); clicado => { root.toast = @tr("Ctrl+Alt+Del enviado para {}.", root.host); } }
+                ItemMenu {
+                    titulo: root.ajustar ? @tr("Tamanho real") : @tr("Ajustar à janela");
+                    clicado => { root.ajustar = !root.ajustar; }
+                }
+                ItemMenu { titulo: @tr("Mostrar informações da conexão"); marcado: root.hud; clicado => { root.hud = !root.hud; } }
+                ItemMenu { titulo: @tr("Diagnóstico da conexão"); clicado => { root.diagnostico(); } }
+                Separador { }
+                ItemMenu {
+                    titulo: @tr("Simular: conexão via relay");
+                    marcado: root.via-relay;
+                    clicado => {
+                        root.via-relay = !root.via-relay;
+                        if root.via-relay { root.toast = @tr("Conexão via relay do Tailscale. A imagem pode ficar mais lenta."); }
+                    }
+                }
+                ItemMenu { titulo: @tr("Simular: queda de conexão"); clicado => { root.etapa = Etapa.reconectando; } }
+                ItemMenu {
+                    titulo: @tr("Simular: caractere impossível");
+                    clicado => { root.toast = @tr("Não foi possível digitar ‘ß’ em {}.", root.host); }
+                }
+            }
+        }
+    }
+
+    if root.hud || root.via-relay: Rectangle {
+        x: parent.width - self.width - (root.painel-arquivos ? 360px : 16px);
+        y: parent.height - self.height - 60px;
+        width: 190px;
+        height: 70px;
+        border-radius: 8px;
+        background: #000000b0;
+        VerticalLayout {
+            padding: 10px;
+            spacing: 2px;
+            Text { text: root.via-relay ? @tr("48 ms · via relay · Média") : @tr("9 ms · direto · LAN"); color: root.via-relay ? #ffcc4d : #7ee2a8; font-size: Tema.fonte; font-weight: 700; }
+            Text { text: root.via-relay ? "1080p · 30 fps · 6 Mbit/s" : "1080p · 60 fps · 18 Mbit/s"; color: #ffffff; font-size: Tema.fonte-pequena; }
+            Text { text: "H.264 · openh264"; color: #ffffffaa; font-size: 11px; }
+        }
+    }
+
+    if root.painel-arquivos && root.etapa == Etapa.conectada: PainelArquivos {
+        x: parent.width - self.width;
+        y: 0;
+        width: 340px;
+        height: parent.height;
+        host: root.host;
+        aba <=> root.aba-arquivos;
+        fechar => { root.painel-arquivos = false; }
+    }
+
+    // Etapas antes de conectar e falhas (§5.3 e §6 F2/F7).
+    if root.etapa != Etapa.conectada: Rectangle {
+        background: root.etapa == Etapa.reconectando ? #00000080 : transparent;
+        Cartao {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 420px;
+            height: cartao-etapa.preferred-height;
+            drop-shadow-blur: 20px;
+            drop-shadow-color: Tema.sombra;
+            cartao-etapa := VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                Text {
+                    wrap: word-wrap;
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: Tema.texto;
+                    text: root.etapa == Etapa.procurando ? @tr("Encontrando {}…", root.host)
+                        : root.etapa == Etapa.esperando ? @tr("Esperando {} permitir o acesso…", root.host)
+                        : root.etapa == Etapa.reconectando ? @tr("Conexão perdida. Reconectando…")
+                        : root.etapa == Etapa.recusada ? @tr("{} recusou o acesso.", root.host)
+                        : @tr("Ninguém respondeu em {}.", root.host);
+                }
+                Text {
+                    wrap: word-wrap;
+                    font-size: Tema.fonte;
+                    color: Tema.texto-2;
+                    text: root.etapa == Etapa.procurando ? @tr("Procurando o melhor caminho na sua tailnet.")
+                        : root.etapa == Etapa.esperando ? @tr("Alguém em {} precisa clicar em Permitir. O pedido expira em 60 segundos.", root.host)
+                        : root.etapa == Etapa.reconectando ? @tr("A sessão continua aberta. Nada do que está em {} foi perdido.", root.host)
+                        : root.etapa == Etapa.recusada ? @tr("Você pode tentar de novo mais tarde.")
+                        : @tr("Tente de novo quando houver alguém lá.");
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    if root.etapa == Etapa.recusada || root.etapa == Etapa.sem-resposta: Botao {
+                        texto: @tr("Tentar de novo");
+                        clicado => { root.etapa = Etapa.procurando; }
+                    }
+                    Botao {
+                        texto: root.etapa == Etapa.recusada || root.etapa == Etapa.sem-resposta ? @tr("Fechar") : @tr("Cancelar");
+                        clicado => { root.desconectar(); }
+                    }
+                }
+            }
+        }
+    }
+
+    Toast {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 64px;
+        texto: root.toast;
+    }
+}
