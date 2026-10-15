@@ -67,7 +67,15 @@ jobs:
           tool: cargo-deb,cargo-generate-rpm
       - name: zsyncmake (gera o .zsync do AppImage para auto update)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq zsync
+      # O crate pipewire 0.10 não compila com os cabeçalhos 0.3.48 do 22.04: usa os da 1.0.5
+      # (Ubuntu 24.04) e liga a biblioteca do sistema; o passo seguinte confere os símbolos.
+      - name: Cabeçalhos da PipeWire 1.0.5
+        run: |
+          packaging/linux/pipewire-headers.sh 1.0.5 "$RUNNER_TEMP/pipewire"
+          echo "PKG_CONFIG_PATH=$RUNNER_TEMP/pipewire/lib/pkgconfig" >> "$GITHUB_ENV"
       - run: cargo build --release --locked -p taildesk -p taildesk-cli
+      - name: Símbolos da PipeWire presentes na 0.3.48 do sistema
+        run: packaging/linux/check-pipewire-symbols.sh /usr/lib/x86_64-linux-gnu/libpipewire-0.3.so.0 target/release/taildesk target/release/taildesk-cli
       - run: packaging/linux/build-packages.sh "${{ needs.version.outputs.version }}" dist
       - name: Teste rápido do AppImage e do tar.gz
         run: |
