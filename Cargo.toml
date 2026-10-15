@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yurisanp/taildesk"
+
+[workspace.dependencies]
+taildesk-proto = { path = "crates/taildesk-proto" }
+taildesk-overlay = { path = "crates/taildesk-overlay" }
+taildesk-tsapi = { path = "crates/taildesk-tsapi" }
+taildesk-transport = { path = "crates/taildesk-transport" }
+taildesk-codec = { path = "crates/taildesk-codec" }
+taildesk-media = { path = "crates/taildesk-media" }
+taildesk-platform = { path = "crates/taildesk-platform" }
+taildesk-render = { path = "crates/taildesk-render" }
+taildesk-files = { path = "crates/taildesk-files" }
+taildesk-keyboard = { path = "crates/taildesk-keyboard" }
+taildesk-session = { path = "crates/taildesk-session" }
+taildesk-ui = { path = "crates/taildesk-ui" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

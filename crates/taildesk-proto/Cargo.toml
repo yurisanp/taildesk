@@ -1,0 +1,14 @@
+[package]
+name = "taildesk-proto"
+description = "Protocolo de fio: mensagens de controle e header binário de mídia."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+
+
+[lints]
+workspace = true
