@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 taildesk-keyboard.workspace = true
+taildesk-proto.workspace = true
 
 # Pergunta ao D-Bus se há bandeja (StatusNotifierWatcher). O Slint já traz o zbus para a bandeja.
 [target.'cfg(target_os = "linux")'.dependencies]

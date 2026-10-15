@@ -6,6 +6,7 @@
 #[cfg(target_os = "linux")]
 pub mod captura_pipewire;
 pub mod instancia;
+pub mod mouse;
 pub mod teclado;
 #[cfg(target_os = "linux")]
 pub mod wayland;
