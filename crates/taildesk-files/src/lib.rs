@@ -6,7 +6,8 @@
 //! - [`xfer`]: envio e recepção dos bytes (stream de dados, BLAKE3, `.part`, retomada);
 //! - [`listing`]: listagem para o navegador remoto e envio de pastas;
 //! - [`service`]: sessão de arquivos (mensagens 80–89, streams, vagas, permissões);
-//! - [`audit`]: registro local de cada transferência.
+//! - [`audit`]: registro local de cada transferência;
+//! - [`panel`]: estado da faixa de transferências e do navegador do host, para a interface.
 //!
 //! As mensagens de controle estão em `taildesk_proto::files`.
 
@@ -16,6 +17,7 @@ use std::path::{Component, Path, PathBuf};
 
 pub mod audit;
 pub mod listing;
+pub mod panel;
 pub mod service;
 pub mod xfer;
 
