@@ -18,6 +18,10 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+      # O Slint (apps/taildesk-prototipo) liga o fontconfig via pkg-config no build.
+      - name: Dependências do sistema (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - name: Toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -37,10 +41,10 @@ jobs:
         include:
           - distro: fedora
             image: fedora:latest
-            deps: dnf install -y --setopt=install_weak_deps=False gcc git curl
+            deps: dnf install -y --setopt=install_weak_deps=False gcc git curl pkgconf-pkg-config fontconfig-devel
           - distro: archlinux
             image: archlinux:latest
-            deps: pacman -Syu --noconfirm --needed base-devel git curl
+            deps: pacman -Syu --noconfirm --needed base-devel git curl fontconfig
     steps:
       - name: Dependências do sistema
         run: ${{ matrix.deps }}
