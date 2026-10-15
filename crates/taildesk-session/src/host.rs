@@ -70,7 +70,7 @@ pub enum Need {
     Nothing,
     View,
     Control,
-    Files,
+    /// Recusar responde `AudioStopped{NO_PERMISSION}` (`15-audio.md`).
     Audio,
 }
 
@@ -91,19 +91,21 @@ pub fn need(msg: &Msg) -> Need {
         | Msg::Key(_)
         | Msg::KeyShortcut(_)
         | Msg::KeyChar(_) => Need::Control,
+        Msg::StartAudio(_) | Msg::AudioConfig(_) => Need::Audio,
+        // Arquivos passam sempre: `taildesk_files::service::Files` confere `Permissions.files`
+        // e as raízes e responde `DENIED`, então o controlador nunca fica esperando resposta.
         Msg::FsRootsRequest(_)
         | Msg::FsList(_)
         | Msg::FileOffer(_)
         | Msg::FileRequest(_)
         | Msg::FileAccept(_)
-        | Msg::FileDone(_) => Need::Files,
-        Msg::StartAudio(_) | Msg::AudioConfig(_) => Need::Audio,
-        // Soltar teclas, parar áudio, cancelar ou reportar erro nunca é bloqueado: só encerra
-        // algo, e bloquear deixaria tecla presa ou transferência pendurada.
+        | Msg::FileDone(_)
+        | Msg::FileCancel(_)
+        | Msg::FileError(_) => Need::Nothing,
+        // Soltar teclas ou parar áudio nunca é bloqueado: só encerra algo, e bloquear deixaria
+        // tecla presa.
         Msg::ReleaseAll(_)
         | Msg::StopAudio(_)
-        | Msg::FileCancel(_)
-        | Msg::FileError(_)
         | Msg::Hello(_)
         | Msg::HelloAck(_)
         | Msg::ConsentResult(_)
@@ -260,8 +262,10 @@ impl HostSession {
         }
     }
 
-    /// Se a mensagem do controlador pode ser atendida agora. Recusadas são descartadas (e
-    /// logadas); quem precisa de resposta (arquivos, áudio) responde com o erro do seu grupo.
+    /// Se a mensagem do controlador pode ser atendida agora. Vídeo, mouse e teclado recusados
+    /// são descartados (e logados); áudio recusado responde `AudioStopped{NO_PERMISSION}`.
+    /// Arquivos sempre passam: o serviço de arquivos é montado com [`Self::permissions`] e
+    /// responde `DENIED` (recrie-o quando as permissões mudarem).
     pub fn admits(&self, msg: &Msg) -> bool {
         let HostState::Live {
             permissions: p,
@@ -274,7 +278,6 @@ impl HostSession {
             Need::Nothing => true,
             Need::View => p.view,
             Need::Control => p.control && !control_paused,
-            Need::Files => p.files,
             Need::Audio => p.audio,
         }
     }
@@ -374,7 +377,9 @@ mod tests {
         assert!(settings.is_trusted(&peer()));
         assert!(s.admits(&key()));
         assert!(s.admits(&Msg::StartAudio(StartAudio::default())));
-        assert!(!s.admits(&Msg::FsList(Default::default())));
+        // Arquivos passam para o serviço de arquivos, que responde DENIED.
+        assert!(s.admits(&Msg::FsList(Default::default())));
+        assert!(!s.permissions().files);
 
         // Pausar controle bloqueia só mouse e teclado.
         s.set_control_paused(true);
