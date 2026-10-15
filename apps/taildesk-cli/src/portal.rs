@@ -1,11 +1,69 @@
 //! `taildesk-cli portal [--so-tela]`: abre a sessão do portal (RemoteDesktop + ScreenCast) como o
-//! host vai abrir, lista os monitores liberados e passeia o ponteiro pelo centro de cada um.
-//! Serve para conferir o portal de cada compositor (KDE, GNOME, wlroots) antes da captura.
+//! host vai abrir, lista os monitores liberados, mede 3 s de captura de cada um e passeia o ponteiro
+//! pelo centro deles. Serve para conferir o portal de cada compositor (KDE, GNOME, wlroots).
 
 use std::process::ExitCode;
 use std::time::Duration;
 
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use taildesk_platform::captura_pipewire::{CapturaPipeWire, Conexao, FormatoPixel};
 use taildesk_platform::wayland::{ErroPortal, SessaoPortal};
+
+/// Quadros e último formato por monitor, contados no callback da captura.
+#[derive(Clone, Copy, Debug, Default)]
+struct Contagem {
+    quadros: u32,
+    tamanho: (u32, u32),
+    formato: Option<FormatoPixel>,
+}
+
+/// Captura `segundos` de cada monitor e imprime quadros por segundo, tamanho e formato.
+fn medir(conexao: Conexao, monitores: &[(u32, u32)], segundos: u64) -> std::io::Result<()> {
+    let contagem = Arc::new(Mutex::new(vec![Contagem::default(); monitores.len()]));
+    let c = Arc::clone(&contagem);
+    let ids: Vec<u32> = monitores.iter().map(|m| m.0).collect();
+    let ids_cb = ids.clone();
+    let inicio = Instant::now();
+    let captura = CapturaPipeWire::iniciar(conexao, monitores, move |q| {
+        if let Some(i) = ids_cb.iter().position(|&d| d == q.display_id) {
+            let mut c = c.lock().unwrap();
+            c[i].quadros += 1;
+            c[i].tamanho = (q.largura, q.altura);
+            c[i].formato = Some(q.formato);
+        }
+    })?;
+    std::thread::sleep(Duration::from_secs(segundos));
+    drop(captura);
+    let s = inicio.elapsed().as_secs_f64();
+    for (id, c) in ids.iter().zip(contagem.lock().unwrap().iter()) {
+        println!(
+            "monitor {id}: {} quadros ({:.1}/s), {}x{} {:?}",
+            c.quadros,
+            f64::from(c.quadros) / s,
+            c.tamanho.0,
+            c.tamanho.1,
+            c.formato
+        );
+    }
+    Ok(())
+}
+
+/// `taildesk-cli captura-node <node>`: lê um node do PipeWire do usuário, sem portal.
+pub fn captura_node(args: &[String]) -> ExitCode {
+    let Some(node) = args.first().and_then(|a| a.parse().ok()) else {
+        eprintln!("uso: taildesk-cli captura-node <node-id>");
+        return ExitCode::from(2);
+    };
+    match medir(Conexao::Padrao, &[(0, node)], 3) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("erro: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
 
 pub fn main(args: &[String]) -> ExitCode {
     let com_input = !args.iter().any(|a| a == "--so-tela");
@@ -51,9 +109,18 @@ async fn rodar(com_input: bool) -> Result<(), ErroPortal> {
     if let Some(motivo) = sessao.sem_input() {
         println!("sem controle: {}", ErroPortal::SemInput(motivo));
     }
-    match sessao.abrir_pipewire().await {
-        Ok(_) => println!("PipeWire: conexão da sessão aberta"),
-        Err(e) => println!("PipeWire: {e}"),
+    let fd = sessao.abrir_pipewire().await?;
+    let nodes: Vec<(u32, u32)> = sessao
+        .monitores()
+        .iter()
+        .map(|m| (m.display_id, m.node_id))
+        .collect();
+    println!("Capturando 3 s de cada monitor…");
+    let medicao = tokio::task::spawn_blocking(move || medir(Conexao::Portal(fd), &nodes, 3));
+    match medicao.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => println!("captura: {e}"),
+        Err(e) => println!("captura: {e}"),
     }
     if d.ponteiro {
         match sessao.conectar_eis().await {

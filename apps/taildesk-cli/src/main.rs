@@ -25,6 +25,8 @@ fn main() -> ExitCode {
         Some("bench-net") => bench_net::main(&args[1..]),
         #[cfg(target_os = "linux")]
         Some("portal") => portal::main(&args[1..]),
+        #[cfg(target_os = "linux")]
+        Some("captura-node") => portal::captura_node(&args[1..]),
         Some("host" | "connect" | "probe") => {
             eprintln!("{}: ainda não implementado (fase 0/1)", args[0]);
             ExitCode::from(2)
