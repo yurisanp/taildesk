@@ -2,6 +2,8 @@
 
 use std::process::ExitCode;
 
+mod bench_net;
+
 const USAGE: &str =
     "uso: taildesk-cli <host | connect <peer> | probe | bench-net <peer> | --version>";
 
@@ -17,7 +19,8 @@ fn main() -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        Some("host" | "connect" | "probe" | "bench-net") => {
+        Some("bench-net") => bench_net::main(&args[1..]),
+        Some("host" | "connect" | "probe") => {
             eprintln!("{}: ainda não implementado (fase 0/1)", args[0]);
             ExitCode::from(2)
         }
