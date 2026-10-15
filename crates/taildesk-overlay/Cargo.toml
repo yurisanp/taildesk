@@ -9,6 +9,8 @@ license.workspace = true
 
 [dependencies]
 taildesk-proto.workspace = true
+taildesk-tsapi.workspace = true
+tokio = { version = "1", features = ["net"] }
 
 
 [lints]

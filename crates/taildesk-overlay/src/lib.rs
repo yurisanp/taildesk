@@ -3,7 +3,7 @@
 //! Todo acesso à rede passa pela trait [`Overlay`] (`docs/context/01-tailscale.md` §3 e
 //! `10-plano-windows-linux.md` §2.1). O TailDesk usa só o Tailscale instalado na máquina
 //! (ADR-009), então há dois backends:
-//! - `SystemOverlay`: `tailscaled` ≥ 1.102 + LocalAPI (`taildesk-tsapi`), dá caminho, usuário
+//! - [`SystemOverlay`]: `tailscaled` ≥ 1.102 + LocalAPI (`taildesk-tsapi`), dá caminho, usuário
 //!   e app caps. É o único em produção.
 //! - `LanOverlay`: sockets do SO, só para desenvolvimento e testes.
 //!
@@ -38,13 +38,17 @@ pub struct PeerIdentity {
 
 pub use taildesk_proto::net::PathKind;
 
+mod system;
+
+pub use system::{SystemOverlay, SystemSocket, path_from};
+
 /// Caminho de rede até um peer (`14-selecao-adaptativa.md` §1.1). É pista para a seleção
 /// adaptativa: a classe de rede sai sempre da medição.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PathInfo {
-    /// Vem do `status` da LocalAPI (`CurAddr` direto ou `Relay`).
+    /// Vem do `ping` disco do `tailscaled`: direto (LAN ou internet) ou relay.
     pub kind: PathKind,
-    /// RTT informado pelo overlay (ping do `tailscaled`), se houver.
+    /// RTT do `ping` disco do `tailscaled`, se houver.
     pub rtt: Option<Duration>,
     /// Região DERP do peer ("sao", "mia").
     pub derp_region: Option<String>,

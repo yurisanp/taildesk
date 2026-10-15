@@ -11,6 +11,7 @@ license.workspace = true
 taildesk-proto.workspace = true
 taildesk-media.workspace = true
 taildesk-transport.workspace = true
+taildesk-overlay.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "net"] }
 
 [lints]

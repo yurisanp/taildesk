@@ -7,8 +7,8 @@
 //! - [`probe`]: rajada de sondagem e recepção pelos datagramas;
 //! - [`bench`]: o teste do `taildesk-cli bench-net` (RTT + banda nos dois sentidos).
 //!
-//! O TailDesk usa só o Tailscale instalado na máquina (ADR-009): o IP da tailnet é uma
-//! interface comum do SO, então o socket UDP do SO é o transporte definitivo.
+//! O TailDesk usa só o Tailscale instalado na máquina (ADR-009): o IP da tailnet é uma interface comum do
+//! SO, então o endpoint usa um socket UDP do SO ligado a esse IP (`SystemOverlay::local_addr`).
 
 pub mod bench;
 pub mod endpoint;
