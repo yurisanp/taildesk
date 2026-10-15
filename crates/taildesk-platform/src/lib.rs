@@ -3,6 +3,7 @@
 //! portal+PipeWire, XShm), injeção de input (SendInput, portal/libei, XTest), cursor e segredos
 //! (`docs/context/10-plano-windows-linux.md`).
 
+pub mod arquivos;
 pub mod captura;
 #[cfg(windows)]
 pub mod captura_dxgi;

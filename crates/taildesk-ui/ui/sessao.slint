@@ -3,6 +3,7 @@
 // por cima (cursor separado, `07-protocolo.md`).
 import { Tema } from "tema.slint";
 import { Botao, Toast } from "componentes.slint";
+import { ArquivosNaSessao } from "arquivos.slint";
 
 export struct AbaMonitor {
     texto: string,
@@ -140,4 +141,6 @@ export component JanelaSessao inherits Window {
             }
         }
     }
+    // Painel de arquivos (fase 3), por cima do vídeo.
+    ArquivosNaSessao { width: parent.width; height: parent.height; }
 }
