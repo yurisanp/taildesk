@@ -36,6 +36,21 @@ A identidade do controlador **não** vem do `Hello` — vem do `Overlay::identif
 
 ## 3. Mensagens de controle (protobuf, `oneof`)
 
+Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo `oneof` tem uma **faixa de tags por grupo** (PR #13). Faixas sem mensagem ficam reservadas para a fase que as traz; números de tag e de enum nunca mudam de significado. No fio, cada `Control` vai precedido do tamanho em varint, com no máximo 64 KiB.
+
+| Tags | Grupo |
+|---|---|
+| 1–19 | Sessão |
+| 20–39 | Vídeo, um stream por monitor (`13-multimonitor.md` §3) |
+| 40–49 | Mouse |
+| 50–59 | Teclado (`11-teclado.md` §3, fase 2) |
+| 60–69 | Cursor |
+| 70–79 | Clipboard (fase 4) |
+| 80–89 | Arquivos (fase 3; §3.1) |
+| 90–99 | QoS e seleção adaptativa (`14-selecao-adaptativa.md` §4) |
+| 100–109 | Áudio (`15-audio.md` §6.5; reservado) |
+| 110–119 | Chat |
+
 | Grupo | Mensagens |
 |---|---|
 | Sessão | `Hello`, `HelloAck`, `ConsentResult`, `Close{reason}`, `Ping{t}`/`Pong{t,t_echo}` |
@@ -43,7 +58,7 @@ A identidade do controlador **não** vem do `Hello` — vem do `Overlay::identif
 | Input | Teclado: ver `11-teclado.md` §3 (`KeyboardInfo`, `Key`, `KeyShortcut`, `KeyChar`, `KeyboardMode`, `ReleaseAll`), `MouseMove{display_id, x, y (u16 normalizado no monitor) | rel}`, `MouseButton{btn, down}`, `Scroll{dx,dy,precise}`, `Touch{id, phase, x, y, pressure}`, `Gamepad{...}` (futuro) |
 | Cursor | `CursorPos{display_id, x, y, visible}`, `CursorShapeRef{hash}` (shape completo no stream de cursor) |
 | Clipboard | `ClipboardOffer{formats}`, `ClipboardData{format, bytes}` (texto/HTML/PNG; arquivos → transferência explícita) |
-| Arquivos | `FileOffer{id, name, size, hash}`, `FileAccept`, `FileCancel`, `FileProgress` |
+| Arquivos (80–89) | `FsRootsRequest`, `FsRoots`, `FsList`, `FsListing`, `FileOffer`, `FileRequest`, `FileAccept`, `FileCancel`, `FileDone`, `FileError` (detalhe em §3.1) |
 | QoS | `ReceiverReport{display, recv_kbps, loss_pct, jitter_ms, decode_ms, render_ms, queue_frames, audio_loss_pct, audio_jitter_ms, audio_buffer_ms, concealed_ms}` (a cada 250 ms) |
 | Áudio (`15-audio.md` §6.5) | `StartAudio{stream_id, prefs: AudioPrefs{profile: AUTO|VOICE|MUSIC, max_kbps, channels}}`, `AudioSelected{stream_id, codec=OPUS, sample_rate, channels, frame_ms_x10, bitrate_kbps, redundancy, inband_fec}`, `AudioConfig{stream_id, bitrate_kbps, frame_ms_x10, redundancy}` (troca a quente), `StopAudio{stream_id}`, `AudioStopped{stream_id, reason: BY_CONTROLLER|BY_HOST|NO_PERMISSION|DEVICE_ERROR}` |
 | Chat | `ChatMessage{text}` |
@@ -51,6 +66,31 @@ A identidade do controlador **não** vem do `Hello` — vem do `Overlay::identif
 Multi-monitor (`13-multimonitor.md` §3): **um stream de vídeo por monitor**, cada um com encoder, keyframes e `stream_id` próprios, respondido por um `CodecSelected` por `display_id`. Host recusa `StartVideo` acima do seu limite (`Error{TOO_MANY_STREAMS}`; padrão 2 com openh264). Parser: no máximo 16 `DisplayInfo` por mensagem, `name` ≤ 128 bytes.
 
 Regras: campos novos sempre opcionais; `proto_version` maior só quando quebrar; mensagens desconhecidas no `oneof` são ignoradas e logadas.
+
+### 3.1 Arquivos (tags 80–89, fase 3)
+
+Caminhos são relativos a uma raiz (`root`), com `/` como separador, e quem recebe sempre os passa por `taildesk_files::resolve_in_root`. A **raiz 0** (`files::INBOX_ROOT`) é a pasta de entrada de quem recebe (`~/Downloads/TailDesk`).
+
+| Tag | Mensagem | Sentido | Campos |
+|---|---|---|---|
+| 80 | `FsRootsRequest` | C→H | — |
+| 81 | `FsRoots` | H→C | `roots[{id ≠ 0, name, access: READ\|WRITE\|READ_WRITE}]` (vazio = navegador remoto desligado; até 64 raízes, nome ≤ 128 bytes) |
+| 82 | `FsList` | C→H | `req_id, root, path ("" = a raiz), start` |
+| 83 | `FsListing` | H→C | `req_id, entries[{name, kind: DIR\|FILE\|OTHER, size, mtime_ms}], more, error` |
+| 84 | `FileOffer` | quem envia | `xfer_id, root, rel_path, size, mtime_ms` |
+| 85 | `FileRequest` | quem baixa | `xfer_id, root, path` (sem offset) |
+| 86 | `FileAccept` | quem recebe | `xfer_id, offset, prefix_blake3` |
+| 87 | `FileCancel` | ambos | `xfer_id` |
+| 88 | `FileDone` | quem envia | `xfer_id, blake3` (arquivo inteiro) |
+| 89 | `FileError` | ambos | `xfer_id, code` |
+
+- **Envio**: `FileOffer` → `FileAccept{offset, prefix_blake3}` → stream de dados → `FileDone`.
+- **Download**: `FileRequest` → o peer responde com `FileOffer` → daí em diante igual ao envio. O offset nunca vai no `FileRequest`: quem recebe decide pelo `.part` que tem.
+- **Retomada**: `offset` = tamanho do `.part`; `prefix_blake3` = BLAKE3 desses bytes (32 bytes; vazio quando `offset` = 0). Se o prefixo não bate com o arquivo de quem envia, ele responde `FileError(RESUME_MISMATCH)` e quem recebe recomeça do zero.
+- **Listagem paginada**: no máximo **512 itens ou 40 KiB de nomes** por `FsListing`, para caber no frame de 64 KiB; `more = true` → pedir de novo com `start += entries.len()`.
+- **Stream de dados**: um stream QUIC uni por arquivo, começando pelo cabeçalho de **16 bytes** `files::DataHeader` (little-endian): `"TDF"` + versão `0x01` (4 bytes), `xfer_id` u32, `offset` u64 (posição do primeiro byte que segue); depois bytes crus em blocos de 256 KiB. Cabeçalho errado ou bytes a mais = `FileError(PROTOCOL)`.
+- **Limites**: caminho ≤ 4096 bytes, nome ≤ 1024 bytes, até 4 transferências simultâneas por sessão (acima disso, `BUSY`).
+- **Códigos de `FileError`**: `NOT_FOUND`, `DENIED` (sem `Permissions.files`, raiz sem o acesso pedido ou recusa da pessoa), `BAD_PATH`, `NO_SPACE`, `HASH_MISMATCH`, `RESUME_MISMATCH`, `IO`, `BUSY`, `CANCELLED`, `CHANGED` (origem mudou durante o envio), `PROTOCOL`.
 
 ## 4. Header de datagrama de mídia (binário, little-endian, 16 bytes)
 

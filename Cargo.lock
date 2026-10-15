@@ -565,6 +565,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3"
+version = "1.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
+dependencies = [
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures",
+]
+
+[[package]]
 name = "block2"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -836,6 +849,12 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "convert_case"
@@ -4672,10 +4691,20 @@ version = "0.1.0"
 [[package]]
 name = "taildesk-files"
 version = "0.1.0"
+dependencies = [
+ "blake3",
+ "quinn",
+ "taildesk-proto",
+ "taildesk-transport",
+ "tokio",
+]
 
 [[package]]
 name = "taildesk-keyboard"
 version = "0.1.0"
+dependencies = [
+ "taildesk-proto",
+]
 
 [[package]]
 name = "taildesk-media"
@@ -4699,7 +4728,9 @@ version = "0.1.0"
 dependencies = [
  "ashpd",
  "futures-util",
+ "taildesk-keyboard",
  "windows-sys 0.61.2",
+ "xkbcommon-dl",
  "zbus",
 ]
 

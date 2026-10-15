@@ -6,6 +6,7 @@
 pub mod instancia;
 #[cfg(target_os = "linux")]
 pub mod wayland;
+pub mod teclado;
 
 use std::io;
 use std::process::{Command, Stdio};

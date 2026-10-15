@@ -32,7 +32,8 @@ Casos clássicos de dor neste par de layouts:
 Cada lado manda ao outro um `KeyboardInfo` no handshake e um `KeyboardLayoutChanged` quando o layout muda no meio da sessão. Os dois lados guardam a tabela do **próprio** layout; ninguém precisa ter a tabela do layout alheio.
 
 ### 2.2 Decisão automática
-- **Layouts iguais** (ex.: ABNT2 ↔ ABNT2) → **Físico puro**. É o mais fiel: atalhos, jogos e teclas mortas funcionam como no teclado local.
+- **Layouts iguais** (mesmo `layout_tag`, ex.: ABNT2 ↔ ABNT2 no mesmo SO) → **Físico puro**. É o mais fiel: atalhos, jogos e teclas mortas funcionam como no teclado local.
+- **O mesmo layout em SOs diferentes não é igual.** Pelos dumps reais (ToUnicodeEx × libxkbcommon), as teclas mortas divergem: no ABNT2 do Linux `´` + espaço dá `'` e `¨` + espaço dá `"`, no Windows dá `´` e `¨`; no US-Intl do Linux `'` + `c` dá `ć`, no Windows dá `ç`. Por isso o `layout_tag` do Linux leva o sufixo `-xkb` (ex.: `br-abnt2-xkb`) e Windows ABNT2 ↔ Linux ABNT2 vai pelo **Auto híbrido**, que resolve as teclas mortas no controlador.
 - **Layouts diferentes** → **Auto híbrido** (abaixo).
 - O usuário pode forçar **Físico** (jogos) ou **Texto** por host; a escolha fica salva para aquele host.
 
@@ -73,7 +74,7 @@ Na conexão e a cada troca de layout, o host monta uma tabela `char → sequênc
 ```proto
 message KeyboardInfo {          // em Hello / HelloAck
   string os_layout_id = 1;      // KLID ("00020409") ou "xkb:us(intl)"
-  string layout_tag = 2;        // normalizado: "us-intl", "br-abnt2", "us", "pt", ...
+  string layout_tag = 2;        // normalizado: "us-intl", "br-abnt2", "us", "pt", ...; no Linux com sufixo "-xkb" ("br-abnt2-xkb")
   repeated uint32 extra_hid = 3;// teclas físicas que existem (ex.: 0x87, 0x85 no ABNT2)
 }
 message KeyboardLayoutChanged { KeyboardInfo info = 1; }
@@ -93,7 +94,7 @@ O `layout_tag` serve para UI, logs e decidir "iguais vs diferentes". A traduçã
 ## 5. Testes (obrigatórios para fechar a fase 2)
 Tabelas de layout gravadas como fixtures (dump de `ToUnicodeEx` e de keymaps XKB) permitem testar a tradução **sem SO**, em CI, para qualquer par.
 
-Matriz mínima de pares: Win US-Intl → Linux ABNT2, Linux ABNT2 → Win US-Intl, Win ABNT2 → Linux US, Linux US → Win ABNT2, ABNT2 ↔ ABNT2 (deve cair em Físico), US ↔ US-Intl.
+Matriz mínima de pares: Win US-Intl → Linux ABNT2, Linux ABNT2 → Win US-Intl, Win ABNT2 → Linux US, Linux US → Win ABNT2, ABNT2 ↔ ABNT2 no mesmo SO (deve cair em Físico), Win ABNT2 ↔ Linux ABNT2 (Auto híbrido, pelas teclas mortas de §2.2), US ↔ US-Intl.
 
 Casos por par:
 - `ç Ç á é í ó ú à â ê ô ã õ ü` e as mesmas maiúsculas

@@ -8,6 +8,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+taildesk-keyboard.workspace = true
 
 # Pergunta ao D-Bus se há bandeja (StatusNotifierWatcher). O Slint já traz o zbus para a bandeja.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -16,9 +17,11 @@ zbus = "5"
 # têm de concordar no runtime do zbus.
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "remote_desktop", "screencast"] }
 futures-util = { version = "0.3", default-features = false }
+# Lê o layout do teclado (keymap XKB); carregado em tempo de execução, sem pacote -dev.
+xkbcommon-dl = "0.4"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [lints]
 workspace = true

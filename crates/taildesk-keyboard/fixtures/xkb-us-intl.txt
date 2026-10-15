@@ -1,0 +1,610 @@
+name xkb:us(intl)
+key 0x04 base char U+0061 # a
+key 0x05 base char U+0062 # b
+key 0x06 base char U+0063 # c
+key 0x07 base char U+0064 # d
+key 0x08 base char U+0065 # e
+key 0x09 base char U+0066 # f
+key 0x0a base char U+0067 # g
+key 0x0b base char U+0068 # h
+key 0x0c base char U+0069 # i
+key 0x0d base char U+006A # j
+key 0x0e base char U+006B # k
+key 0x0f base char U+006C # l
+key 0x10 base char U+006D # m
+key 0x11 base char U+006E # n
+key 0x12 base char U+006F # o
+key 0x13 base char U+0070 # p
+key 0x14 base char U+0071 # q
+key 0x15 base char U+0072 # r
+key 0x16 base char U+0073 # s
+key 0x17 base char U+0074 # t
+key 0x18 base char U+0075 # u
+key 0x19 base char U+0076 # v
+key 0x1a base char U+0077 # w
+key 0x1b base char U+0078 # x
+key 0x1c base char U+0079 # y
+key 0x1d base char U+007A # z
+key 0x1e base char U+0031 # 1
+key 0x1f base char U+0032 # 2
+key 0x20 base char U+0033 # 3
+key 0x21 base char U+0034 # 4
+key 0x22 base char U+0035 # 5
+key 0x23 base char U+0036 # 6
+key 0x24 base char U+0037 # 7
+key 0x25 base char U+0038 # 8
+key 0x26 base char U+0039 # 9
+key 0x27 base char U+0030 # 0
+key 0x2c base char U+0020 # ·
+key 0x2d base char U+002D # -
+key 0x2e base char U+003D # =
+key 0x2f base char U+005B # [
+key 0x30 base char U+005D # ]
+key 0x31 base char U+005C # \
+key 0x33 base char U+003B # ;
+key 0x34 base dead U+00B4 # ´
+key 0x35 base dead U+0060 # `
+key 0x36 base char U+002C # ,
+key 0x37 base char U+002E # .
+key 0x38 base char U+002F # /
+key 0x54 base char U+002F # /
+key 0x55 base char U+002A # *
+key 0x56 base char U+002D # -
+key 0x57 base char U+002B # +
+key 0x59 base char U+0031 # 1
+key 0x5a base char U+0032 # 2
+key 0x5b base char U+0033 # 3
+key 0x5c base char U+0034 # 4
+key 0x5d base char U+0035 # 5
+key 0x5e base char U+0036 # 6
+key 0x5f base char U+0037 # 7
+key 0x60 base char U+0038 # 8
+key 0x61 base char U+0039 # 9
+key 0x62 base char U+0030 # 0
+key 0x63 base char U+002E # .
+key 0x64 base char U+005C # \
+key 0x67 base char U+003D # =
+key 0x85 base char U+002E # .
+key 0x04 shift char U+0041 # A
+key 0x05 shift char U+0042 # B
+key 0x06 shift char U+0043 # C
+key 0x07 shift char U+0044 # D
+key 0x08 shift char U+0045 # E
+key 0x09 shift char U+0046 # F
+key 0x0a shift char U+0047 # G
+key 0x0b shift char U+0048 # H
+key 0x0c shift char U+0049 # I
+key 0x0d shift char U+004A # J
+key 0x0e shift char U+004B # K
+key 0x0f shift char U+004C # L
+key 0x10 shift char U+004D # M
+key 0x11 shift char U+004E # N
+key 0x12 shift char U+004F # O
+key 0x13 shift char U+0050 # P
+key 0x14 shift char U+0051 # Q
+key 0x15 shift char U+0052 # R
+key 0x16 shift char U+0053 # S
+key 0x17 shift char U+0054 # T
+key 0x18 shift char U+0055 # U
+key 0x19 shift char U+0056 # V
+key 0x1a shift char U+0057 # W
+key 0x1b shift char U+0058 # X
+key 0x1c shift char U+0059 # Y
+key 0x1d shift char U+005A # Z
+key 0x1e shift char U+0021 # !
+key 0x1f shift char U+0040 # @
+key 0x20 shift char U+0023 # #
+key 0x21 shift char U+0024 # $
+key 0x22 shift char U+0025 # %
+key 0x23 shift dead U+005E # ^
+key 0x24 shift char U+0026 # &
+key 0x25 shift char U+002A # *
+key 0x26 shift char U+0028 # (
+key 0x27 shift char U+0029 # )
+key 0x2c shift char U+0020 # ·
+key 0x2d shift char U+005F # _
+key 0x2e shift char U+002B # +
+key 0x2f shift char U+007B # {
+key 0x30 shift char U+007D # }
+key 0x31 shift char U+007C # |
+key 0x33 shift char U+003A # :
+key 0x34 shift dead U+00A8 # ¨
+key 0x35 shift dead U+007E # ~
+key 0x36 shift char U+003C # <
+key 0x37 shift char U+003E # >
+key 0x38 shift char U+003F # ?
+key 0x54 shift char U+002F # /
+key 0x55 shift char U+002A # *
+key 0x56 shift char U+002D # -
+key 0x57 shift char U+002B # +
+key 0x64 shift char U+007C # |
+key 0x67 shift char U+003D # =
+key 0x85 shift char U+002E # .
+key 0x04 altgr char U+00E1 # á
+key 0x05 altgr char U+0062 # b
+key 0x06 altgr char U+00A9 # ©
+key 0x07 altgr char U+00F0 # ð
+key 0x08 altgr char U+00E9 # é
+key 0x09 altgr char U+00EB # ë
+key 0x0a altgr char U+0067 # g
+key 0x0b altgr char U+0068 # h
+key 0x0c altgr char U+00ED # í
+key 0x0d altgr char U+00EF # ï
+key 0x0e altgr char U+0153 # œ
+key 0x0f altgr char U+00F8 # ø
+key 0x10 altgr char U+00B5 # µ
+key 0x11 altgr char U+00F1 # ñ
+key 0x12 altgr char U+00F3 # ó
+key 0x13 altgr char U+00F6 # ö
+key 0x14 altgr char U+00E4 # ä
+key 0x15 altgr char U+00AE # ®
+key 0x16 altgr char U+00DF # ß
+key 0x17 altgr char U+00FE # þ
+key 0x18 altgr char U+00FA # ú
+key 0x19 altgr char U+0076 # v
+key 0x1a altgr char U+00E5 # å
+key 0x1b altgr char U+00B7 # ·
+key 0x1c altgr char U+00FC # ü
+key 0x1d altgr char U+00E6 # æ
+key 0x1e altgr char U+00A1 # ¡
+key 0x1f altgr char U+00B2 # ²
+key 0x20 altgr char U+00B3 # ³
+key 0x21 altgr char U+00A4 # ¤
+key 0x22 altgr char U+20AC # €
+key 0x23 altgr char U+00BC # ¼
+key 0x24 altgr char U+00BD # ½
+key 0x25 altgr char U+00BE # ¾
+key 0x26 altgr char U+2018 # ‘
+key 0x27 altgr char U+2019 # ’
+key 0x2c altgr char U+0020 # ·
+key 0x2d altgr char U+00A5 # ¥
+key 0x2e altgr char U+00D7 # ×
+key 0x2f altgr char U+00AB # «
+key 0x30 altgr char U+00BB # »
+key 0x31 altgr char U+00AC # ¬
+key 0x33 altgr char U+00B6 # ¶
+key 0x34 altgr char U+0027 # '
+key 0x35 altgr char U+0060 # `
+key 0x36 altgr char U+00E7 # ç
+key 0x37 altgr dead U+02D9 # ˙
+key 0x38 altgr char U+00BF # ¿
+key 0x54 altgr char U+002F # /
+key 0x55 altgr char U+002A # *
+key 0x56 altgr char U+002D # -
+key 0x57 altgr char U+002B # +
+key 0x59 altgr char U+0031 # 1
+key 0x5a altgr char U+0032 # 2
+key 0x5b altgr char U+0033 # 3
+key 0x5c altgr char U+0034 # 4
+key 0x5d altgr char U+0035 # 5
+key 0x5e altgr char U+0036 # 6
+key 0x5f altgr char U+0037 # 7
+key 0x60 altgr char U+0038 # 8
+key 0x61 altgr char U+0039 # 9
+key 0x62 altgr char U+0030 # 0
+key 0x63 altgr char U+002E # .
+key 0x64 altgr char U+005C # \
+key 0x67 altgr char U+003D # =
+key 0x85 altgr char U+002E # .
+key 0x04 shift-altgr char U+00C1 # Á
+key 0x05 shift-altgr char U+0042 # B
+key 0x06 shift-altgr char U+00A2 # ¢
+key 0x07 shift-altgr char U+00D0 # Ð
+key 0x08 shift-altgr char U+00C9 # É
+key 0x09 shift-altgr char U+00CB # Ë
+key 0x0a shift-altgr char U+0047 # G
+key 0x0b shift-altgr char U+0048 # H
+key 0x0c shift-altgr char U+00CD # Í
+key 0x0d shift-altgr char U+00CF # Ï
+key 0x0e shift-altgr char U+0152 # Œ
+key 0x0f shift-altgr char U+00D8 # Ø
+key 0x10 shift-altgr char U+00B1 # ±
+key 0x11 shift-altgr char U+00D1 # Ñ
+key 0x12 shift-altgr char U+00D3 # Ó
+key 0x13 shift-altgr char U+00D6 # Ö
+key 0x14 shift-altgr char U+00C4 # Ä
+key 0x15 shift-altgr char U+2122 # ™
+key 0x16 shift-altgr char U+00A7 # §
+key 0x17 shift-altgr char U+00DE # Þ
+key 0x18 shift-altgr char U+00DA # Ú
+key 0x19 shift-altgr char U+0056 # V
+key 0x1a shift-altgr char U+00C5 # Å
+key 0x1c shift-altgr char U+00DC # Ü
+key 0x1d shift-altgr char U+00C6 # Æ
+key 0x1e shift-altgr char U+00B9 # ¹
+key 0x1f shift-altgr dead U+02DD # ˝
+key 0x20 shift-altgr dead U+00AF # ¯
+key 0x21 shift-altgr char U+00A3 # £
+key 0x22 shift-altgr dead U+00B8 # ¸
+key 0x23 shift-altgr char U+005E # ^
+key 0x25 shift-altgr dead U+02DB # ˛
+key 0x26 shift-altgr dead U+02D8 # ˘
+key 0x27 shift-altgr dead U+02DA # ˚
+key 0x2c shift-altgr char U+0020 # ·
+key 0x2e shift-altgr char U+00F7 # ÷
+key 0x2f shift-altgr char U+201C # “
+key 0x30 shift-altgr char U+201D # ”
+key 0x31 shift-altgr char U+00A6 # ¦
+key 0x33 shift-altgr char U+00B0 # °
+key 0x34 shift-altgr char U+0022 # "
+key 0x35 shift-altgr char U+007E # ~
+key 0x36 shift-altgr char U+00C7 # Ç
+key 0x37 shift-altgr dead U+02C7 # ˇ
+key 0x54 shift-altgr char U+002F # /
+key 0x55 shift-altgr char U+002A # *
+key 0x56 shift-altgr char U+002D # -
+key 0x57 shift-altgr char U+002B # +
+key 0x64 shift-altgr char U+007C # |
+key 0x67 shift-altgr char U+003D # =
+key 0x85 shift-altgr char U+002E # .
+compose U+00B4 U+0061 U+00E1 # ´ a á
+compose U+00B4 U+0063 U+0107 # ´ c ć
+compose U+00B4 U+0065 U+00E9 # ´ e é
+compose U+00B4 U+0067 U+01F5 # ´ g ǵ
+compose U+00B4 U+0069 U+00ED # ´ i í
+compose U+00B4 U+006B U+1E31 # ´ k ḱ
+compose U+00B4 U+006C U+013A # ´ l ĺ
+compose U+00B4 U+006D U+1E3F # ´ m ḿ
+compose U+00B4 U+006E U+0144 # ´ n ń
+compose U+00B4 U+006F U+00F3 # ´ o ó
+compose U+00B4 U+0070 U+1E55 # ´ p ṕ
+compose U+00B4 U+0072 U+0155 # ´ r ŕ
+compose U+00B4 U+0073 U+015B # ´ s ś
+compose U+00B4 U+0075 U+00FA # ´ u ú
+compose U+00B4 U+0076 U+01D8 # ´ v ǘ
+compose U+00B4 U+0077 U+1E83 # ´ w ẃ
+compose U+00B4 U+0079 U+00FD # ´ y ý
+compose U+00B4 U+007A U+017A # ´ z ź
+compose U+00B4 U+0020 U+0027 # ´ · '
+compose U+00B4 U+0041 U+00C1 # ´ A Á
+compose U+00B4 U+0043 U+0106 # ´ C Ć
+compose U+00B4 U+0045 U+00C9 # ´ E É
+compose U+00B4 U+0047 U+01F4 # ´ G Ǵ
+compose U+00B4 U+0049 U+00CD # ´ I Í
+compose U+00B4 U+004B U+1E30 # ´ K Ḱ
+compose U+00B4 U+004C U+0139 # ´ L Ĺ
+compose U+00B4 U+004D U+1E3E # ´ M Ḿ
+compose U+00B4 U+004E U+0143 # ´ N Ń
+compose U+00B4 U+004F U+00D3 # ´ O Ó
+compose U+00B4 U+0050 U+1E54 # ´ P Ṕ
+compose U+00B4 U+0052 U+0154 # ´ R Ŕ
+compose U+00B4 U+0053 U+015A # ´ S Ś
+compose U+00B4 U+0055 U+00DA # ´ U Ú
+compose U+00B4 U+0056 U+01D7 # ´ V Ǘ
+compose U+00B4 U+0057 U+1E82 # ´ W Ẃ
+compose U+00B4 U+0059 U+00DD # ´ Y Ý
+compose U+00B4 U+005A U+0179 # ´ Z Ź
+compose U+00B4 U+00EF U+1E2F # ´ ï ḯ
+compose U+00B4 U+00F8 U+01FF # ´ ø ǿ
+compose U+00B4 U+00E5 U+01FB # ´ å ǻ
+compose U+00B4 U+00FC U+01D8 # ´ ü ǘ
+compose U+00B4 U+00E6 U+01FD # ´ æ ǽ
+compose U+00B4 U+00E7 U+1E09 # ´ ç ḉ
+compose U+00B4 U+00CF U+1E2E # ´ Ï Ḯ
+compose U+00B4 U+00D8 U+01FE # ´ Ø Ǿ
+compose U+00B4 U+00C5 U+01FA # ´ Å Ǻ
+compose U+00B4 U+00DC U+01D7 # ´ Ü Ǘ
+compose U+00B4 U+00C6 U+01FC # ´ Æ Ǽ
+compose U+00B4 U+00C7 U+1E08 # ´ Ç Ḉ
+compose U+00B4 U+00B4 U+00B4 # ´ ´ ´
+compose U+0060 U+0061 U+00E0 # ` a à
+compose U+0060 U+0065 U+00E8 # ` e è
+compose U+0060 U+0069 U+00EC # ` i ì
+compose U+0060 U+006E U+01F9 # ` n ǹ
+compose U+0060 U+006F U+00F2 # ` o ò
+compose U+0060 U+0075 U+00F9 # ` u ù
+compose U+0060 U+0076 U+01DC # ` v ǜ
+compose U+0060 U+0077 U+1E81 # ` w ẁ
+compose U+0060 U+0079 U+1EF3 # ` y ỳ
+compose U+0060 U+0020 U+0060 # ` · `
+compose U+0060 U+0041 U+00C0 # ` A À
+compose U+0060 U+0045 U+00C8 # ` E È
+compose U+0060 U+0049 U+00CC # ` I Ì
+compose U+0060 U+004E U+01F8 # ` N Ǹ
+compose U+0060 U+004F U+00D2 # ` O Ò
+compose U+0060 U+0055 U+00D9 # ` U Ù
+compose U+0060 U+0056 U+01DB # ` V Ǜ
+compose U+0060 U+0057 U+1E80 # ` W Ẁ
+compose U+0060 U+0059 U+1EF2 # ` Y Ỳ
+compose U+0060 U+00FC U+01DC # ` ü ǜ
+compose U+0060 U+00DC U+01DB # ` Ü Ǜ
+compose U+0060 U+0060 U+0060 # ` ` `
+compose U+005E U+0061 U+00E2 # ^ a â
+compose U+005E U+0063 U+0109 # ^ c ĉ
+compose U+005E U+0065 U+00EA # ^ e ê
+compose U+005E U+0067 U+011D # ^ g ĝ
+compose U+005E U+0068 U+0125 # ^ h ĥ
+compose U+005E U+0069 U+00EE # ^ i î
+compose U+005E U+006A U+0135 # ^ j ĵ
+compose U+005E U+006F U+00F4 # ^ o ô
+compose U+005E U+0073 U+015D # ^ s ŝ
+compose U+005E U+0075 U+00FB # ^ u û
+compose U+005E U+0077 U+0175 # ^ w ŵ
+compose U+005E U+0079 U+0177 # ^ y ŷ
+compose U+005E U+007A U+1E91 # ^ z ẑ
+compose U+005E U+0031 U+00B9 # ^ 1 ¹
+compose U+005E U+0032 U+00B2 # ^ 2 ²
+compose U+005E U+0033 U+00B3 # ^ 3 ³
+compose U+005E U+0034 U+2074 # ^ 4 ⁴
+compose U+005E U+0035 U+2075 # ^ 5 ⁵
+compose U+005E U+0036 U+2076 # ^ 6 ⁶
+compose U+005E U+0037 U+2077 # ^ 7 ⁷
+compose U+005E U+0038 U+2078 # ^ 8 ⁸
+compose U+005E U+0039 U+2079 # ^ 9 ⁹
+compose U+005E U+0030 U+2070 # ^ 0 ⁰
+compose U+005E U+0020 U+005E # ^ · ^
+compose U+005E U+002D U+207B # ^ - ⁻
+compose U+005E U+003D U+207C # ^ = ⁼
+compose U+005E U+002E U+00B7 # ^ . ·
+compose U+005E U+002B U+207A # ^ + ⁺
+compose U+005E U+0041 U+00C2 # ^ A Â
+compose U+005E U+0043 U+0108 # ^ C Ĉ
+compose U+005E U+0045 U+00CA # ^ E Ê
+compose U+005E U+0047 U+011C # ^ G Ĝ
+compose U+005E U+0048 U+0124 # ^ H Ĥ
+compose U+005E U+0049 U+00CE # ^ I Î
+compose U+005E U+004A U+0134 # ^ J Ĵ
+compose U+005E U+004F U+00D4 # ^ O Ô
+compose U+005E U+0053 U+015C # ^ S Ŝ
+compose U+005E U+0055 U+00DB # ^ U Û
+compose U+005E U+0057 U+0174 # ^ W Ŵ
+compose U+005E U+0059 U+0176 # ^ Y Ŷ
+compose U+005E U+005A U+1E90 # ^ Z Ẑ
+compose U+005E U+0028 U+207D # ^ ( ⁽
+compose U+005E U+0029 U+207E # ^ ) ⁾
+compose U+005E U+00E1 U+1EA5 # ^ á ấ
+compose U+005E U+00E9 U+1EBF # ^ é ế
+compose U+005E U+00F3 U+1ED1 # ^ ó ố
+compose U+005E U+00C1 U+1EA4 # ^ Á Ấ
+compose U+005E U+00C9 U+1EBE # ^ É Ế
+compose U+005E U+00D3 U+1ED0 # ^ Ó Ố
+compose U+005E U+005E U+005E # ^ ^ ^
+compose U+00A8 U+0061 U+00E4 # ¨ a ä
+compose U+00A8 U+0065 U+00EB # ¨ e ë
+compose U+00A8 U+0068 U+1E27 # ¨ h ḧ
+compose U+00A8 U+0069 U+00EF # ¨ i ï
+compose U+00A8 U+006F U+00F6 # ¨ o ö
+compose U+00A8 U+0074 U+1E97 # ¨ t ẗ
+compose U+00A8 U+0075 U+00FC # ¨ u ü
+compose U+00A8 U+0077 U+1E85 # ¨ w ẅ
+compose U+00A8 U+0078 U+1E8D # ¨ x ẍ
+compose U+00A8 U+0079 U+00FF # ¨ y ÿ
+compose U+00A8 U+0020 U+0022 # ¨ · "
+compose U+00A8 U+0041 U+00C4 # ¨ A Ä
+compose U+00A8 U+0045 U+00CB # ¨ E Ë
+compose U+00A8 U+0048 U+1E26 # ¨ H Ḧ
+compose U+00A8 U+0049 U+00CF # ¨ I Ï
+compose U+00A8 U+004F U+00D6 # ¨ O Ö
+compose U+00A8 U+0055 U+00DC # ¨ U Ü
+compose U+00A8 U+0057 U+1E84 # ¨ W Ẅ
+compose U+00A8 U+0058 U+1E8C # ¨ X Ẍ
+compose U+00A8 U+0059 U+0178 # ¨ Y Ÿ
+compose U+00A8 U+00ED U+1E2F # ¨ í ḯ
+compose U+00A8 U+00FA U+01D8 # ¨ ú ǘ
+compose U+00A8 U+0027 U+0344 # ¨ ' ̈́
+compose U+00A8 U+00CD U+1E2E # ¨ Í Ḯ
+compose U+00A8 U+00DA U+01D7 # ¨ Ú Ǘ
+compose U+00A8 U+00A8 U+00A8 # ¨ ¨ ¨
+compose U+007E U+0061 U+00E3 # ~ a ã
+compose U+007E U+0065 U+1EBD # ~ e ẽ
+compose U+007E U+0069 U+0129 # ~ i ĩ
+compose U+007E U+006E U+00F1 # ~ n ñ
+compose U+007E U+006F U+00F5 # ~ o õ
+compose U+007E U+0075 U+0169 # ~ u ũ
+compose U+007E U+0076 U+1E7D # ~ v ṽ
+compose U+007E U+0079 U+1EF9 # ~ y ỹ
+compose U+007E U+0020 U+007E # ~ · ~
+compose U+007E U+003D U+2243 # ~ = ≃
+compose U+007E U+0041 U+00C3 # ~ A Ã
+compose U+007E U+0045 U+1EBC # ~ E Ẽ
+compose U+007E U+0049 U+0128 # ~ I Ĩ
+compose U+007E U+004E U+00D1 # ~ N Ñ
+compose U+007E U+004F U+00D5 # ~ O Õ
+compose U+007E U+0055 U+0168 # ~ U Ũ
+compose U+007E U+0056 U+1E7C # ~ V Ṽ
+compose U+007E U+0059 U+1EF8 # ~ Y Ỹ
+compose U+007E U+003C U+2272 # ~ < ≲
+compose U+007E U+003E U+2273 # ~ > ≳
+compose U+007E U+00F3 U+1E4D # ~ ó ṍ
+compose U+007E U+00F6 U+1E4F # ~ ö ṏ
+compose U+007E U+00FA U+1E79 # ~ ú ṹ
+compose U+007E U+00D3 U+1E4C # ~ Ó Ṍ
+compose U+007E U+00D6 U+1E4E # ~ Ö Ṏ
+compose U+007E U+00DA U+1E78 # ~ Ú Ṹ
+compose U+007E U+007E U+007E # ~ ~ ~
+compose U+02D9 U+0061 U+0227 # ˙ a ȧ
+compose U+02D9 U+0062 U+1E03 # ˙ b ḃ
+compose U+02D9 U+0063 U+010B # ˙ c ċ
+compose U+02D9 U+0064 U+1E0B # ˙ d ḋ
+compose U+02D9 U+0065 U+0117 # ˙ e ė
+compose U+02D9 U+0066 U+1E1F # ˙ f ḟ
+compose U+02D9 U+0067 U+0121 # ˙ g ġ
+compose U+02D9 U+0068 U+1E23 # ˙ h ḣ
+compose U+02D9 U+0069 U+0131 # ˙ i ı
+compose U+02D9 U+006A U+0237 # ˙ j ȷ
+compose U+02D9 U+006C U+0140 # ˙ l ŀ
+compose U+02D9 U+006D U+1E41 # ˙ m ṁ
+compose U+02D9 U+006E U+1E45 # ˙ n ṅ
+compose U+02D9 U+006F U+022F # ˙ o ȯ
+compose U+02D9 U+0070 U+1E57 # ˙ p ṗ
+compose U+02D9 U+0072 U+1E59 # ˙ r ṙ
+compose U+02D9 U+0073 U+1E61 # ˙ s ṡ
+compose U+02D9 U+0074 U+1E6B # ˙ t ṫ
+compose U+02D9 U+0077 U+1E87 # ˙ w ẇ
+compose U+02D9 U+0078 U+1E8B # ˙ x ẋ
+compose U+02D9 U+0079 U+1E8F # ˙ y ẏ
+compose U+02D9 U+007A U+017C # ˙ z ż
+compose U+02D9 U+0020 U+02D9 # ˙ · ˙
+compose U+02D9 U+0041 U+0226 # ˙ A Ȧ
+compose U+02D9 U+0042 U+1E02 # ˙ B Ḃ
+compose U+02D9 U+0043 U+010A # ˙ C Ċ
+compose U+02D9 U+0044 U+1E0A # ˙ D Ḋ
+compose U+02D9 U+0045 U+0116 # ˙ E Ė
+compose U+02D9 U+0046 U+1E1E # ˙ F Ḟ
+compose U+02D9 U+0047 U+0120 # ˙ G Ġ
+compose U+02D9 U+0048 U+1E22 # ˙ H Ḣ
+compose U+02D9 U+0049 U+0130 # ˙ I İ
+compose U+02D9 U+004C U+013F # ˙ L Ŀ
+compose U+02D9 U+004D U+1E40 # ˙ M Ṁ
+compose U+02D9 U+004E U+1E44 # ˙ N Ṅ
+compose U+02D9 U+004F U+022E # ˙ O Ȯ
+compose U+02D9 U+0050 U+1E56 # ˙ P Ṗ
+compose U+02D9 U+0052 U+1E58 # ˙ R Ṙ
+compose U+02D9 U+0053 U+1E60 # ˙ S Ṡ
+compose U+02D9 U+0054 U+1E6A # ˙ T Ṫ
+compose U+02D9 U+0057 U+1E86 # ˙ W Ẇ
+compose U+02D9 U+0058 U+1E8A # ˙ X Ẋ
+compose U+02D9 U+0059 U+1E8E # ˙ Y Ẏ
+compose U+02D9 U+005A U+017B # ˙ Z Ż
+compose U+02D9 U+02D9 U+02D9 # ˙ ˙ ˙
+compose U+02DD U+006F U+0151 # ˝ o ő
+compose U+02DD U+0075 U+0171 # ˝ u ű
+compose U+02DD U+0020 U+02DD # ˝ · ˝
+compose U+02DD U+004F U+0150 # ˝ O Ő
+compose U+02DD U+0055 U+0170 # ˝ U Ű
+compose U+02DD U+02DD U+02DD # ˝ ˝ ˝
+compose U+00AF U+0061 U+0101 # ¯ a ā
+compose U+00AF U+0065 U+0113 # ¯ e ē
+compose U+00AF U+0067 U+1E21 # ¯ g ḡ
+compose U+00AF U+0069 U+012B # ¯ i ī
+compose U+00AF U+006F U+014D # ¯ o ō
+compose U+00AF U+0075 U+016B # ¯ u ū
+compose U+00AF U+0076 U+01D6 # ¯ v ǖ
+compose U+00AF U+0079 U+0233 # ¯ y ȳ
+compose U+00AF U+0020 U+00AF # ¯ · ¯
+compose U+00AF U+0041 U+0100 # ¯ A Ā
+compose U+00AF U+0045 U+0112 # ¯ E Ē
+compose U+00AF U+0047 U+1E20 # ¯ G Ḡ
+compose U+00AF U+0049 U+012A # ¯ I Ī
+compose U+00AF U+004F U+014C # ¯ O Ō
+compose U+00AF U+0055 U+016A # ¯ U Ū
+compose U+00AF U+0056 U+01D5 # ¯ V Ǖ
+compose U+00AF U+0059 U+0232 # ¯ Y Ȳ
+compose U+00AF U+00E9 U+1E17 # ¯ é ḗ
+compose U+00AF U+00F3 U+1E53 # ¯ ó ṓ
+compose U+00AF U+00F6 U+022B # ¯ ö ȫ
+compose U+00AF U+00E4 U+01DF # ¯ ä ǟ
+compose U+00AF U+00FC U+01D6 # ¯ ü ǖ
+compose U+00AF U+00E6 U+01E3 # ¯ æ ǣ
+compose U+00AF U+00C9 U+1E16 # ¯ É Ḗ
+compose U+00AF U+00D3 U+1E52 # ¯ Ó Ṓ
+compose U+00AF U+00D6 U+022A # ¯ Ö Ȫ
+compose U+00AF U+00C4 U+01DE # ¯ Ä Ǟ
+compose U+00AF U+00DC U+01D5 # ¯ Ü Ǖ
+compose U+00AF U+00C6 U+01E2 # ¯ Æ Ǣ
+compose U+00AF U+00AF U+00AF # ¯ ¯ ¯
+compose U+00B8 U+0063 U+00E7 # ¸ c ç
+compose U+00B8 U+0064 U+1E11 # ¸ d ḑ
+compose U+00B8 U+0065 U+0229 # ¸ e ȩ
+compose U+00B8 U+0067 U+0123 # ¸ g ģ
+compose U+00B8 U+0068 U+1E29 # ¸ h ḩ
+compose U+00B8 U+006B U+0137 # ¸ k ķ
+compose U+00B8 U+006C U+013C # ¸ l ļ
+compose U+00B8 U+006E U+0146 # ¸ n ņ
+compose U+00B8 U+0072 U+0157 # ¸ r ŗ
+compose U+00B8 U+0073 U+015F # ¸ s ş
+compose U+00B8 U+0074 U+0163 # ¸ t ţ
+compose U+00B8 U+0020 U+00B8 # ¸ · ¸
+compose U+00B8 U+0043 U+00C7 # ¸ C Ç
+compose U+00B8 U+0044 U+1E10 # ¸ D Ḑ
+compose U+00B8 U+0045 U+0228 # ¸ E Ȩ
+compose U+00B8 U+0047 U+0122 # ¸ G Ģ
+compose U+00B8 U+0048 U+1E28 # ¸ H Ḩ
+compose U+00B8 U+004B U+0136 # ¸ K Ķ
+compose U+00B8 U+004C U+013B # ¸ L Ļ
+compose U+00B8 U+004E U+0145 # ¸ N Ņ
+compose U+00B8 U+0052 U+0156 # ¸ R Ŗ
+compose U+00B8 U+0053 U+015E # ¸ S Ş
+compose U+00B8 U+0054 U+0162 # ¸ T Ţ
+compose U+00B8 U+00B8 U+00B8 # ¸ ¸ ¸
+compose U+02DB U+0061 U+0105 # ˛ a ą
+compose U+02DB U+0065 U+0119 # ˛ e ę
+compose U+02DB U+0069 U+012F # ˛ i į
+compose U+02DB U+006F U+01EB # ˛ o ǫ
+compose U+02DB U+0075 U+0173 # ˛ u ų
+compose U+02DB U+0020 U+02DB # ˛ · ˛
+compose U+02DB U+0041 U+0104 # ˛ A Ą
+compose U+02DB U+0045 U+0118 # ˛ E Ę
+compose U+02DB U+0049 U+012E # ˛ I Į
+compose U+02DB U+004F U+01EA # ˛ O Ǫ
+compose U+02DB U+0055 U+0172 # ˛ U Ų
+compose U+02DB U+02DB U+02DB # ˛ ˛ ˛
+compose U+02D8 U+0061 U+0103 # ˘ a ă
+compose U+02D8 U+0065 U+0115 # ˘ e ĕ
+compose U+02D8 U+0067 U+011F # ˘ g ğ
+compose U+02D8 U+0069 U+012D # ˘ i ĭ
+compose U+02D8 U+006F U+014F # ˘ o ŏ
+compose U+02D8 U+0075 U+016D # ˘ u ŭ
+compose U+02D8 U+0020 U+02D8 # ˘ · ˘
+compose U+02D8 U+0041 U+0102 # ˘ A Ă
+compose U+02D8 U+0045 U+0114 # ˘ E Ĕ
+compose U+02D8 U+0047 U+011E # ˘ G Ğ
+compose U+02D8 U+0049 U+012C # ˘ I Ĭ
+compose U+02D8 U+004F U+014E # ˘ O Ŏ
+compose U+02D8 U+0055 U+016C # ˘ U Ŭ
+compose U+02D8 U+00E1 U+1EAF # ˘ á ắ
+compose U+02D8 U+00C1 U+1EAE # ˘ Á Ắ
+compose U+02D8 U+02D8 U+02D8 # ˘ ˘ ˘
+compose U+02DA U+0061 U+00E5 # ˚ a å
+compose U+02DA U+0075 U+016F # ˚ u ů
+compose U+02DA U+0077 U+1E98 # ˚ w ẘ
+compose U+02DA U+0079 U+1E99 # ˚ y ẙ
+compose U+02DA U+0020 U+00B0 # ˚ · °
+compose U+02DA U+0041 U+00C5 # ˚ A Å
+compose U+02DA U+0055 U+016E # ˚ U Ů
+compose U+02DA U+00E1 U+01FB # ˚ á ǻ
+compose U+02DA U+00C1 U+01FA # ˚ Á Ǻ
+compose U+02DA U+02DA U+00B0 # ˚ ˚ °
+compose U+02C7 U+0061 U+01CE # ˇ a ǎ
+compose U+02C7 U+0063 U+010D # ˇ c č
+compose U+02C7 U+0064 U+010F # ˇ d ď
+compose U+02C7 U+0065 U+011B # ˇ e ě
+compose U+02C7 U+0067 U+01E7 # ˇ g ǧ
+compose U+02C7 U+0068 U+021F # ˇ h ȟ
+compose U+02C7 U+0069 U+01D0 # ˇ i ǐ
+compose U+02C7 U+006A U+01F0 # ˇ j ǰ
+compose U+02C7 U+006B U+01E9 # ˇ k ǩ
+compose U+02C7 U+006C U+013E # ˇ l ľ
+compose U+02C7 U+006E U+0148 # ˇ n ň
+compose U+02C7 U+006F U+01D2 # ˇ o ǒ
+compose U+02C7 U+0072 U+0159 # ˇ r ř
+compose U+02C7 U+0073 U+0161 # ˇ s š
+compose U+02C7 U+0074 U+0165 # ˇ t ť
+compose U+02C7 U+0075 U+01D4 # ˇ u ǔ
+compose U+02C7 U+0076 U+01DA # ˇ v ǚ
+compose U+02C7 U+007A U+017E # ˇ z ž
+compose U+02C7 U+0031 U+2081 # ˇ 1 ₁
+compose U+02C7 U+0032 U+2082 # ˇ 2 ₂
+compose U+02C7 U+0033 U+2083 # ˇ 3 ₃
+compose U+02C7 U+0034 U+2084 # ˇ 4 ₄
+compose U+02C7 U+0035 U+2085 # ˇ 5 ₅
+compose U+02C7 U+0036 U+2086 # ˇ 6 ₆
+compose U+02C7 U+0037 U+2087 # ˇ 7 ₇
+compose U+02C7 U+0038 U+2088 # ˇ 8 ₈
+compose U+02C7 U+0039 U+2089 # ˇ 9 ₉
+compose U+02C7 U+0030 U+2080 # ˇ 0 ₀
+compose U+02C7 U+0020 U+02C7 # ˇ · ˇ
+compose U+02C7 U+002D U+208B # ˇ - ₋
+compose U+02C7 U+003D U+208C # ˇ = ₌
+compose U+02C7 U+0041 U+01CD # ˇ A Ǎ
+compose U+02C7 U+0043 U+010C # ˇ C Č
+compose U+02C7 U+0044 U+010E # ˇ D Ď
+compose U+02C7 U+0045 U+011A # ˇ E Ě
+compose U+02C7 U+0047 U+01E6 # ˇ G Ǧ
+compose U+02C7 U+0048 U+021E # ˇ H Ȟ
+compose U+02C7 U+0049 U+01CF # ˇ I Ǐ
+compose U+02C7 U+004B U+01E8 # ˇ K Ǩ
+compose U+02C7 U+004C U+013D # ˇ L Ľ
+compose U+02C7 U+004E U+0147 # ˇ N Ň
+compose U+02C7 U+004F U+01D1 # ˇ O Ǒ
+compose U+02C7 U+0052 U+0158 # ˇ R Ř
+compose U+02C7 U+0053 U+0160 # ˇ S Š
+compose U+02C7 U+0054 U+0164 # ˇ T Ť
+compose U+02C7 U+0055 U+01D3 # ˇ U Ǔ
+compose U+02C7 U+0056 U+01D9 # ˇ V Ǚ
+compose U+02C7 U+005A U+017D # ˇ Z Ž
+compose U+02C7 U+0028 U+208D # ˇ ( ₍
+compose U+02C7 U+0029 U+208E # ˇ ) ₎
+compose U+02C7 U+00FC U+01DA # ˇ ü ǚ
+compose U+02C7 U+00DC U+01D9 # ˇ Ü Ǚ
+compose U+02C7 U+02C7 U+02C7 # ˇ ˇ ˇ

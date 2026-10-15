@@ -1,7 +1,9 @@
-//! Layouts de referência para testes, escritos à mão a partir do comportamento do SO.
+//! Layouts de referência para testes.
 //!
-//! Na fase 2 estes dados passam a ser gerados por dump real (`ToUnicodeEx` no Windows,
-//! `xkbcommon` no Linux) e gravados como arquivos; os testes continuam os mesmos.
+//! - `xkb_*`: dump real do libxkbcommon (xkeyboard-config 2.41), gravado em `fixtures/` por
+//!   `cargo run -p taildesk-platform --example dump_teclado -- <layout> <variante> <locale>`.
+//! - os outros: escritos à mão a partir do comportamento do Windows, até entrar o dump de
+//!   `ToUnicodeEx`.
 
 use crate::{Hid, Keymap, Level, Output};
 
@@ -12,6 +14,7 @@ fn letters_and_space(keys: &mut Vec<(Hid, Level, Output)>) {
         keys.push((hid, Level::Shift, Output::Char(c.to_ascii_uppercase())));
     }
     keys.push((0x2C, Level::Base, Output::Char(' ')));
+    keys.push((0x2C, Level::Shift, Output::Char(' ')));
 }
 
 fn digits(keys: &mut Vec<(Hid, Level, Output)>, shifted: [Output; 10]) {
@@ -27,6 +30,18 @@ fn pairs(keys: &mut Vec<(Hid, Level, Output)>, list: &[(Hid, Output, Output)]) {
         keys.push((hid, Level::Base, base));
         keys.push((hid, Level::Shift, shift));
     }
+}
+
+/// Teclado numérico com o Num Lock ligado. Com ele desligado as teclas viram navegação
+/// (`keypad_nav`), o que não depende do layout.
+fn keypad(keys: &mut Vec<(Hid, Level, Output)>, decimal: char) {
+    for (hid, c) in [(0x54, '/'), (0x55, '*'), (0x56, '-'), (0x57, '+')] {
+        keys.push((hid, Level::Base, Output::Char(c)));
+    }
+    for (i, c) in "1234567890".chars().enumerate() {
+        keys.push((0x59 + i as Hid, Level::Base, Output::Char(c)));
+    }
+    keys.push((0x63, Level::Base, Output::Char(decimal)));
 }
 
 /// `(morta, bases, resultados)` -> entradas de composição, com maiúsculas e o acento sozinho.
@@ -46,7 +61,8 @@ fn compose(out: &mut Vec<(char, char, char)>, dead: char, bases: &str, results: 
 
 use Output::{Char as C, Dead as D};
 
-/// Português (Brasil) ABNT2.
+/// Português (Brasil) ABNT2, com o comportamento do Windows (conferido no CI contra
+/// `ToUnicodeEx`): `´` + `c` não compõe (sai `´c`), ao contrário do Linux com `pt_BR.UTF-8`.
 pub fn abnt2() -> Keymap {
     let mut keys = Vec::new();
     letters_and_space(&mut keys);
@@ -72,7 +88,7 @@ pub fn abnt2() -> Keymap {
             (0x2E, C('='), C('+')),
             (0x2F, D('´'), D('`')),
             (0x30, C('['), C('{')),
-            (0x32, C(']'), C('}')),
+            (0x31, C(']'), C('}')), // ISO 0x32 = a mesma tecla física do 0x31 (`codes::canonical`)
             (0x33, C('ç'), C('Ç')),
             (0x34, D('~'), D('^')),
             (0x35, C('\''), C('"')),
@@ -93,6 +109,9 @@ pub fn abnt2() -> Keymap {
     ] {
         keys.push((hid, Level::AltGr, C(c)));
     }
+    keypad(&mut keys, ',');
+    // Keypad Comma, a tecla extra do numérico do ABNT2: produz `.` (o `,` fica no decimal).
+    keys.push((0x85, Level::Base, C('.')));
     let mut comp = Vec::new();
     compose(&mut comp, '´', "aeiou", "áéíóú");
     compose(&mut comp, '`', "aeiou", "àèìòù");
@@ -148,9 +167,12 @@ pub fn us_intl_windows() -> Keymap {
         (0x12, 'ó'),
         (0x18, 'ú'),
         (0x36, 'ç'),
+        (0x16, 'ß'),
+        (0x11, 'ñ'),
     ] {
         keys.push((hid, Level::AltGr, C(c)));
     }
+    keypad(&mut keys, '.');
     let mut comp = Vec::new();
     compose(&mut comp, '\'', "aeiouc", "áéíóúç");
     compose(&mut comp, '"', "aeiou", "äëïöü");
@@ -162,4 +184,66 @@ pub fn us_intl_windows() -> Keymap {
         keys,
         compose: comp,
     }
+}
+
+/// Inglês (EUA) sem teclas mortas nem AltGr.
+pub fn us() -> Keymap {
+    let mut keys = Vec::new();
+    letters_and_space(&mut keys);
+    digits(
+        &mut keys,
+        [
+            C('!'),
+            C('@'),
+            C('#'),
+            C('$'),
+            C('%'),
+            C('^'),
+            C('&'),
+            C('*'),
+            C('('),
+            C(')'),
+        ],
+    );
+    pairs(
+        &mut keys,
+        &[
+            (0x2D, C('-'), C('_')),
+            (0x2E, C('='), C('+')),
+            (0x2F, C('['), C('{')),
+            (0x30, C(']'), C('}')),
+            (0x31, C('\\'), C('|')),
+            (0x33, C(';'), C(':')),
+            (0x34, C('\''), C('"')),
+            (0x35, C('`'), C('~')),
+            (0x36, C(','), C('<')),
+            (0x37, C('.'), C('>')),
+            (0x38, C('/'), C('?')),
+        ],
+    );
+    keypad(&mut keys, '.');
+    Keymap {
+        name: "us".into(),
+        keys,
+        compose: Vec::new(),
+    }
+}
+
+fn dump(text: &str) -> Keymap {
+    Keymap::from_text(text).expect("fixture gravado com Keymap::to_text")
+}
+
+/// Linux `br(abnt2)` com a tabela Compose de `pt_BR.UTF-8` (`´` + `c` = `ç`).
+pub fn xkb_br_abnt2() -> Keymap {
+    dump(include_str!("../fixtures/xkb-br-abnt2.txt"))
+}
+
+/// Linux `us`.
+pub fn xkb_us() -> Keymap {
+    dump(include_str!("../fixtures/xkb-us.txt"))
+}
+
+/// Linux `us(intl)` com a tabela Compose de `en_US.UTF-8` (`'` + `c` = `ć`).
+pub fn xkb_us_intl() -> Keymap {
+    dump(include_str!("../fixtures/xkb-us-intl.txt"))
 }
