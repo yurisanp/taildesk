@@ -4,7 +4,7 @@
 > **Windows e Linux**, **desktop remoto** (ver + controlar) e **troca de arquivos**.
 > Onde este arquivo diverge dos anteriores, **este vale para o MVP**; o restante do pacote
 > continua como referência para fases futuras (macOS, mobile, PyroWave, áudio).
-> Versões conferidas no crates.io hoje: `tailscale` 0.6.1, `quinn` 0.11.12, `slint` 1.18.1,
+> Versões conferidas no crates.io hoje: `quinn` 0.11.12, `slint` 1.18.1,
 > `wgpu` 30.0.1, `windows-capture` 2.0.1, `openh264` 0.9.8, `ashpd` 0.13.13, `reis` 0.7.1, `x11rb` 0.14.0.
 
 Codinome: **`taildesk`** no lugar de `halyard` (crates `taildesk-*`).
@@ -24,11 +24,13 @@ Codinome: **`taildesk`** no lugar de `halyard` (crates `taildesk-*`).
 ## 2. Decisões ajustadas para Windows + Linux
 
 ### 2.1 Rede (Tailscale)
-- **Overlay embutido (`tailscale` =0.6.1) é o padrão** nas duas plataformas: ambas são suportadas pelo tailscale-rs (Linux x86_64/ARM64, Windows x86_64). O usuário não precisa instalar o Tailscale.
-- **Versões de referência (15/10/2026)**: cliente Tailscale / `tailscaled` **mínimo 1.102** (definido pelo Yuri; estável atual 1.104.1) e crate `tailscale` **0.6.1** (ainda a mais nova no crates.io, conferido hoje). São projetos separados: a crate Rust tem numeração própria e não acompanha a 1.102. O `SystemOverlay` exige `tailscaled` ≥ 1.102 e os testes de contrato da LocalAPI rodam contra a 1.102 e a estável atual; ao surgir uma crate nova, reavaliar o pin (em especial conexão direta, `14-selecao-adaptativa.md`).
-- **Overlay sistema (`tailscaled` + LocalAPI)** entra logo depois como alternativa: dá `whois` com **usuário + app capabilities**, que o modo embutido não expõe (Q1 em `08`). LocalAPI: unix socket no Linux, named pipe no Windows — só esses dois clientes, sem o caso macOS.
-- **Autorização no MVP**, enquanto Q1 não se resolve: ACL/grants da tailnet decidem quem alcança `udp:7420`; o host aplica **tags do peer** + **lista local de nós confiáveis** (`node_stable_id`) + **consentimento na tela**. App capabilities por usuário só no modo sistema.
-- **Risco técnico nº 1**: o quinn precisa de um `AsyncUdpSocket` sobre o socket UDP do tailscale-rs. É o primeiro spike (fase 0); se ficar ruim, plano B é QUIC no modo sistema (socket do SO) enquanto se contribui upstream.
+- **Decisão do Yuri (15/10/2026): o TailDesk usa só o Tailscale instalado na máquina.** Não há nó embutido: a crate `tailscale` (tailscale-rs) não entra no projeto. Host e controlador precisam do cliente oficial do Tailscale instalado, logado na mesma tailnet e rodando. Isso substitui o "embutido como padrão" do pacote original (ADR-002 revisado em `08-roadmap.md`).
+- **Versões de referência (15/10/2026)**: cliente Tailscale / `tailscaled` **mínimo 1.102** (estável atual 1.104.1). Os testes de contrato da LocalAPI rodam contra a 1.102 e a estável atual.
+- **Como o app fala com a rede**: o QUIC usa um socket UDP comum do SO ligado ao IP da tailnet (o `tailscaled` cria a interface `tailscale0` / adaptador Wintun), como já faz o transporte da fase 0. Peers, caminho e identidade vêm da **LocalAPI** (`taildesk-tsapi`): unix socket no Linux, named pipe no Windows. O `SystemOverlay` é o único backend de produção; o `LanOverlay` existe só para desenvolvimento e testes.
+- **O que isso resolve**: `whois` dá **usuário + app capabilities** desde a fase 0 (Q1 em `08` deixa de ser lacuna), o `status` informa se o caminho é direto ou DERP, MagicDNS funciona, e a conexão direta é a do cliente oficial.
+- **O que o app precisa tratar**: Tailscale ausente, parado, deslogado ou abaixo de 1.102. Ao abrir, o app consulta a LocalAPI e, se algo faltar, mostra uma tela com o motivo e o link de instalação da plataforma (Windows: instalador oficial; Ubuntu/Debian e Fedora: repositório `pkgs.tailscale.com`; Arch: pacote `tailscale` do repositório oficial). Leituras como `status` e `whois` não pedem privilégio; ações de escrita (login, prefs) ficam com o próprio cliente do Tailscale e o app não as faz. No Linux, confirmar na fase 0 o acesso ao socket da LocalAPI por usuário comum nas três distros.
+- **Firewall**: no Windows e em distros com firewalld (Fedora), a porta `7420/udp` precisa estar liberada na interface do Tailscale; o instalador/pacote cuida disso ou o app orienta.
+- **Autorização no MVP**: ACL/grants da tailnet decidem quem alcança `udp:7420`; o host aplica **usuário e tags do peer** (via `whois`) + **lista local de nós confiáveis** (`node_stable_id`) + **consentimento na tela**. App capabilities por usuário disponíveis desde o início.
 
 ### 2.2 Linux: Wayland primeiro, não por último
 O pacote original deixava Wayland para a fase 5. Para Linux isso não serve mais: as distros GNOME
@@ -106,7 +108,7 @@ O pacote só tinha `FileOffer/FileAccept/FileCancel/FileProgress`. Proposta comp
 - Nunca sobrescrever sem confirmação; conflito = renomear (`arquivo (1).txt`).
 - Registro de auditoria local de cada transferência (quem, o quê, tamanho, hash).
 
-Por que não Taildrop: o tailscale-rs não o suporta, e ele não dá navegação nem integração com a sessão.
+Por que não Taildrop: ele não dá navegação remota nem integração com a sessão.
 
 ## 4. Workspace inicial
 
@@ -115,7 +117,7 @@ taildesk/
 ├─ Cargo.toml              # workspace, edition 2024, resolver 3
 ├─ crates/
 │  ├─ taildesk-proto/      # .proto (prost) + header binário de mídia
-│  ├─ taildesk-overlay/    # trait Overlay + Embedded(tailscale) + System(LocalAPI) + Lan(dev)
+│  ├─ taildesk-overlay/    # trait Overlay + System(tailscaled/LocalAPI) + Lan(dev)
 │  ├─ taildesk-tsapi/      # cliente LocalAPI: unix socket / named pipe
 │  ├─ taildesk-transport/  # quinn sobre Overlay, certificados pinned, canais tipados
 │  ├─ taildesk-codec/      # traits + openh264 → MF / VA-API
@@ -136,11 +138,11 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 
 | Fase | Entrega | Pronto quando |
 |---|---|---|
-| **0 — Fundações** | Workspace, CI, `taildesk-proto`, `EmbeddedOverlay`, spike quinn-sobre-tailscale-rs, `taildesk-cli bench-net` | **Gate G0**: QUIC sobre o overlay embutido entre um Windows e um Linux, conexão direta e via DERP, com números de throughput/RTT/CPU. Meta mínima: 30 Mbit/s estáveis direto. O README do tailscale-rs diz que a conexão direta funciona "in many cases", mas cai para relay mais que o cliente oficial e a biblioteca não informa o caminho: o G0 **mede com que frequência o embutido fica direto** (mesma LAN e NAT diferentes) e compara com o `tailscaled`. Decisão do Yuri (`14-selecao-adaptativa.md`): o **modo sistema garante a classe LAN** desde já. |
+| **0 — Fundações** | Workspace, CI, `taildesk-proto`, transporte QUIC sobre socket do SO (feito, PR #5), `taildesk-tsapi` (status, peers, `whois`), `SystemOverlay`, detecção de Tailscale ausente/antigo, `taildesk-cli bench-net` | **Gate G0**: QUIC sobre o Tailscale do sistema entre um Windows e um Linux, conexão direta e via DERP, com números de throughput/RTT/CPU e o caminho lido do `status`. Meta mínima: 30 Mbit/s estáveis direto. `whois` identifica o usuário do peer nos dois sentidos. |
 | **1 — Ver** | Captura (DXGI no Windows, portal+PipeWire no Wayland, XShm no X11), openh264, datagramas, janela wgpu. **Protocolo por monitor desde já**: um stream de vídeo por monitor, `DisplayInfo` completo, `StartVideo`/`StopVideo` por `display_id`, mouse com `display_id`; Wayland pede `multiple=true`. **Protocolo de áudio reservado** (mensagens de `15-audio.md` §6.5 e `kind=1` com `stream_id` ≥ 0xF0), sem implementação | `taildesk-cli connect <host> --display N` mostra qualquer monitor do host em 1080p30 nos 4 sentidos (Win↔Win, Win↔Linux, Linux↔Linux). |
 | **2 — Controlar** | Input com tradução automática de layouts (`11-teclado.md`: US-Intl ↔ ABNT2 etc.), cursor separado, consentimento, UI Slint com lista de peers da tailnet; multi-monitor **um por vez** (abas e atalhos, input por monitor); **spike de 2 janelas Slint com vídeo wgpu** (2 texturas NV12 a 60 fps) | Usar o host remoto para trabalho normal de escritório; matriz de teclado de `11-teclado.md` §5 passando; troca de monitor < 300 ms em LAN; latência < 60 ms em LAN. |
 | **3 — Arquivos** | §3 completo: enviar/receber, navegador remoto, retomada, hash | 10 GB em ambos os sentidos sem travar o vídeo; retomada após queda de rede. |
-| **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor em **janelas separadas** (destacar/recolocar aba, prioridades, hotplug, "seguir o mouse", "usar todos os meus monitores"), clipboard texto/imagem, **áudio do sistema** (Opus via `cpal`: WASAPI loopback no Windows, PipeWire/Pulse no Linux) com liga/desliga que corta o tráfego, `SystemOverlay` + `whois` | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
+| **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor em **janelas separadas** (destacar/recolocar aba, prioridades, hotplug, "seguir o mouse", "usar todos os meus monitores"), clipboard texto/imagem, **áudio do sistema** (Opus via `cpal`: WASAPI loopback no Windows, PipeWire/Pulse no Linux) com liga/desliga que corta o tráfego | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
 | **5 — Produção** | Serviço Windows (UAC/login), não-assistido, `restore_token` Wayland, instalador MSI assinado, repositório COPR e AUR (os pacotes básicos já saem no Releases, §8), auditoria | Instalação limpa em máquina nova e acesso sem ninguém na frente (Windows). |
 
 ## 6. Decisões do Yuri (15/10/2026)
@@ -148,16 +150,17 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 1. **Repositório**: `github.com/yurisanp/taildesk`.
 2. **Licença (Q4)**: **open-source, MIT OR Apache-2.0**. Slint entra pela Royalty-free License (atribuição na tela "Sobre"); OpenH264 pelo binário da Cisco baixado em runtime; dependências GPL/AGPL só com ADR. Código do RustDesk continua proibido.
 3. **Servidor de controle (Q5)**: **Tailscale (SaaS)**. Headscale fica fora do MVP; o código não deve impedi-lo (URL de controle configurável), mas não será testado nem documentado agora.
-4. **Nome**: "TailDesk" lembra a marca Tailscale; como o projeto é open-source e público, vale checar as diretrizes de marca do Tailscale antes de divulgar.
+4. **Tailscale só instalado na máquina**: nada de nó embutido; o app usa o `tailscaled` ≥ 1.102 e a LocalAPI (§2.1).
+5. **Nome**: "TailDesk" lembra a marca Tailscale; como o projeto é open-source e público, vale checar as diretrizes de marca do Tailscale antes de divulgar.
 
 ## 7. Riscos específicos deste recorte
 
 | Risco | Mitigação |
 |---|---|
-| quinn sobre o socket do tailscale-rs dá trabalho ou rende pouco | Spike e G0 na fase 0; plano B = modo sistema |
+| Usuário sem Tailscale instalado, parado ou abaixo de 1.102 | Checagem pela LocalAPI ao abrir; tela com o motivo e o link de instalação por plataforma |
+| Acesso à LocalAPI por usuário comum varia entre distros ou versões | Teste de contrato na 1.102 e na estável, nas três distros, na fase 0 |
 | Portal Wayland varia entre GNOME, KDE e wlroots (libei, restore_token, RemoteDesktop ausente no wlroots) | Testar Fedora GNOME/KDE e Arch KDE/Hyprland desde a fase 1 (§2.6) |
 | Fedora sem H.264/HEVC por hardware no Mesa padrão | openh264 da Cisco como padrão; probe detecta e a UI sugere o `mesa-va-drivers-freeworld` |
-| Identidade de usuário ausente no modo embutido | Tags + nós confiáveis + consentimento; `whois` no modo sistema |
 | DXGI DD falha em notebook híbrido | Fallback WGC |
 | openh264 pesado em 1440p/4K | É só ponte; HW na fase 4 |
 | Vários monitores ao mesmo tempo multiplicam encode e banda | Qualidade cheia só no monitor em foco; os outros visíveis a 5–15 fps; abas escondidas param de codificar; **máximo de 2 monitores simultâneos com openh264** (até 4 com HW, conforme o probe) |
@@ -171,4 +174,5 @@ Cada tag `v*` gera, pelo workflow `release.yml`, uma versão na aba Releases do 
 AppImage (Linux universal), `.deb` (Ubuntu/Debian), `.rpm` (Fedora), `.tar.gz` (outros Linux e base do
 `taildesk-bin` do AUR) e `.zip` (Windows x64), mais `SHA256SUMS`. Os pacotes Linux são gerados por
 `packaging/linux/build-packages.sh`. Em PRs que mexem no empacotamento o workflow só gera e testa os pacotes, sem publicar.
+O AppImage carrega a update information (`gh-releases-zsync`) e cada release publica o `.zsync`, para auto update (`16-atualizacao-automatica.md`); o atualizador dentro do app entra na fase 1 com o app gráfico.
 Pendente para a fase 5: instalador MSI assinado, repositório COPR, publicação no AUR e assinatura dos binários.

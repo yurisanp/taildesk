@@ -3,7 +3,13 @@
 Acesso remoto (desktop remoto + troca de arquivos) em **Rust**, para **Windows e Linux** (Ubuntu, Fedora e Arch), usando a
 **tailnet do Tailscale** (servidor de controle do Tailscale) como rede e identidade. Sem servidor próprio de rendezvous ou relay.
 
-> Estado: esqueleto (fase 0). Nada conecta ainda.
+> Estado: fase 1 em andamento. O app abre com a lista de dispositivos da tailnet (lida do Tailscale do
+> sistema) e fica na bandeja; a conexão remota (captura, vídeo e controle) ainda está sendo feita.
+
+O TailDesk usa o **Tailscale instalado no computador** (versão 1.102 ou mais nova), não um embutido.
+Fechar a janela deixa o app na bandeja; para sair, use **Sair** no menu do ícone. No GNOME, a bandeja
+precisa da extensão AppIndicator (o Ubuntu já traz); sem bandeja, fechar a janela encerra o app.
+`taildesk --oculto` abre só na bandeja.
 
 ## Documentação
 O contexto completo está em [`docs/context/`](docs/context/README.md). Comece por:
@@ -19,18 +25,18 @@ Os documentos `00`–`09` usam o codinome antigo `halyard`; leia como `taildesk`
 | Crate | Papel |
 |---|---|
 | `taildesk-proto` | Protocolo de fio; header binário de mídia (pronto, com testes) |
-| `taildesk-overlay` | Trait `Overlay` (tailscale-rs embutido, tailscaled do sistema, LAN de dev) |
+| `taildesk-overlay` | Trait `Overlay` (tailscaled do sistema via LocalAPI, LAN de dev) |
 | `taildesk-tsapi` | Cliente da LocalAPI do tailscaled |
 | `taildesk-transport` | QUIC (quinn) sobre o overlay |
 | `taildesk-codec` | Encoders/decoders (openh264 → Media Foundation / VA-API) |
 | `taildesk-media` | Pipelines do host e do controlador |
-| `taildesk-platform` | Captura, input, cursor e segredos por SO |
+| `taildesk-platform` | Código por SO: instância única e bandeja hoje; captura, input, cursor e segredos nas próximas etapas |
 | `taildesk-render` | Vídeo em wgpu |
 | `taildesk-files` | Troca de arquivos; validação de caminhos (pronta, com testes) |
 | `taildesk-keyboard` | Tradução de layouts; classificação e busca reversa (pronta, com testes) |
 | `taildesk-session` | Estados da sessão, autorização, consentimento |
-| `taildesk-ui` | Interface Slint |
-| `apps/taildesk` | App desktop |
+| `taildesk-ui` | Interface Slint do app (janela principal e bandeja) |
+| `apps/taildesk` | App desktop (janela + ícone na bandeja) |
 | `apps/taildesk-cli` | CLI (`host`, `connect`, `probe`, `bench-net`) |
 
 ## Downloads
@@ -51,8 +57,11 @@ As builds saem na aba [Releases](https://github.com/yurisanp/taildesk/releases):
 ## Desenvolvimento
 ```bash
 cargo xtask check                      # fmt + clippy -D warnings + testes (igual ao CI)
+cargo run -p taildesk                  # app gráfico (janela + bandeja)
 cargo run -p taildesk-cli -- --version
 ```
+No Linux o build precisa do `fontconfig` de desenvolvimento (`libfontconfig1-dev`, `fontconfig-devel`
+ou `fontconfig`). O ícone da bandeja é gerado por `packaging/icone-bandeja.py`.
 Toolchain fixa em `rust-toolchain.toml` (1.97, MSRV do crate `tailscale`).
 
 ## Licença

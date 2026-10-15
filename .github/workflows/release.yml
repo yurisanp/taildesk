@@ -1,12 +1,18 @@
 name: Release
 
-# Publica uma versão: `git tag v0.1.0 && git push origin v0.1.0`.
+# Publica uma versão: `git tag v0.1.0 && git push origin v0.1.0`, ou "Run workflow" (workflow_dispatch)
+# na main com o campo `tag` (ex.: v0.1.0); nesse caso a release cria a tag no commit rodado.
 # Tags com hífen (v0.1.0-beta.1) saem como pre-release.
 # Em PRs que mexem no empacotamento, gera os pacotes sem publicar (só artefatos do workflow).
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag a publicar (ex.: v0.1.0). Vazio = só gera os pacotes."
+        required: false
+        default: ""
   pull_request:
     paths:
       - ".github/workflows/release.yml"
@@ -15,6 +21,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Tag da release: a tag empurrada ou a informada no workflow_dispatch.
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag || '' }}
 
 jobs:
   version:
@@ -27,10 +35,14 @@ jobs:
         name: Versão (tag precisa bater com o Cargo.toml)
         run: |
           cargo_version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            tag="${GITHUB_REF_NAME#v}"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+              echo "::error::tag inválida: $RELEASE_TAG"
+              exit 1
+            fi
+            tag="${RELEASE_TAG#v}"
             if [[ "${tag%%-*}" != "$cargo_version" ]]; then
-              echo "::error::tag $GITHUB_REF_NAME não bate com a versão $cargo_version do Cargo.toml"
+              echo "::error::tag $RELEASE_TAG não bate com a versão $cargo_version do Cargo.toml"
               exit 1
             fi
             echo "version=$tag" >> "$GITHUB_OUTPUT"
@@ -44,17 +56,26 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      # O app gráfico (Slint) liga o fontconfig via pkg-config no build.
+      - name: Dependências do sistema
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Ferramentas de empacotamento
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-deb,cargo-generate-rpm
+      - name: zsyncmake (gera o .zsync do AppImage para auto update)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsync
       - run: cargo build --release --locked -p taildesk -p taildesk-cli
       - run: packaging/linux/build-packages.sh "${{ needs.version.outputs.version }}" dist
       - name: Teste rápido do AppImage e do tar.gz
         run: |
           APPIMAGE_EXTRACT_AND_RUN=1 ./dist/TailDesk-*.AppImage cli --version
+          # Update information embutida (seção .upd_info) e o .zsync ao lado do AppImage.
+          objcopy -O binary --only-section=.upd_info dist/TailDesk-*.AppImage /dev/stdout | tr -d '\0' | tee "$RUNNER_TEMP/updinfo"; echo
+          grep -q '^gh-releases-zsync|yurisanp|taildesk|' "$RUNNER_TEMP/updinfo"
+          test -s dist/TailDesk-*.AppImage.zsync
           tar -xzf dist/taildesk-*-linux-x86_64.tar.gz -C "$RUNNER_TEMP"
           "$RUNNER_TEMP"/taildesk-*/usr/bin/taildesk-cli --version
       - uses: actions/upload-artifact@v4
@@ -87,7 +108,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
     needs: [version, linux, windows]
     runs-on: ubuntu-latest
     permissions:
@@ -104,6 +125,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          flags=(--generate-notes --title "TailDesk ${GITHUB_REF_NAME}")
-          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
+          flags=(--generate-notes --title "TailDesk ${RELEASE_TAG}" --target "$GITHUB_SHA")
+          [[ "$RELEASE_TAG" == *-* ]] && flags+=(--prerelease)
+          gh release create "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"

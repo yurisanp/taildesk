@@ -71,12 +71,12 @@ impl PathKind {
     }
 }
 
-/// Backend do Tailscale em uso.
+/// Backend do Tailscale em uso. Só existe o do sistema (ADR-009); o valor 1 era o modo
+/// embutido e fica reservado.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum OverlayMode {
     #[default]
     Unknown = 0,
-    Embedded = 1,
     System = 2,
 }
 
