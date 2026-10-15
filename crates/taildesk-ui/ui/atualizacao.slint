@@ -1,0 +1,201 @@
+// Atualizador do app (docs/context/16-atualizacao-automatica.md §5): faixa de aviso na tela inicial
+// e o cartão Configurações → Atualizações. O estado vem do app (`apps/taildesk/src/atualizacao.rs`).
+import { Switch } from "std-widgets.slint";
+import { Tema } from "tema.slint";
+import { BarraProgresso, Botao, Cartao, Separador } from "componentes.slint";
+
+export enum EstadoAtualizacao {
+    // Ainda não procurou (procura automática desligada ou app recém-aberto).
+    parada,
+    procurando,
+    em-dia,
+    disponivel,
+    baixando,
+    // Arquivo trocado; falta reiniciar.
+    pronta,
+    erro,
+}
+
+// Como esta cópia foi instalada: decide se o app troca o arquivo ou só avisa.
+export enum Instalacao { appimage, pacote, arquivo }
+
+export struct InfoAtualizacao {
+    estado: EstadoAtualizacao,
+    // Versão nova (ex.: "0.2.0").
+    versao: string,
+    // Página da release (notas e download manual).
+    pagina: string,
+    progresso: float,
+    instalacao: Instalacao,
+    // O app consegue se trocar sozinho (AppImage numa pasta com escrita).
+    automatica: bool,
+    // Há sessão ativa: instalar e reiniciar esperam ela terminar.
+    adiada: bool,
+    // Mostrar a faixa na tela inicial ("Depois" esconde até a próxima versão).
+    aviso: bool,
+    erro: string,
+}
+
+export global TextosAtualizacao {
+    public pure function linha(i: InfoAtualizacao) -> string {
+        if i.estado == EstadoAtualizacao.procurando { return @tr("Procurando atualizações…"); }
+        if i.estado == EstadoAtualizacao.em-dia { return @tr("Você está na versão mais recente."); }
+        if i.estado == EstadoAtualizacao.baixando { return @tr("Baixando o TailDesk {}…", i.versao); }
+        if i.estado == EstadoAtualizacao.pronta {
+            return i.adiada ? @tr("TailDesk {} instalado. O app reinicia quando a sessão terminar.", i.versao)
+                : @tr("TailDesk {} instalado. Reinicie para concluir.", i.versao);
+        }
+        if i.estado == EstadoAtualizacao.erro { return @tr("Não foi possível atualizar: {}", i.erro); }
+        if i.estado == EstadoAtualizacao.disponivel {
+            if i.adiada && i.automatica { return @tr("TailDesk {} disponível. A atualização será instalada quando a sessão terminar.", i.versao); }
+            if i.instalacao == Instalacao.pacote { return @tr("TailDesk {} disponível. Atualize pelo gerenciador de pacotes da sua distribuição.", i.versao); }
+            if !i.automatica && i.instalacao == Instalacao.appimage { return @tr("TailDesk {} disponível. A pasta do AppImage não aceita escrita: baixe a versão nova no GitHub.", i.versao); }
+            return @tr("TailDesk {} disponível.", i.versao);
+        }
+        @tr("Procura automática desligada.")
+    }
+}
+
+// Botão principal de acordo com o estado; "" quando não há ação.
+component AcaoAtualizacao inherits VerticalLayout {
+    in property <InfoAtualizacao> info;
+    callback procurar();
+    callback atualizar();
+    callback reiniciar();
+    callback abrir-link(string);
+    alignment: center;
+    if info.estado == EstadoAtualizacao.disponivel && info.automatica && !info.adiada: Botao {
+        texto: @tr("Atualizar agora"); primario: true; altura: 28px; clicado => { root.atualizar(); }
+    }
+    if info.estado == EstadoAtualizacao.disponivel && !info.automatica && info.instalacao != Instalacao.pacote: Botao {
+        texto: @tr("Baixar no GitHub"); primario: true; altura: 28px; clicado => { root.abrir-link(info.pagina); }
+    }
+    if info.estado == EstadoAtualizacao.pronta && !info.adiada: Botao {
+        texto: @tr("Reiniciar"); primario: true; altura: 28px; clicado => { root.reiniciar(); }
+    }
+    if info.estado == EstadoAtualizacao.parada || info.estado == EstadoAtualizacao.em-dia || info.estado == EstadoAtualizacao.erro: Botao {
+        texto: info.estado == EstadoAtualizacao.erro ? @tr("Tentar de novo") : @tr("Procurar agora");
+        altura: 28px;
+        clicado => { root.procurar(); }
+    }
+}
+
+// Faixa no topo da tela inicial: versão nova disponível, baixando ou pronta para reiniciar.
+export component FaixaAtualizacao inherits Rectangle {
+    in property <InfoAtualizacao> info;
+    callback procurar();
+    callback atualizar();
+    callback reiniciar();
+    callback dispensar();
+    callback abrir-link(string);
+    background: root.info.estado == EstadoAtualizacao.erro ? Tema.perigo.with-alpha(0.12) : Tema.primaria.with-alpha(0.12);
+
+    VerticalLayout {
+        padding: 12px;
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                font-weight: 600;
+                color: Tema.texto;
+                font-size: Tema.fonte;
+                text: TextosAtualizacao.linha(root.info);
+            }
+            AcaoAtualizacao {
+                info: root.info;
+                procurar => { root.procurar(); }
+                atualizar => { root.atualizar(); }
+                reiniciar => { root.reiniciar(); }
+                abrir-link(u) => { root.abrir-link(u); }
+            }
+            if root.info.pagina != "": VerticalLayout {
+                alignment: center;
+                Botao { texto: @tr("Novidades"); discreto: true; altura: 28px; clicado => { root.abrir-link(root.info.pagina); } }
+            }
+            if root.info.estado != EstadoAtualizacao.baixando: VerticalLayout {
+                alignment: center;
+                Botao { texto: @tr("Depois"); discreto: true; altura: 28px; clicado => { root.dispensar(); } }
+            }
+        }
+        if root.info.estado == EstadoAtualizacao.baixando: BarraProgresso { valor: root.info.progresso; }
+    }
+}
+
+// Configurações → Atualizações.
+export component CartaoAtualizacoes inherits Cartao {
+    in property <InfoAtualizacao> info;
+    in-out property <bool> automatica;
+    in-out property <bool> pre;
+    callback automatica-mudou(bool);
+    callback pre-mudou(bool);
+    callback procurar();
+    callback atualizar();
+    callback reiniciar();
+    callback abrir-link(string);
+
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        HorizontalLayout {
+            spacing: 16px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 2px;
+                Text { text: @tr("Procurar atualizações automaticamente"); color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+                Text { text: @tr("Ao abrir e uma vez por dia, só na página de releases do GitHub. Sem telemetria."); color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+            }
+            VerticalLayout {
+                alignment: center;
+                Switch { checked <=> root.automatica; toggled => { root.automatica-mudou(self.checked); } }
+            }
+        }
+        Separador { }
+        HorizontalLayout {
+            spacing: 16px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 2px;
+                Text { text: @tr("Receber versões de teste"); color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+                Text { text: @tr("Canal pré-lançamento: as betas chegam antes, com mais chance de erros."); color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+            }
+            VerticalLayout {
+                alignment: center;
+                Switch { checked <=> root.pre; toggled => { root.pre-mudou(self.checked); } }
+            }
+        }
+        Separador { }
+        VerticalLayout {
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    color: Tema.texto;
+                    font-size: Tema.fonte;
+                    text: TextosAtualizacao.linha(root.info);
+                }
+                AcaoAtualizacao {
+                    info: root.info;
+                    procurar => { root.procurar(); }
+                    atualizar => { root.atualizar(); }
+                    reiniciar => { root.reiniciar(); }
+                    abrir-link(u) => { root.abrir-link(u); }
+                }
+            }
+            if root.info.estado == EstadoAtualizacao.baixando: BarraProgresso { valor: root.info.progresso; }
+        }
+    }
+}

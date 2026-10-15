@@ -403,6 +403,11 @@ fn responder(sessao: IdSessao, resposta: ConsentAnswer) {
 }
 
 impl Ui {
+    /// Alguém controla este computador agora (faixa de sessão aberta).
+    pub fn ativa(&self) -> bool {
+        !self.faixas.borrow().is_empty()
+    }
+
     pub fn evento(&self, ev: EventoHost, settings: &Arc<Mutex<HostSettings>>) {
         match ev {
             EventoHost::Pedido {

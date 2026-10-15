@@ -454,6 +454,11 @@ fn na_sessao_ja<R>(id: IdLocal, f: impl FnOnce(&mut SessaoUi) -> R) -> Option<R>
 }
 
 impl Controlador {
+    /// Há janela de sessão aberta por este computador.
+    pub fn ativa(&self) -> bool {
+        !self.sessoes.borrow().is_empty()
+    }
+
     /// "Conectar" num dispositivo da lista.
     pub fn conectar(&self, rt: &tokio::runtime::Handle, nome: String, ip: String) {
         let Ok(ip) = ip.parse::<IpAddr>() else {

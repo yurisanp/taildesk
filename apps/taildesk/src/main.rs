@@ -12,6 +12,7 @@
 // Sem console no Windows: é um app gráfico.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod atualizacao;
 mod config;
 mod controlador;
 mod host;
@@ -114,6 +115,7 @@ impl App {
         j.set_aceitando(self.aceitando.get());
         j.set_dispositivos(ModelRc::from(self.lista.clone()));
         aplicar_na_janela(&j, &self.visao.borrow());
+        atualizacao::ligar(&j);
 
         j.on_busca_mudou(|_| no_app(App::filtrar));
         j.on_aceitando_mudou(|v| no_app(move |app| app.definir_aceitando(v)));
@@ -171,6 +173,11 @@ impl App {
         *self.todos.borrow_mut() = v.dispositivos.clone();
         *self.visao.borrow_mut() = v;
         self.filtrar();
+    }
+
+    /// Há sessão aberta, como host ou controlador: o atualizador não instala nem reinicia.
+    fn sessao_ativa(&self) -> bool {
+        self.host.ativa() || self.controlador.ativa()
     }
 
     /// Mantém a janela e a bandeja com o mesmo valor de "Aceitar conexões".
@@ -320,7 +327,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Leitura do Tailscale numa thread própria, para não travar a interface.
     let agora = Arc::new(Notify::new());
-    let mut settings = config::ler().host;
+    let conf = config::ler();
+    let mut settings = conf.host;
     settings.accept_connections = aceitando;
     let settings = Arc::new(Mutex::new(settings));
     // Rede (Tailscale, sessões) fora da thread da interface.
@@ -345,6 +353,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     APP.with(|a| *a.borrow_mut() = Some(app.clone()));
     rt.spawn(acompanhar_tailscale(agora));
     rt.spawn(host::rodar(settings));
+    atualizacao::iniciar(conf.atualizacao);
 
     if !(oculto && com_bandeja) {
         app.mostrar(token);
@@ -355,5 +364,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fecha a janela e tira o ícone da bandeja antes de sair.
     APP.with(|a| a.borrow_mut().take());
     rt.shutdown_timeout(Duration::from_secs(1));
+    drop(_guarda);
+    atualizacao::reiniciar_se_pedido();
     Ok(())
 }

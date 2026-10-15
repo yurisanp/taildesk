@@ -18,6 +18,7 @@ taildesk-overlay.workspace = true
 taildesk-proto.workspace = true
 taildesk-keyboard.workspace = true
 taildesk-files.workspace = true
+taildesk-update.workspace = true
 slint = { version = "=1.18.1", features = ["unstable-winit-030"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
 

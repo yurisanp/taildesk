@@ -3,6 +3,7 @@
 import { AboutSlint, LineEdit, ScrollView, Switch, ListView } from "std-widgets.slint";
 import { Tema } from "tema.slint";
 import { Botao, Cartao, ChipStatus, Dispositivo, Estado, ItemNav, LinhaInfo, PontoStatus, Separador, Textos, Toast } from "componentes.slint";
+import { CartaoAtualizacoes, FaixaAtualizacao, InfoAtualizacao } from "atualizacao.slint";
 
 // Como está o Tailscale deste computador, lido pela LocalAPI.
 export enum EstadoTailscale {
@@ -310,8 +311,16 @@ component SecaoConfiguracoes inherits ScrollView {
     in property <string> tailscale;
     in property <string> versao-app;
     in property <bool> bandeja;
+    in property <InfoAtualizacao> atualizacao;
+    in-out property <bool> atualizar-auto;
+    in-out property <bool> canal-pre;
     callback aceitando-mudou(bool);
     callback abrir-link(string);
+    callback atualizar-auto-mudou(bool);
+    callback canal-pre-mudou(bool);
+    callback procurar-atualizacao();
+    callback atualizar-agora();
+    callback reiniciar-app();
     VerticalLayout {
         padding: 20px;
         spacing: 14px;
@@ -351,6 +360,19 @@ component SecaoConfiguracoes inherits ScrollView {
                     acionar => { root.abrir-link("https://login.tailscale.com/admin/machines"); }
                 }
             }
+        }
+
+        Text { text: @tr("Atualizações"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        CartaoAtualizacoes {
+            info: root.atualizacao;
+            automatica <=> root.atualizar-auto;
+            pre <=> root.canal-pre;
+            automatica-mudou(v) => { root.atualizar-auto-mudou(v); }
+            pre-mudou(v) => { root.canal-pre-mudou(v); }
+            procurar => { root.procurar-atualizacao(); }
+            atualizar => { root.atualizar-agora(); }
+            reiniciar => { root.reiniciar-app(); }
+            abrir-link(u) => { root.abrir-link(u); }
         }
 
         // Atribuição exigida pela licença royalty-free do Slint para apps desktop.
@@ -398,12 +420,21 @@ export component JanelaPrincipal inherits Window {
     in property <bool> linux;
     in property <string> versao-app;
     in property <bool> bandeja;
+    in property <InfoAtualizacao> atualizacao;
+    in-out property <bool> atualizar-auto: true;
+    in-out property <bool> canal-pre;
 
     callback busca-mudou(string);
     callback conectar(Dispositivo);
     callback abrir-link(string);
     callback verificar();
     callback aceitando-mudou(bool);
+    callback atualizar-auto-mudou(bool);
+    callback canal-pre-mudou(bool);
+    callback procurar-atualizacao();
+    callback atualizar-agora();
+    callback reiniciar-app();
+    callback dispensar-atualizacao();
 
     function copiar(t: string) {
         copiador.copiar(t);
@@ -466,6 +497,14 @@ export component JanelaPrincipal inherits Window {
                 copiar(t) => { root.copiar(t); }
                 verificar => { root.verificar(); }
             }
+            if root.atualizacao.aviso: FaixaAtualizacao {
+                info: root.atualizacao;
+                procurar => { root.procurar-atualizacao(); }
+                atualizar => { root.atualizar-agora(); }
+                reiniciar => { root.reiniciar-app(); }
+                dispensar => { root.dispensar-atualizacao(); }
+                abrir-link(u) => { root.abrir-link(u); }
+            }
             if root.secao == 0: SecaoDispositivos {
                 vertical-stretch: 1;
                 opacity: root.tailscale == EstadoTailscale.conectado ? 1 : 0.5;
@@ -484,8 +523,16 @@ export component JanelaPrincipal inherits Window {
                 tailscale: root.tailscale-resumo;
                 versao-app: root.versao-app;
                 bandeja: root.bandeja;
+                atualizacao: root.atualizacao;
+                atualizar-auto <=> root.atualizar-auto;
+                canal-pre <=> root.canal-pre;
                 aceitando-mudou(v) => { root.aceitando-mudou(v); }
                 abrir-link(u) => { root.abrir-link(u); }
+                atualizar-auto-mudou(v) => { root.atualizar-auto-mudou(v); }
+                canal-pre-mudou(v) => { root.canal-pre-mudou(v); }
+                procurar-atualizacao => { root.procurar-atualizacao(); }
+                atualizar-agora => { root.atualizar-agora(); }
+                reiniciar-app => { root.reiniciar-app(); }
             }
         }
     }

@@ -4,8 +4,11 @@ export component Bandeja inherits SystemTrayIcon {
     // Linha de estado no topo do menu (ex.: "yuri-notebook · 2 dispositivos online").
     in property <string> estado;
     in-out property <bool> aceitando: true;
+    // "TailDesk 0.2.0 disponível" quando há versão nova; vazio esconde o item.
+    in property <string> atualizacao;
 
     callback abrir();
+    callback abrir-atualizacao();
     callback aceitando-mudou(bool);
     callback sair();
 
@@ -18,6 +21,7 @@ export component Bandeja inherits SystemTrayIcon {
         MenuItem { title: root.estado; enabled: false; }
         MenuSeparator { }
         MenuItem { title: @tr("Abrir o TailDesk"); activated => { root.abrir(); } }
+        if root.atualizacao != "": MenuItem { title: root.atualizacao; activated => { root.abrir-atualizacao(); } }
         // Texto da ação em vez de marca: a bandeja do Linux (StatusNotifierItem) no Slint 1.18
         // não mostra itens marcáveis.
         MenuItem {
