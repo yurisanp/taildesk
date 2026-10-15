@@ -364,6 +364,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fecha a janela e tira o ícone da bandeja antes de sair.
     APP.with(|a| a.borrow_mut().take());
     rt.shutdown_timeout(Duration::from_secs(1));
+    // O exec não roda destrutores: tira o socket da instância única antes (no Windows a guarda
+    // não tem nada a soltar).
+    #[cfg(unix)]
     drop(_guarda);
     atualizacao::reiniciar_se_pedido();
     Ok(())

@@ -132,8 +132,8 @@ fn mudar(f: impl FnOnce(&mut Estado)) {
         let versao = i.versao.to_string();
         let dispensada = e.dispensada.as_deref() == Some(versao.as_str());
         i.aviso = match i.estado {
-            EstadoAtualizacao::Disponivel => !dispensada,
-            EstadoAtualizacao::Baixando | EstadoAtualizacao::Pronta => true,
+            EstadoAtualizacao::Disponivel | EstadoAtualizacao::Pronta => !dispensada,
+            EstadoAtualizacao::Baixando => true,
             // Falha ao instalar o que o usuário pediu: a faixa mostra o erro e "Tentar de novo".
             EstadoAtualizacao::Erro => e.nova.is_some() && !dispensada,
             _ => false,
