@@ -1,11 +1,21 @@
 //! Troca de arquivos (`docs/context/10-plano-windows-linux.md` §3).
 //!
-//! Este módulo concentra a parte de segurança: todo caminho que chega do peer é **relativo a
+//! A raiz do crate concentra a parte de segurança: todo caminho que chega do peer é **relativo a
 //! uma raiz permitida**, usa `/` como separador e é validado aqui antes de tocar o disco.
+//!
+//! - [`xfer`]: envio e recepção dos bytes (stream de dados, BLAKE3, `.part`, retomada);
+//! - [`listing`]: listagem para o navegador remoto e envio de pastas.
+//!
+//! As mensagens de controle estão em `taildesk_proto::files`.
 
 use std::fmt;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+
+pub mod listing;
+pub mod xfer;
+
+pub use xfer::{Incoming, Source, XferError};
 
 /// Sufixo dos arquivos em transferência; o rename para o nome final é atômico no fim.
 pub const PART_SUFFIX: &str = ".part";
