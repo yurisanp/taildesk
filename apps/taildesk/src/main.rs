@@ -13,6 +13,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod config;
+mod controlador;
 mod host;
 mod modelo;
 
@@ -49,12 +50,20 @@ struct App {
     settings: Arc<Mutex<taildesk_session::HostSettings>>,
     /// Pedido de acesso e faixa de sessão ativa.
     host: host::Ui,
+    /// Janelas de sessão abertas por este computador.
+    controlador: controlador::Controlador,
+    rt: tokio::runtime::Handle,
 }
 
 thread_local! {
     static APP: RefCell<Option<Rc<App>>> = const { RefCell::new(None) };
     /// Token de ativação para a próxima janela criada (consumido pelo gancho do winit).
     static TOKEN: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Roda `f` com o app agora; só na thread da interface. `None` se o app já fechou.
+fn com_app<R>(f: impl FnOnce(&App) -> R) -> Option<R> {
+    APP.with(|a| a.borrow().clone()).map(|app| f(&app))
 }
 
 /// Roda `f` com o app, na thread da interface (de qualquer thread).
@@ -114,10 +123,10 @@ impl App {
             }
         });
         j.on_conectar(|d| {
-            avisar(format!(
-                "A conexão com {} chega nas próximas etapas da fase 1 (captura e vídeo).",
-                d.nome
-            ));
+            com_app(|app| {
+                app.controlador
+                    .conectar(&app.rt, d.nome.to_string(), d.ip.to_string())
+            });
         });
         let agora = self.agora.clone();
         j.on_verificar(move || agora.notify_one());
@@ -314,6 +323,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut settings = config::ler().host;
     settings.accept_connections = aceitando;
     let settings = Arc::new(Mutex::new(settings));
+    // Rede (Tailscale, sessões) fora da thread da interface.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("taildesk-rede")
+        .enable_all()
+        .build()?;
     let app = Rc::new(App {
         janela: RefCell::new(None),
         todos: RefCell::new(Vec::new()),
@@ -324,14 +339,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         agora: agora.clone(),
         settings: settings.clone(),
         host: host::Ui::default(),
+        controlador: controlador::Controlador::default(),
+        rt: rt.handle().clone(),
     });
     APP.with(|a| *a.borrow_mut() = Some(app.clone()));
-    // Rede (Tailscale, sessões) fora da thread da interface.
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .thread_name("taildesk-rede")
-        .enable_all()
-        .build()?;
     rt.spawn(acompanhar_tailscale(agora));
     rt.spawn(host::rodar(settings));
 
