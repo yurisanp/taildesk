@@ -16,11 +16,11 @@ mod ui {
 }
 
 use ui::{
-    Dispositivo, Estado, Etapa, FaixaHost, JanelaPedido, JanelaPrincipal, JanelaSessao,
-    JanelaTeste, Monitor, Tema,
+    Dispositivo, Estado, EstadoTailscale, Etapa, FaixaHost, JanelaBoasVindas, JanelaPedido,
+    JanelaPrincipal, JanelaSessao, JanelaTeste, Monitor, Tema,
 };
 
-const TELAS: &str = "principal, teste, diagnostico, sessao-som, transferencias, configuracoes, pedido, faixa, sessao, sessao-monitores, sessao-wayland, sessao-com-janela, sessao-destacada, sessao-arquivos, sessao-navegar, sessao-relay, sessao-esperando, sessao-reconectando";
+const TELAS: &str = "boas-vindas, boas-vindas-instalar, boas-vindas-entrar, boas-vindas-windows, boas-vindas-conectado, boas-vindas-acesso, boas-vindas-wayland, tailscale-parado, principal, teste, diagnostico, sessao-som, transferencias, configuracoes, pedido, faixa, sessao, sessao-monitores, sessao-wayland, sessao-com-janela, sessao-destacada, sessao-arquivos, sessao-navegar, sessao-relay, sessao-esperando, sessao-reconectando";
 
 fn dispositivo(
     nome: &str,
@@ -240,6 +240,32 @@ struct Abertas {
     sessoes: Vec<JanelaSessao>,
     pedido: Option<JanelaPedido>,
     faixa: Option<FaixaHost>,
+    boas_vindas: Option<JanelaBoasVindas>,
+}
+
+/// Primeira execução (levantamento §5.1). O sistema detectado decide os textos de instalação e login.
+fn boas_vindas(tema: TemaEscolhido) -> Result<JanelaBoasVindas, slint::PlatformError> {
+    let b = JanelaBoasVindas::new()?;
+    aplicar_tema(&b, tema);
+    b.set_sistema(if cfg!(windows) { "windows" } else { "ubuntu" }.into());
+    b.set_wayland(!cfg!(windows));
+    Ok(b)
+}
+
+/// Versão estática de um passo da primeira execução, para capturas.
+fn boas_vindas_estatica(
+    tema: TemaEscolhido,
+    estado: EstadoTailscale,
+    sistema: &str,
+    passo: i32,
+) -> Result<JanelaBoasVindas, slint::PlatformError> {
+    let b = boas_vindas(tema)?;
+    b.set_simular(false);
+    b.set_tailscale(estado);
+    b.set_sistema(sistema.into());
+    b.set_wayland(sistema != "windows");
+    b.set_passo(passo);
+    Ok(b)
 }
 
 fn abrir_sessao(
@@ -365,6 +391,24 @@ fn principal(tema: TemaEscolhido, secao: i32) -> Result<JanelaPrincipal, slint::
     janela.on_testar(move |d| abrir_teste(d.nome, false, tema, &a));
     let a = abertas.clone();
     janela.on_diagnostico(move || abrir_teste("desktop-casa".into(), false, tema, &a));
+    let a = abertas.clone();
+    let fraca = janela.as_weak();
+    janela.on_boas_vindas(move || {
+        let b = boas_vindas(tema).expect("janela de primeira execução");
+        b.set_tailscale(EstadoTailscale::Conectado);
+        let principal = fraca.clone();
+        let propria = b.as_weak();
+        b.on_concluir(move |aceitar| {
+            if let Some(p) = principal.upgrade() {
+                p.set_aceitando(aceitar);
+            }
+            if let Some(b) = propria.upgrade() {
+                b.hide().expect("fechar primeira execução");
+            }
+        });
+        b.show().expect("mostrar primeira execução");
+        a.borrow_mut().boas_vindas = Some(b);
+    });
     // Mantém as janelas filhas vivas enquanto a principal existir.
     std::mem::forget(abertas);
     Ok(janela)
@@ -404,6 +448,45 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     match tela.as_str() {
+        "boas-vindas" => {
+            let b = boas_vindas(tema)?;
+            let propria = b.as_weak();
+            b.on_concluir(move |aceitar| {
+                let p = principal(tema, 0).expect("janela principal");
+                p.set_aceitando(aceitar);
+                p.show().expect("mostrar janela principal");
+                // A principal passa a ser a janela do app até o fim do protótipo.
+                std::mem::forget(p);
+                if let Some(b) = propria.upgrade() {
+                    b.hide().expect("fechar primeira execução");
+                }
+            });
+            b.show()?;
+            slint::run_event_loop()
+        }
+        "boas-vindas-instalar" => {
+            boas_vindas_estatica(tema, EstadoTailscale::NaoInstalado, "ubuntu", 1)?.run()
+        }
+        "boas-vindas-entrar" => {
+            boas_vindas_estatica(tema, EstadoTailscale::Desconectado, "fedora", 1)?.run()
+        }
+        "boas-vindas-windows" => {
+            boas_vindas_estatica(tema, EstadoTailscale::Desconectado, "windows", 1)?.run()
+        }
+        "boas-vindas-conectado" => {
+            boas_vindas_estatica(tema, EstadoTailscale::Conectado, "ubuntu", 1)?.run()
+        }
+        "boas-vindas-acesso" => {
+            boas_vindas_estatica(tema, EstadoTailscale::Conectado, "ubuntu", 2)?.run()
+        }
+        "boas-vindas-wayland" => {
+            boas_vindas_estatica(tema, EstadoTailscale::Conectado, "ubuntu", 3)?.run()
+        }
+        "tailscale-parado" => {
+            let p = principal(tema, 0)?;
+            p.set_tailscale_conectado(false);
+            p.run()
+        }
         "principal" => principal(tema, 0)?.run(),
         "transferencias" => principal(tema, 1)?.run(),
         "configuracoes" => principal(tema, 2)?.run(),

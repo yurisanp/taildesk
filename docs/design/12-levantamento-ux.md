@@ -73,8 +73,23 @@ Navegação: janela principal com barra lateral (Dispositivos, Transferências, 
 por sessão, uma janela própria (ou aba, a decidir no protótipo).
 
 ### 5.1 Primeira execução
-- Passo 1: "Entrar na sua tailnet" (login do Tailscale embutido; abre o navegador). Texto
-  explica em uma frase: "O TailDesk só conecta máquinas da sua rede Tailscale."
+- Passo 1: **Tailscale neste computador**. O TailDesk não embute o Tailscale: usa o Tailscale
+  instalado na máquina (tailscaled + LocalAPI). Texto em uma frase: "O TailDesk usa o Tailscale
+  deste computador para encontrar e conectar suas máquinas." A tela detecta e mostra um de três
+  estados, e verifica de novo sozinha a cada poucos segundos (e no botão "Verificar de novo"):
+  1. **Não instalado**: "O Tailscale não está instalado." Botão "Baixar o Tailscale" (abre
+     tailscale.com/download). No Linux, mostra o comando da distro detectada com botão Copiar:
+     Ubuntu/Debian e Fedora `curl -fsSL https://tailscale.com/install.sh | sh`, Arch
+     `sudo pacman -S tailscale`, e em seguida `sudo systemctl enable --now tailscaled`.
+     Versão mínima recomendada: 1.102.
+  2. **Instalado, mas desconectado** (serviço parado, sem login ou "Needs login"): "O Tailscale
+     está instalado, mas não está conectado." Windows: "Abrir o Tailscale" (o app da bandeja faz o
+     login). Linux: serviço parado → `sudo systemctl enable --now tailscaled`; sem login → botão
+     "Entrar" que pede a URL de login pela LocalAPI e abre no navegador (alternativa: `sudo
+     tailscale up`). Se a LocalAPI negar acesso ao usuário (Linux sem operador), mostrar
+     `sudo tailscale set --operator=$USER` com Copiar.
+  3. **Conectado**: "Conectado à tailnet **yuri@github** como **este-pc**" e versão; botão
+     Continuar. Versão abaixo da mínima: aviso amarelo "Atualize o Tailscale", mas deixa seguir.
 - Passo 2: "Este computador pode ser acessado?" com duas escolhas: **Sim, pedindo minha
   permissão a cada vez** (padrão) / **Não, só vou acessar outros**.
 - Passo 3 (Linux Wayland): explicar antes que o sistema vai pedir permissão de tela e de
@@ -97,7 +112,7 @@ por sessão, uma janela própria (ou aba, a decidir no protótipo).
 └─────────────────┴──────────────────────────────────────────────────────────┘
 ```
 - Estados por dispositivo: online com TailDesk, online sem TailDesk, offline, não suportado.
-  O modo embutido do tailscale-rs pode não expor todos os dados (SO, usuário); mostrar o que houver.
+  SO, usuário e endereços vêm do Tailscale do sistema (status e whois da LocalAPI); mostrar o que houver.
 - Favoritos (★) no topo; recentes logo abaixo.
 - Ações rápidas no detalhe: Conectar, **Testar conexão** (abre a tela §5.10 com esse dispositivo),
   Enviar arquivo (sem abrir sessão), Copiar endereço.
@@ -214,7 +229,11 @@ abrir pasta. Serve também como registro de auditoria legível (`10-plano` §3).
   remoto ligado ou desligado por padrão, teclado padrão (Auto), tela cheia ao conectar,
   modo de monitores (Um por vez / Janelas separadas), "Seguir o mouse" e "Usar todos os meus
   monitores" (distribui as janelas de monitores em tela cheia nos monitores deste PC).
-- **Rede**: modo embutido vs Tailscale do sistema (quando existir), tailnet atual, sair.
+- **Rede**: Tailscale deste computador (estado, versão, tailnet e nome da máquina), botão
+  "Abrir o Tailscale" (trocar de conta ou sair é feito no próprio Tailscale, não no TailDesk).
+- **Tailscale parou durante o uso**: faixa no topo da janela principal "O Tailscale deste
+  computador está desconectado. As conexões vão voltar quando ele reconectar." com "Abrir o
+  Tailscale"; dispositivos ficam esmaecidos e sessões abertas vão para "Reconectando…".
 - **Sobre / diagnóstico**: versão, abrir o teste de conexão (§5.10), copiar relatório de
   diagnóstico (inspirado na janela de debug do Tailscale) e o selo do Slint (atribuição da licença).
 
@@ -234,7 +253,7 @@ conexão" na sessão (só números ao vivo, sem sondagem) ou por Configurações
 
 | # | Fluxo | Caminho feliz | Pontos de falha e como a UI responde |
 |---|---|---|---|
-| F1 | Primeiro uso | Instalar → login na tailnet → "aceitar conexões?" → lista | Login cancelado: voltar ao passo com "Tentar de novo". Wayland: avisar antes do diálogo do portal. |
+| F1 | Primeiro uso | Instalar o TailDesk → Tailscale detectado e conectado → "aceitar conexões?" → lista | Tailscale ausente: orientar instalação (§5.1) e detectar sozinho quando terminar. Tailscale desconectado: "Abrir o Tailscale"/"Entrar" e esperar. Wayland: avisar antes do diálogo do portal. |
 | F2 | Conectar a um PC próprio | Lista → Conectar → host aceita (ou já confiável) → sessão | Host offline; host sem TailDesk ("Como instalar"); recusado; sem resposta; ACL da tailnet bloqueia (`udp:7420`): mensagem dizendo que a política da tailnet não permite e link para o admin. |
 | F3 | Receber pedido (host) | Diálogo §5.4 → Permitir → faixa §5.5 | Ninguém na frente: expira em 60 s e o controlador vê "sem resposta". |
 | F4 | Digitar com layouts diferentes | Entrar na sessão → toast "Teclado: US-Intl → ABNT2 (automático)" uma vez → digita | Caractere impossível: toast §5.6. Layout trocado no meio: indicador da barra atualiza. |
@@ -250,6 +269,8 @@ conexão" na sessão (só números ao vivo, sem sondagem) ou por Configurações
 | Recusado | "**desktop-casa** recusou o acesso." |
 | Sem resposta | "Ninguém respondeu em **desktop-casa**. Tente de novo quando houver alguém lá." |
 | ACL bloqueia | "A política da sua tailnet não permite conectar a **servidor**. Fale com quem administra a tailnet." |
+| Tailscale ausente | "O Tailscale não está instalado. O TailDesk usa o Tailscale deste computador para conectar suas máquinas." |
+| Tailscale desconectado | "O Tailscale está instalado, mas não está conectado. Entre na sua tailnet para continuar." |
 | Sem TailDesk | "**servidor** está na sua tailnet, mas não tem o TailDesk aberto." |
 | Relay | "Conexão via relay do Tailscale. A imagem pode ficar mais lenta." |
 | Reconectando | "Conexão perdida. Reconectando…" |
