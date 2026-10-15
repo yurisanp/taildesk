@@ -1,0 +1,552 @@
+// Janela da sessão no controlador (levantamento §5.3, §5.6 e §5.7). A "tela remota" é um desenho estático.
+import { Tema } from "tema.slint";
+import { Botao, Separador, BarraProgresso, Toast, Cartao } from "componentes.slint";
+
+export enum Etapa { procurando, esperando, conectada, reconectando, recusada, sem-resposta }
+export enum ModoTeclado { auto, fisico, texto }
+
+// Desenho de um desktop Windows 11 com um editor aberto, só para dar contexto às sobreposições.
+component TelaRemotaFalsa inherits Rectangle {
+    in property <string> texto-digitado;
+    background: @linear-gradient(135deg, #1d4ed8 0%, #0ea5e9 55%, #a5f3fc 100%);
+    clip: true;
+
+    Rectangle {
+        x: parent.width * 0.16;
+        y: parent.height * 0.12;
+        width: parent.width * 0.58;
+        height: parent.height * 0.62;
+        background: #ffffff;
+        border-radius: 8px;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000055;
+        Rectangle {
+            y: 0;
+            height: 34px;
+            background: #f3f3f3;
+            border-radius: 8px;
+            Text { x: 12px; text: "Sem título - Bloco de Notas"; color: #222; font-size: 12px; vertical-alignment: center; height: parent.height; }
+            Text { x: parent.width - 80px; text: "—   ▢   ✕"; color: #444; font-size: 12px; vertical-alignment: center; height: parent.height; }
+        }
+        Text {
+            x: 16px;
+            y: 48px;
+            width: parent.width - 32px;
+            text: root.texto-digitado + "▏";
+            color: #111;
+            font-family: "DejaVu Sans Mono";
+            font-size: 15px;
+            wrap: word-wrap;
+        }
+    }
+    Rectangle {
+        y: parent.height - 44px;
+        height: 44px;
+        background: #f2f4f8e6;
+        HorizontalLayout {
+            alignment: center;
+            spacing: 10px;
+            padding: 8px;
+            for c in [#1d4ed8, #f59e0b, #10b981, #6366f1, #ef4444]: Rectangle {
+                width: 28px;
+                border-radius: 6px;
+                background: c;
+            }
+        }
+        Text { x: parent.width - 70px; height: parent.height; vertical-alignment: center; text: "14:32"; color: #222; font-size: 12px; }
+    }
+}
+
+component ItemMenu inherits Rectangle {
+    in property <string> titulo;
+    in property <string> descricao;
+    in property <bool> marcado;
+    callback clicado();
+    accessible-role: button;
+    accessible-label: titulo;
+    height: descricao == "" ? 34px : 50px;
+    border-radius: 6px;
+    background: toque.has-hover ? Tema.superficie-2 : transparent;
+    toque := TouchArea { clicked => { root.clicado(); } }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        Text { width: 14px; text: root.marcado ? "✓" : ""; color: Tema.primaria; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.titulo; color: Tema.texto; font-size: Tema.fonte; }
+            if root.descricao != "": Text { text: root.descricao; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+        }
+    }
+}
+
+component BotaoBarra inherits Rectangle {
+    in property <string> texto;
+    in property <bool> ativo;
+    in property <bool> perigo;
+    callback clicado();
+    accessible-role: button;
+    accessible-label: texto;
+    width: rotulo.preferred-width + 20px;
+    height: 30px;
+    border-radius: 6px;
+    background: ativo ? Tema.primaria.with-alpha(0.18) : toque.has-hover ? Tema.superficie-2 : transparent;
+    toque := TouchArea { clicked => { root.clicado(); } }
+    rotulo := Text {
+        text: root.texto;
+        color: root.perigo ? Tema.perigo : root.ativo ? Tema.primaria : Tema.texto;
+        font-size: Tema.fonte;
+        font-weight: 500;
+    }
+}
+
+component Divisor inherits Rectangle {
+    width: 1px;
+    height: 18px;
+    background: Tema.borda;
+}
+
+component LinhaArquivo inherits VerticalLayout {
+    vertical-stretch: 0;
+    in property <string> nome;
+    in property <string> detalhe;
+    in property <float> progresso: 1;
+    in property <bool> concluido;
+    in property <string> acao;
+    spacing: 4px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    HorizontalLayout {
+        spacing: 8px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text { text: root.nome; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; overflow: elide; }
+            Text { text: root.detalhe; color: root.concluido ? Tema.online : Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+        }
+        if root.acao != "": VerticalLayout {
+            alignment: center;
+            Botao { texto: root.acao; altura: 26px; discreto: true; }
+        }
+    }
+    if !root.concluido: BarraProgresso { valor: root.progresso; }
+}
+
+component ItemNavegador inherits Rectangle {
+    in property <string> nome;
+    in property <string> info;
+    in property <bool> pasta;
+    in property <bool> bloqueado;
+    height: 40px;
+    border-radius: 6px;
+    background: toque.has-hover && !bloqueado ? Tema.superficie-2 : transparent;
+    toque := TouchArea { }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        Text { width: 18px; text: root.pasta ? "▸" : "·"; color: Tema.texto-2; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text { text: root.nome; color: root.bloqueado ? Tema.texto-2 : Tema.texto; font-size: Tema.fonte; overflow: elide; }
+            Text { text: root.info; color: Tema.texto-2; font-size: 11px; }
+        }
+        if !root.pasta && !root.bloqueado: VerticalLayout {
+            alignment: center;
+            Botao { texto: @tr("Baixar"); altura: 26px; discreto: true; }
+        }
+    }
+}
+
+component PainelArquivos inherits Rectangle {
+    in-out property <int> aba: 0;
+    in property <string> host;
+    callback fechar();
+    background: Tema.superficie;
+    drop-shadow-blur: 16px;
+    drop-shadow-color: Tema.sombra;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            Text { text: @tr("Arquivos"); font-size: 16px; font-weight: 700; color: Tema.texto; horizontal-stretch: 1; vertical-alignment: center; }
+            Botao { texto: "✕"; discreto: true; altura: 28px; clicado => { root.fechar(); } }
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            BotaoBarra { texto: @tr("Transferências"); ativo: root.aba == 0; clicado => { root.aba = 0; } }
+            BotaoBarra { texto: @tr("Navegar no host"); ativo: root.aba == 1; clicado => { root.aba = 1; } }
+        }
+        Separador { }
+        if root.aba == 0: VerticalLayout {
+            alignment: start;
+            spacing: 4px;
+            vertical-stretch: 1;
+            Rectangle {
+                height: 64px;
+                border-radius: Tema.raio;
+                border-width: 1px;
+                border-color: Tema.borda;
+                background: Tema.fundo;
+                Text {
+                    width: parent.width - 24px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    text: @tr("Arraste arquivos para a janela para enviar a {}", root.host);
+                    color: Tema.texto-2;
+                    font-size: Tema.fonte-pequena;
+                }
+            }
+            LinhaArquivo {
+                nome: "relatorio-trimestral.pdf";
+                detalhe: @tr("✓ Salvo em Downloads/TailDesk");
+                concluido: true;
+                acao: @tr("Abrir pasta");
+            }
+            Separador { }
+            LinhaArquivo {
+                nome: "fotos-viagem/ (42 arquivos)";
+                detalhe: @tr("Enviando · 1,9 de 3,1 GB · 38 MB/s · 4 em paralelo");
+                progresso: 0.61;
+                acao: @tr("Pausar");
+            }
+            Separador { }
+            LinhaArquivo {
+                nome: "notas (1).txt";
+                detalhe: @tr("✓ Recebido. Renomeado porque já existia notas.txt");
+                concluido: true;
+                acao: @tr("Abrir pasta");
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+        if root.aba == 1: VerticalLayout {
+            spacing: 2px;
+            vertical-stretch: 1;
+            Text { text: "Documentos  /  Projetos"; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+            Text { text: @tr("Só as pastas que {} liberou aparecem aqui.", root.host); color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+            Rectangle { height: 6px; }
+            ItemNavegador { nome: "taildesk"; info: @tr("pasta · ontem"); pasta: true; }
+            ItemNavegador { nome: "orcamento-2026.xlsx"; info: "84 KB · 12/10/2026"; }
+            ItemNavegador { nome: "apresentacao.pptx"; info: "12,3 MB · 09/10/2026"; }
+            ItemNavegador { nome: "build-windows.zip"; info: "220 MB · hoje 11:20"; }
+            ItemNavegador { nome: "C:\\Windows"; info: @tr("Sem permissão"); pasta: true; bloqueado: true; }
+            Rectangle { vertical-stretch: 1; }
+            Botao { texto: @tr("Enviar daqui para lá…"); }
+        }
+    }
+}
+
+export component JanelaSessao inherits Window {
+    title: root.host + " · TailDesk";
+    preferred-width: 1280px;
+    preferred-height: 760px;
+    min-width: 800px;
+    min-height: 500px;
+    background: #000000;
+    default-font-family: "Inter";
+
+    in property <string> host: "desktop-casa";
+    in property <string> so-host: "Windows 11";
+    in property <string> teclado-local: "ABNT2";
+    in property <string> teclado-host: "US-Intl";
+    in property <int> monitores: 2;
+    in-out property <Etapa> etapa: Etapa.procurando;
+    in-out property <bool> via-relay: false;
+    in-out property <ModoTeclado> modo-teclado: ModoTeclado.auto;
+    in-out property <int> monitor: 1;
+    in-out property <bool> barra-fixada: true;
+    in-out property <bool> hud: false;
+    in-out property <bool> painel-arquivos: false;
+    in-out property <int> aba-arquivos: 0;
+    in-out property <bool> ajustar: true;
+    in-out property <string> toast;
+    // Quando verdadeiro, as etapas avançam sozinhas (demonstração interativa).
+    in property <bool> simular: true;
+
+    callback desconectar();
+
+    property <bool> layouts-iguais: root.teclado-local == root.teclado-host;
+    property <string> rotulo-teclado:
+        root.modo-teclado == ModoTeclado.fisico ? @tr("Teclado: físico")
+        : root.modo-teclado == ModoTeclado.texto ? @tr("Teclado: texto")
+        : root.layouts-iguais ? @tr("Teclado: {} (iguais)", root.teclado-host)
+        : @tr("Teclado: {} → {}", root.teclado-local, root.teclado-host);
+    property <bool> barra-visivel: root.barra-fixada || area-topo.has-hover || toque-barra.has-hover;
+
+    Timer {
+        interval: 1200ms;
+        running: root.simular && root.etapa == Etapa.procurando;
+        triggered => { root.etapa = Etapa.esperando; }
+    }
+    Timer {
+        interval: 2500ms;
+        running: root.simular && root.etapa == Etapa.esperando;
+        triggered => {
+            root.etapa = Etapa.conectada;
+            if !root.layouts-iguais {
+                root.toast = @tr("Teclado: {} → {} (tradução automática)", root.teclado-local, root.teclado-host);
+            }
+        }
+    }
+    Timer {
+        interval: 3s;
+        running: root.simular && root.etapa == Etapa.reconectando;
+        triggered => { root.etapa = Etapa.conectada; root.toast = @tr("Reconectado."); }
+    }
+    Timer {
+        interval: 4s;
+        running: root.toast != "";
+        triggered => { root.toast = ""; }
+    }
+
+    TelaRemotaFalsa {
+        texto-digitado: "Ação, café e pão. Olá, mundo! ç Ç á é ã õ ü / ?";
+        opacity: root.etapa == Etapa.conectada || root.etapa == Etapa.reconectando ? 1 : 0.15;
+        width: root.ajustar ? parent.width : 1600px;
+        height: root.ajustar ? parent.height : 900px;
+    }
+
+    // Faixa invisível no topo: passar o mouse revela a barra quando ela não está fixada.
+    area-topo := TouchArea {
+        y: 0;
+        height: 10px;
+    }
+
+    if root.etapa == Etapa.conectada || root.etapa == Etapa.reconectando: Rectangle {
+        // Alça visível quando a barra está recolhida.
+        x: (parent.width - 64px) / 2;
+        y: 4px;
+        width: 64px;
+        height: 6px;
+        border-radius: 3px;
+        background: #ffffffaa;
+        visible: !root.barra-visivel;
+    }
+
+    barra := Rectangle {
+        visible: root.barra-visivel && (root.etapa == Etapa.conectada || root.etapa == Etapa.reconectando);
+        // Centralizada no espaço que sobra ao lado do painel de arquivos.
+        x: (parent.width - (root.painel-arquivos ? 340px : 0px) - self.width) / 2;
+        y: 8px;
+        width: linha-barra.preferred-width;
+        height: 42px;
+        border-radius: 10px;
+        background: Tema.superficie;
+        drop-shadow-blur: 14px;
+        drop-shadow-color: Tema.sombra;
+        toque-barra := TouchArea { }
+        linha-barra := HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 6px;
+            spacing: 4px;
+            alignment: center;
+            VerticalLayout {
+                alignment: center;
+                Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.via-relay ? Tema.relay : Tema.online; }
+            }
+            VerticalLayout {
+                alignment: center;
+                padding-left: 4px;
+                padding-right: 6px;
+                Text { text: root.host; color: Tema.texto; font-size: Tema.fonte; font-weight: 700; }
+            }
+            VerticalLayout { alignment: center; Divisor { } }
+            if root.monitores > 1: VerticalLayout {
+                alignment: center;
+                BotaoBarra {
+                    texto: @tr("Monitor {}/{}", root.monitor, root.monitores);
+                    clicado => { root.monitor = Math.mod(root.monitor, root.monitores) + 1; }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: root.rotulo-teclado + "  ▾"; clicado => { menu-teclado.show(); } }
+            }
+            VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: @tr("Arquivos"); ativo: root.painel-arquivos; clicado => { root.painel-arquivos = !root.painel-arquivos; } }
+            }
+            VerticalLayout {
+                alignment: center;
+                BotaoBarra {
+                    texto: root.barra-fixada ? @tr("Recolher barra") : @tr("Fixar barra");
+                    clicado => { root.barra-fixada = !root.barra-fixada; }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: "⋯"; clicado => { menu-mais.show(); } }
+            }
+            VerticalLayout { alignment: center; Divisor { } }
+            VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: @tr("Desconectar"); perigo: true; clicado => { root.desconectar(); } }
+            }
+        }
+    }
+
+    menu-teclado := PopupWindow {
+        x: barra.x + 180px;
+        y: barra.y + barra.height + 6px;
+        width: 340px;
+        Rectangle {
+            background: Tema.superficie;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tema.borda;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Tema.sombra;
+            VerticalLayout {
+                padding: 6px;
+                Text {
+                    text: @tr("Este PC: {}  ·  {}: {}", root.teclado-local, root.host, root.teclado-host);
+                    color: Tema.texto-2;
+                    font-size: Tema.fonte-pequena;
+                    horizontal-alignment: left;
+                }
+                Rectangle { height: 4px; }
+                ItemMenu {
+                    titulo: @tr("Automático (recomendado)");
+                    descricao: @tr("Digita o que você vê no seu teclado e mantém os atalhos.");
+                    marcado: root.modo-teclado == ModoTeclado.auto;
+                    clicado => { root.modo-teclado = ModoTeclado.auto; }
+                }
+                ItemMenu {
+                    titulo: @tr("Físico");
+                    descricao: @tr("Envia a posição das teclas. Para jogos.");
+                    marcado: root.modo-teclado == ModoTeclado.fisico;
+                    clicado => { root.modo-teclado = ModoTeclado.fisico; }
+                }
+                ItemMenu {
+                    titulo: @tr("Texto");
+                    descricao: @tr("Envia só caracteres. Atalhos podem não funcionar.");
+                    marcado: root.modo-teclado == ModoTeclado.texto;
+                    clicado => { root.modo-teclado = ModoTeclado.texto; }
+                }
+            }
+        }
+    }
+
+    menu-mais := PopupWindow {
+        x: barra.x + barra.width - 290px;
+        y: barra.y + barra.height + 6px;
+        width: 290px;
+        Rectangle {
+            background: Tema.superficie;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tema.borda;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Tema.sombra;
+            VerticalLayout {
+                padding: 6px;
+                ItemMenu { titulo: @tr("Enviar Ctrl+Alt+Del"); clicado => { root.toast = @tr("Ctrl+Alt+Del enviado para {}.", root.host); } }
+                ItemMenu {
+                    titulo: root.ajustar ? @tr("Tamanho real") : @tr("Ajustar à janela");
+                    clicado => { root.ajustar = !root.ajustar; }
+                }
+                ItemMenu { titulo: @tr("Mostrar informações da conexão"); marcado: root.hud; clicado => { root.hud = !root.hud; } }
+                Separador { }
+                ItemMenu {
+                    titulo: @tr("Simular: conexão via relay");
+                    marcado: root.via-relay;
+                    clicado => {
+                        root.via-relay = !root.via-relay;
+                        if root.via-relay { root.toast = @tr("Conexão via relay do Tailscale. A imagem pode ficar mais lenta."); }
+                    }
+                }
+                ItemMenu { titulo: @tr("Simular: queda de conexão"); clicado => { root.etapa = Etapa.reconectando; } }
+                ItemMenu {
+                    titulo: @tr("Simular: caractere impossível");
+                    clicado => { root.toast = @tr("Não foi possível digitar ‘ß’ em {}.", root.host); }
+                }
+            }
+        }
+    }
+
+    if root.hud || root.via-relay: Rectangle {
+        x: parent.width - self.width - (root.painel-arquivos ? 360px : 16px);
+        y: parent.height - self.height - 60px;
+        width: 190px;
+        height: 70px;
+        border-radius: 8px;
+        background: #000000b0;
+        VerticalLayout {
+            padding: 10px;
+            spacing: 2px;
+            Text { text: root.via-relay ? @tr("48 ms · via relay") : @tr("9 ms · direto"); color: root.via-relay ? #ffcc4d : #7ee2a8; font-size: Tema.fonte; font-weight: 700; }
+            Text { text: root.via-relay ? "1080p · 30 fps · 6 Mbit/s" : "1080p · 60 fps · 18 Mbit/s"; color: #ffffff; font-size: Tema.fonte-pequena; }
+            Text { text: "H.264 · openh264"; color: #ffffffaa; font-size: 11px; }
+        }
+    }
+
+    if root.painel-arquivos && root.etapa == Etapa.conectada: PainelArquivos {
+        x: parent.width - self.width;
+        y: 0;
+        width: 340px;
+        height: parent.height;
+        host: root.host;
+        aba <=> root.aba-arquivos;
+        fechar => { root.painel-arquivos = false; }
+    }
+
+    // Etapas antes de conectar e falhas (§5.3 e §6 F2/F7).
+    if root.etapa != Etapa.conectada: Rectangle {
+        background: root.etapa == Etapa.reconectando ? #00000080 : transparent;
+        Cartao {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 420px;
+            height: cartao-etapa.preferred-height;
+            drop-shadow-blur: 20px;
+            drop-shadow-color: Tema.sombra;
+            cartao-etapa := VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                Text {
+                    wrap: word-wrap;
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: Tema.texto;
+                    text: root.etapa == Etapa.procurando ? @tr("Encontrando {}…", root.host)
+                        : root.etapa == Etapa.esperando ? @tr("Esperando {} permitir o acesso…", root.host)
+                        : root.etapa == Etapa.reconectando ? @tr("Conexão perdida. Reconectando…")
+                        : root.etapa == Etapa.recusada ? @tr("{} recusou o acesso.", root.host)
+                        : @tr("Ninguém respondeu em {}.", root.host);
+                }
+                Text {
+                    wrap: word-wrap;
+                    font-size: Tema.fonte;
+                    color: Tema.texto-2;
+                    text: root.etapa == Etapa.procurando ? @tr("Procurando o melhor caminho na sua tailnet.")
+                        : root.etapa == Etapa.esperando ? @tr("Alguém em {} precisa clicar em Permitir. O pedido expira em 60 segundos.", root.host)
+                        : root.etapa == Etapa.reconectando ? @tr("A sessão continua aberta. Nada do que está em {} foi perdido.", root.host)
+                        : root.etapa == Etapa.recusada ? @tr("Você pode tentar de novo mais tarde.")
+                        : @tr("Tente de novo quando houver alguém lá.");
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    if root.etapa == Etapa.recusada || root.etapa == Etapa.sem-resposta: Botao {
+                        texto: @tr("Tentar de novo");
+                        clicado => { root.etapa = Etapa.procurando; }
+                    }
+                    Botao {
+                        texto: root.etapa == Etapa.recusada || root.etapa == Etapa.sem-resposta ? @tr("Fechar") : @tr("Cancelar");
+                        clicado => { root.desconectar(); }
+                    }
+                }
+            }
+        }
+    }
+
+    Toast {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 64px;
+        texto: root.toast;
+    }
+}
