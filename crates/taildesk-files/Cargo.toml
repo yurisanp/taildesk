@@ -8,7 +8,14 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+taildesk-proto.workspace = true
+blake3 = { version = "1", default-features = false, features = ["std"] }
+tokio = { version = "1", features = ["fs", "io-util", "rt"] }
 
+[dev-dependencies]
+taildesk-transport.workspace = true
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time"] }
 
 [lints]
 workspace = true
