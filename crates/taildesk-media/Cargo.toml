@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 taildesk-proto.workspace = true
+taildesk-codec.workspace = true
 
 
 [lints]

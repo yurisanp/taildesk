@@ -23,6 +23,7 @@ taildesk-files = { path = "crates/taildesk-files" }
 taildesk-keyboard = { path = "crates/taildesk-keyboard" }
 taildesk-session = { path = "crates/taildesk-session" }
 taildesk-ui = { path = "crates/taildesk-ui" }
+taildesk-update = { path = "crates/taildesk-update" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

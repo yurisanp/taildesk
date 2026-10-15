@@ -1,8 +1,10 @@
 //! CLI do TailDesk. Subcomandos previstos: `host`, `connect <peer>`, `probe`, `bench-net <peer>`; no Linux,
-//! `portal` testa a sessão do portal; no Windows, `captura-dxgi` testa a captura.
+//! `portal` testa a sessão do portal; no Windows, `captura-dxgi` testa a captura. `atualizar` procura
+//! a versão nova e, no AppImage, instala.
 
 use std::process::ExitCode;
 
+mod atualizar;
 mod bench_net;
 #[cfg(windows)]
 mod captura_dxgi;
@@ -12,7 +14,8 @@ mod medicao;
 mod portal;
 
 const USAGE: &str = "uso: taildesk-cli <host | connect <peer> | probe | bench-net <peer> | \
-                     portal [--so-tela] | captura-dxgi [segundos] | --version>";
+                     portal [--so-tela] [--video] | captura-dxgi [segundos] [--video] | \
+                     atualizar [--pre] [--instalar] | --version>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -27,6 +30,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("bench-net") => bench_net::main(&args[1..]),
+        Some("atualizar") => atualizar::main(&args[1..]),
         #[cfg(target_os = "linux")]
         Some("portal") => portal::main(&args[1..]),
         #[cfg(target_os = "linux")]

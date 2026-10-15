@@ -1,6 +1,6 @@
 [package]
 name = "taildesk-codec"
-description = "Traits VideoEncoder/VideoDecoder, CodecRegistry, probe e fallback."
+description = "Traits VideoEncoder/VideoDecoder, conversão de cor e o backend openh264."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,9 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
-
+# H.264 em software (BSD-2-Clause). O feature padrão `source` compila o OpenH264 junto (precisa de
+# compilador C++); carregar o binário da Cisco em tempo de execução vem antes da release com vídeo.
+openh264 = "0.9.8"
 
 [lints]
 workspace = true

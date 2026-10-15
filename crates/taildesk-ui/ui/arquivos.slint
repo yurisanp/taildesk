@@ -1,0 +1,380 @@
+// Painel de arquivos da sessão (levantamento de UX §5.7): faixa de transferências e
+// "Navegar no host". O estado vem de `taildesk_files::panel`; a janela da sessão converte
+// para estas structs e trata os callbacks. Arrastar arquivos do SO é tratado pela janela.
+import { ListView } from "std-widgets.slint";
+import { Tema } from "tema.slint";
+import { BarraProgresso, Botao, Separador } from "componentes.slint";
+
+export enum EstadoTransferencia { esperando, andamento, concluida, falhou, cancelada }
+
+// Motivo de uma falha, a partir do `FileErrorCode`.
+export enum ErroArquivo { outro, sem-permissao, nao-encontrado, caminho, sem-espaco, integridade, ocupado, mudou, conexao }
+
+export struct LinhaTransferencia {
+    id: int,
+    nome: string,
+    enviando: bool,
+    estado: EstadoTransferencia,
+    progresso: float,
+    // Textos com número, já formatados (`taildesk_files::panel::fmt`).
+    tamanho: string,
+    feito: string,
+    velocidade: string,
+    restante: string,
+    // Pasta onde ficou, quando concluída (`Downloads/TailDesk`).
+    destino: string,
+    renomeado: bool,
+    // Nome final quando renomeado (`relatorio (1).pdf`).
+    nome-final: string,
+    erro: ErroArquivo,
+    retomavel: bool,
+}
+
+export struct RaizRemota {
+    id: int,
+    nome: string,
+    // Sem leitura: aparece como "Sem permissão" em vez de sumir.
+    permitida: bool,
+}
+
+export struct ItemRemoto {
+    nome: string,
+    pasta: bool,
+    tamanho: string,
+    data: string,
+}
+
+export global TextosArquivos {
+    pure public function erro(e: ErroArquivo) -> string {
+        if e == ErroArquivo.sem-permissao { return @tr("Sem permissão"); }
+        if e == ErroArquivo.nao-encontrado { return @tr("Não encontrado"); }
+        if e == ErroArquivo.caminho { return @tr("Nome de arquivo não aceito"); }
+        if e == ErroArquivo.sem-espaco { return @tr("Sem espaço no disco"); }
+        if e == ErroArquivo.integridade { return @tr("O arquivo chegou diferente; mande de novo"); }
+        if e == ErroArquivo.ocupado { return @tr("Muitas transferências; tente daqui a pouco"); }
+        if e == ErroArquivo.mudou { return @tr("O arquivo mudou durante o envio"); }
+        if e == ErroArquivo.conexao { return @tr("A conexão caiu"); }
+        return @tr("Falhou");
+    }
+
+    pure public function detalhe(l: LinhaTransferencia) -> string {
+        if l.estado == EstadoTransferencia.esperando {
+            return l.enviando ? @tr("Esperando o outro computador…") : @tr("Pedindo ao host…");
+        }
+        if l.estado == EstadoTransferencia.andamento {
+            if l.restante != "" {
+                return @tr("{0} de {1} · {2} · faltam {3}", l.feito, l.tamanho, l.velocidade, l.restante);
+            }
+            return @tr("{0} de {1}", l.feito, l.tamanho);
+        }
+        if l.estado == EstadoTransferencia.concluida {
+            if l.renomeado {
+                return @tr("Salvo como {0} em {1} (já havia um com esse nome)", l.nome-final, l.destino);
+            }
+            if l.destino != "" { return @tr("Salvo em {0}", l.destino); }
+            return @tr("Enviado · {0}", l.tamanho);
+        }
+        if l.estado == EstadoTransferencia.cancelada { return @tr("Cancelado"); }
+        if l.retomavel {
+            return @tr("{0} · mande de novo para continuar de onde parou", TextosArquivos.erro(l.erro));
+        }
+        return TextosArquivos.erro(l.erro);
+    }
+}
+
+component Aba inherits Rectangle {
+    in property <string> texto;
+    in property <bool> ativa;
+    callback clicada();
+    accessible-role: tab;
+    accessible-label: texto;
+    accessible-action-default => { clicada(); }
+    horizontal-stretch: 1;
+    height: 34px;
+    toque := TouchArea { clicked => { root.clicada(); } }
+    Text {
+        width: parent.width;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: root.texto;
+        font-size: Tema.fonte;
+        font-weight: root.ativa ? 600 : 400;
+        color: root.ativa ? Tema.texto : Tema.texto-2;
+    }
+    Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        background: root.ativa ? Tema.primaria : toque.has-hover ? Tema.borda : transparent;
+    }
+}
+
+component ItemTransferencia inherits Rectangle {
+    in property <LinhaTransferencia> linha;
+    callback cancelar();
+    callback abrir-pasta();
+
+    property <bool> ativa: linha.estado == EstadoTransferencia.esperando || linha.estado == EstadoTransferencia.andamento;
+    property <bool> falhou: linha.estado == EstadoTransferencia.falhou;
+
+    accessible-role: list-item;
+    accessible-label: linha.nome;
+    accessible-description: TextosArquivos.detalhe(linha);
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                vertical-alignment: center;
+                text: root.linha.enviando ? "↑" : "↓";
+                font-size: Tema.fonte;
+                color: Tema.texto-2;
+            }
+            Text {
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                text: root.linha.nome;
+                font-size: Tema.fonte;
+                font-weight: 600;
+                color: Tema.texto;
+                overflow: elide;
+            }
+            if root.ativa: Botao {
+                texto: @tr("Cancelar");
+                discreto: true;
+                altura: 24px;
+                clicado => { root.cancelar(); }
+            }
+            if root.linha.estado == EstadoTransferencia.concluida && root.linha.destino != "": Botao {
+                texto: @tr("Abrir pasta");
+                discreto: true;
+                altura: 24px;
+                clicado => { root.abrir-pasta(); }
+            }
+        }
+        if root.ativa: BarraProgresso { valor: root.linha.progresso; }
+        Text {
+            text: TextosArquivos.detalhe(root.linha);
+            font-size: Tema.fonte-pequena;
+            color: root.falhou ? Tema.perigo : root.linha.estado == EstadoTransferencia.concluida ? Tema.online : Tema.texto-2;
+            wrap: word-wrap;
+        }
+    }
+    Separador { y: parent.height - 1px; width: parent.width; }
+}
+
+component ItemNavegador inherits Rectangle {
+    in property <string> nome;
+    in property <string> detalhe;
+    in property <bool> pasta;
+    in property <bool> habilitado: true;
+    callback abrir();
+    callback baixar();
+
+    accessible-role: list-item;
+    accessible-label: nome;
+    accessible-description: detalhe;
+    accessible-action-default => { if pasta && habilitado { abrir(); } }
+
+    height: 44px;
+    background: toque.has-hover && pasta && habilitado ? Tema.superficie-2 : transparent;
+    toque := TouchArea {
+        mouse-cursor: root.pasta && root.habilitado ? pointer : default;
+        clicked => { if root.pasta && root.habilitado { root.abrir(); } }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        Text {
+            vertical-alignment: center;
+            text: root.pasta ? "📁" : "📄";
+            font-size: Tema.fonte;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.nome;
+                font-size: Tema.fonte;
+                color: root.habilitado ? Tema.texto : Tema.texto-2;
+                overflow: elide;
+            }
+            if root.detalhe != "": Text {
+                text: root.detalhe;
+                font-size: Tema.fonte-pequena;
+                color: Tema.texto-2;
+                overflow: elide;
+            }
+        }
+        if !root.pasta: VerticalLayout {
+            alignment: center;
+            Botao { texto: @tr("Baixar"); discreto: true; altura: 26px; clicado => { root.baixar(); } }
+        }
+    }
+}
+
+export component PainelArquivos inherits Rectangle {
+    // 0 = Transferências, 1 = Navegar no host.
+    in-out property <int> aba: 0;
+
+    in property <[LinhaTransferencia]> transferencias;
+
+    in property <[RaizRemota]> raizes;
+    // Nome da raiz aberta; vazio = lista de raízes.
+    in property <string> raiz-aberta;
+    // Pastas abertas a partir da raiz.
+    in property <[string]> caminho;
+    in property <[ItemRemoto]> itens;
+    in property <bool> carregando;
+    in property <bool> tem-erro;
+    in property <ErroArquivo> erro;
+    // O host aceita arquivos nesta raiz ("Enviar para cá").
+    in property <bool> pode-enviar-aqui;
+
+    callback cancelar(int);
+    callback abrir-pasta(int);
+    callback limpar();
+    callback enviar-arquivos();
+    callback listar-raizes();
+    callback abrir-raiz(int);
+    callback entrar(string);
+    // Sobe para a pasta de profundidade n (0 = a raiz); -1 = lista de raízes.
+    callback ir-para(int);
+    callback atualizar();
+    callback baixar(string);
+    callback enviar-aqui();
+
+    width: 340px;
+    background: Tema.superficie;
+    border-width: 1px;
+    border-color: Tema.borda;
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            Aba { texto: @tr("Transferências"); ativa: root.aba == 0; clicada => { root.aba = 0; } }
+            Aba {
+                texto: @tr("Navegar no host");
+                ativa: root.aba == 1;
+                clicada => {
+                    root.aba = 1;
+                    if root.raiz-aberta == "" { root.listar-raizes(); }
+                }
+            }
+        }
+        Separador { }
+
+        if root.aba == 0: VerticalLayout {
+            vertical-stretch: 1;
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 8px;
+                Botao { texto: @tr("Enviar arquivos…"); primario: true; altura: 28px; clicado => { root.enviar-arquivos(); } }
+                Rectangle { horizontal-stretch: 1; }
+                if root.transferencias.length > 0: Botao {
+                    texto: @tr("Limpar concluídas");
+                    discreto: true;
+                    altura: 28px;
+                    clicado => { root.limpar(); }
+                }
+            }
+            if root.transferencias.length == 0: Text {
+                vertical-stretch: 1;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                text: @tr("Arraste arquivos ou pastas para a janela para enviar ao computador remoto.");
+                font-size: Tema.fonte;
+                color: Tema.texto-2;
+            }
+            if root.transferencias.length > 0: ListView {
+                vertical-stretch: 1;
+                for l in root.transferencias: ItemTransferencia {
+                    linha: l;
+                    cancelar => { root.cancelar(l.id); }
+                    abrir-pasta => { root.abrir-pasta(l.id); }
+                }
+            }
+        }
+
+        if root.aba == 1 && root.raiz-aberta == "": VerticalLayout {
+            vertical-stretch: 1;
+            if root.raizes.length == 0: Text {
+                vertical-stretch: 1;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                text: @tr("O computador remoto não liberou nenhuma pasta.");
+                font-size: Tema.fonte;
+                color: Tema.texto-2;
+            }
+            if root.raizes.length > 0: ListView {
+                vertical-stretch: 1;
+                for r in root.raizes: ItemNavegador {
+                    nome: r.nome;
+                    pasta: true;
+                    habilitado: r.permitida;
+                    detalhe: r.permitida ? "" : @tr("Sem permissão");
+                    abrir => { root.abrir-raiz(r.id); }
+                }
+            }
+        }
+
+        if root.aba == 1 && root.raiz-aberta != "": VerticalLayout {
+            vertical-stretch: 1;
+            // Migalhas: Pastas › raiz › a › b
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 4px;
+                Botao { texto: "‹"; discreto: true; altura: 26px; clicado => { root.ir-para(root.caminho.length - 1); } }
+                Botao { texto: @tr("Pastas"); discreto: true; altura: 26px; clicado => { root.ir-para(-1); } }
+                Botao { texto: root.raiz-aberta; discreto: true; altura: 26px; clicado => { root.ir-para(0); } }
+                for p[i] in root.caminho: Botao {
+                    texto: p;
+                    discreto: true;
+                    altura: 26px;
+                    clicado => { root.ir-para(i + 1); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Botao { texto: "↻"; discreto: true; altura: 26px; clicado => { root.atualizar(); } }
+            }
+            Separador { }
+            if root.tem-erro: Text {
+                vertical-stretch: 1;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                text: TextosArquivos.erro(root.erro);
+                font-size: Tema.fonte;
+                color: Tema.perigo;
+            }
+            if !root.tem-erro && root.itens.length == 0: Text {
+                vertical-stretch: 1;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                text: root.carregando ? @tr("Carregando…") : @tr("Pasta vazia");
+                font-size: Tema.fonte;
+                color: Tema.texto-2;
+            }
+            if !root.tem-erro && root.itens.length > 0: ListView {
+                vertical-stretch: 1;
+                for it in root.itens: ItemNavegador {
+                    nome: it.nome;
+                    pasta: it.pasta;
+                    detalhe: it.pasta ? it.data : (it.data == "" ? it.tamanho : it.tamanho + " · " + it.data);
+                    abrir => { root.entrar(it.nome); }
+                    baixar => { root.baixar(it.nome); }
+                }
+            }
+            if root.pode-enviar-aqui: HorizontalLayout {
+                padding: 8px;
+                Botao { texto: @tr("Enviar para cá…"); altura: 28px; clicado => { root.enviar-aqui(); } }
+            }
+        }
+    }
+}
