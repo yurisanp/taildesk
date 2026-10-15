@@ -14,6 +14,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use taildesk_proto::control::FileErrorCode;
 use taildesk_proto::files::{DataHeader, Hash, limits};
 use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
@@ -45,6 +46,28 @@ impl XferError {
     /// O `.part` continua válido e uma nova oferta retoma de onde parou.
     pub fn resumable(&self) -> bool {
         matches!(self, XferError::Incomplete { .. } | XferError::Io(_))
+    }
+
+    /// Código para o `FileError` que avisa o peer.
+    pub fn code(&self) -> FileErrorCode {
+        match self {
+            XferError::Path(PathError::Io(io::ErrorKind::NotFound)) => FileErrorCode::NotFound,
+            XferError::Path(PathError::Io(io::ErrorKind::PermissionDenied)) => {
+                FileErrorCode::Denied
+            }
+            XferError::Path(_) => FileErrorCode::BadPath,
+            XferError::Io(e) => match e.kind() {
+                io::ErrorKind::NotFound => FileErrorCode::NotFound,
+                io::ErrorKind::PermissionDenied => FileErrorCode::Denied,
+                io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => FileErrorCode::NoSpace,
+                _ => FileErrorCode::Io,
+            },
+            XferError::BadHeader | XferError::TooLong => FileErrorCode::Protocol,
+            XferError::Incomplete { .. } => FileErrorCode::Cancelled,
+            XferError::ResumeMismatch => FileErrorCode::ResumeMismatch,
+            XferError::HashMismatch => FileErrorCode::HashMismatch,
+            XferError::Changed => FileErrorCode::Changed,
+        }
     }
 }
 

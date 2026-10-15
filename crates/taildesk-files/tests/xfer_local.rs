@@ -5,8 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-use taildesk_files::listing::{EntryKind, list_dir, page, walk};
+use taildesk_files::listing::{Entry, EntryKind, list_dir, page, walk};
 use taildesk_files::{Incoming, Source, XferError};
+use taildesk_proto::control::{FileErrorCode, FsEntry, FsEntryKind};
 use taildesk_proto::files::{DataHeader, limits};
 use tokio::io::AsyncWriteExt;
 
@@ -181,6 +182,7 @@ async fn diverging_part_is_refused_then_restarted() {
         .await
         .unwrap_err();
     assert!(matches!(err, XferError::ResumeMismatch));
+    assert_eq!(err.code(), FileErrorCode::ResumeMismatch);
     assert!(sink.is_empty(), "nada pode ir para o stream");
 
     incoming.restart().await.unwrap();
@@ -274,6 +276,7 @@ async fn hostile_paths_are_refused() {
     ] {
         let err = Incoming::prepare(&tmp.0, rel, 1, 0).await.unwrap_err();
         assert!(matches!(err, XferError::Path(_)), "{rel}: {err:?}");
+        assert_eq!(err.code(), FileErrorCode::BadPath);
     }
     assert!(fs::read_dir(&tmp.0).unwrap().next().is_none());
 }
@@ -363,4 +366,33 @@ fn walk_folder_for_offers() {
         .collect();
     assert_eq!(rels, [("Fotos/2026/out/a.jpg", 2), ("Fotos/capa.jpg", 1)]);
     assert!(w.skipped.is_empty());
+}
+
+#[test]
+fn listing_pages_fit_a_control_frame() {
+    let long = |i: usize| Entry {
+        name: format!("{i:04}-{}", "x".repeat(995)),
+        kind: EntryKind::File,
+        size: 1,
+        mtime_ms: 1,
+    };
+    let entries: Vec<Entry> = (0..100).map(long).collect();
+    let (first, more) = page(&entries, 0);
+    assert!(more);
+    assert_eq!(first.len(), limits::LISTING_BYTES / 1000);
+    let total: usize = first.iter().map(|e| e.name.len()).sum();
+    assert!(total <= limits::LISTING_BYTES);
+
+    let short: Vec<Entry> = (0..1000)
+        .map(|i| Entry {
+            name: i.to_string(),
+            ..long(0)
+        })
+        .collect();
+    let (first, more) = page(&short, 0);
+    assert_eq!((first.len(), more), (limits::LISTING_ENTRIES, true));
+
+    let wire = FsEntry::from(&entries[0]);
+    assert_eq!(wire.kind(), FsEntryKind::File);
+    assert_eq!(wire.name, entries[0].name);
 }

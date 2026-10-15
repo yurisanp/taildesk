@@ -5,6 +5,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use taildesk_proto::control;
 use taildesk_proto::files::limits;
 
 use crate::xfer::to_unix_ms;
@@ -97,10 +98,37 @@ pub fn list_dir(root: &Path, rel: &str) -> Result<Vec<Entry>, PathError> {
 }
 
 /// Uma página da listagem a partir de `start`, com `more` = há itens depois dela.
+///
+/// Para em [`limits::LISTING_ENTRIES`] itens ou [`limits::LISTING_BYTES`] de nomes, o que vier
+/// primeiro, para o `FsListing` caber num frame de controle. Sempre leva ao menos um item.
 pub fn page(entries: &[Entry], start: u32) -> (&[Entry], bool) {
     let start = (start as usize).min(entries.len());
-    let end = (start + limits::LISTING_ENTRIES).min(entries.len());
+    let mut end = start;
+    let mut bytes = 0;
+    while end < entries.len() && end - start < limits::LISTING_ENTRIES {
+        bytes += entries[end].name.len();
+        if bytes > limits::LISTING_BYTES && end > start {
+            break;
+        }
+        end += 1;
+    }
     (&entries[start..end], end < entries.len())
+}
+
+impl From<&Entry> for control::FsEntry {
+    fn from(e: &Entry) -> control::FsEntry {
+        let kind = match e.kind {
+            EntryKind::Dir => control::FsEntryKind::Dir,
+            EntryKind::File => control::FsEntryKind::File,
+            EntryKind::Other => control::FsEntryKind::Other,
+        };
+        control::FsEntry {
+            name: e.name.clone(),
+            kind: kind.into(),
+            size: e.size,
+            mtime_ms: e.mtime_ms,
+        }
+    }
 }
 
 /// Um arquivo de uma pasta a enviar.

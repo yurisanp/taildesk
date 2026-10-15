@@ -16,8 +16,11 @@ pub mod limits {
     pub const PATH_LEN: usize = 4096;
     /// Nome de um item de listagem, em bytes UTF-8.
     pub const NAME_LEN: usize = 1024;
-    /// Itens por mensagem de listagem; pastas maiores vêm em páginas.
-    pub const LISTING_ENTRIES: usize = 2048;
+    /// Itens por página de listagem; pastas maiores vêm em várias.
+    pub const LISTING_ENTRIES: usize = 512;
+    /// Soma dos nomes de uma página, para o `FsListing` caber num frame de controle de 64 KiB
+    /// com folga para os campos fixos (≤ 32 bytes por item).
+    pub const LISTING_BYTES: usize = 40 * 1024;
     /// Bloco de leitura e escrita do stream de dados.
     pub const CHUNK: usize = 256 * 1024;
     /// Transferências simultâneas por sessão.

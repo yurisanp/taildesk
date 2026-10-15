@@ -24,6 +24,7 @@ use std::fmt;
 
 use prost::Message;
 
+use crate::files::limits as files;
 use crate::media::AUDIO_STREAM_MIN;
 
 /// Versão do protocolo de controle anunciada no [`Hello`].
@@ -51,6 +52,11 @@ pub mod limits {
     pub const COORD_MAX: u32 = u16::MAX as u32;
     /// Canais de áudio.
     pub const AUDIO_CHANNELS: u32 = 2;
+    /// Raízes liberadas pelo host para o navegador remoto.
+    pub const FS_ROOTS: usize = 64;
+    /// Nome de exibição de uma raiz.
+    pub const FS_ROOT_NAME_LEN: usize = 128;
+    // Caminhos, nomes e itens por página: `crate::files::limits`.
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -61,7 +67,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 40, 41, 42, 60, 61, 100, 101, 102, 103, 104"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 40, 41, 42, 60, 61, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 100, 101, 102, 103, 104"
     )]
     pub msg: Option<Msg>,
 }
@@ -118,6 +124,28 @@ pub enum Msg {
     CursorPos(CursorPos),
     #[prost(message, tag = "61")]
     CursorShapeRef(CursorShapeRef),
+
+    // Arquivos (`10-plano-windows-linux.md` §3; bytes nos streams uni, `crate::files`)
+    #[prost(message, tag = "80")]
+    FsRootsRequest(FsRootsRequest),
+    #[prost(message, tag = "81")]
+    FsRoots(FsRoots),
+    #[prost(message, tag = "82")]
+    FsList(FsList),
+    #[prost(message, tag = "83")]
+    FsListing(FsListing),
+    #[prost(message, tag = "84")]
+    FileOffer(FileOffer),
+    #[prost(message, tag = "85")]
+    FileRequest(FileRequest),
+    #[prost(message, tag = "86")]
+    FileAccept(FileAccept),
+    #[prost(message, tag = "87")]
+    FileCancel(FileCancel),
+    #[prost(message, tag = "88")]
+    FileDone(FileDone),
+    #[prost(message, tag = "89")]
+    FileError(FileError),
 
     // Áudio (reservado: o host não captura nem envia nada sem `Permissions.audio` e um
     // `StartAudio` aceito, `15-audio.md` §6.4)
@@ -522,6 +550,138 @@ pub struct CursorShapeRef {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Arquivos
+//
+// Caminhos são relativos a uma raiz (`root`), com `/` como separador, e quem recebe sempre os
+// passa por `taildesk_files::resolve_in_root`. Raiz 0 (`crate::files::INBOX_ROOT`) é a pasta de
+// entrada de quem recebe. Fluxo: `FileOffer` (no download, depois do `FileRequest`) →
+// `FileAccept` com offset e prefixo → stream uni com `crate::files::DataHeader` → `FileDone`.
+
+/// C→H: pede as pastas que o host libera para o navegador remoto.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct FsRootsRequest {}
+
+/// H→C: pastas liberadas (vazio = navegador remoto desligado).
+#[derive(Clone, PartialEq, Message)]
+pub struct FsRoots {
+    #[prost(message, repeated, tag = "1")]
+    pub roots: Vec<FsRoot>,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct FsRoot {
+    /// Diferente de 0, estável na sessão.
+    #[prost(uint32, tag = "1")]
+    pub id: u32,
+    #[prost(string, tag = "2")]
+    pub name: String,
+    #[prost(enumeration = "FsAccess", tag = "3")]
+    pub access: i32,
+}
+
+/// Lista `path` (`""` = a própria raiz) a partir do item `start`.
+#[derive(Clone, PartialEq, Message)]
+pub struct FsList {
+    #[prost(uint32, tag = "1")]
+    pub req_id: u32,
+    #[prost(uint32, tag = "2")]
+    pub root: u32,
+    #[prost(string, tag = "3")]
+    pub path: String,
+    #[prost(uint32, tag = "4")]
+    pub start: u32,
+}
+
+/// Uma página da listagem; `more` = pedir de novo com `start` += `entries.len()`.
+#[derive(Clone, PartialEq, Message)]
+pub struct FsListing {
+    #[prost(uint32, tag = "1")]
+    pub req_id: u32,
+    #[prost(message, repeated, tag = "2")]
+    pub entries: Vec<FsEntry>,
+    #[prost(bool, tag = "3")]
+    pub more: bool,
+    /// Preenchido quando a listagem falhou (`entries` vazio).
+    #[prost(enumeration = "FileErrorCode", tag = "4")]
+    pub error: i32,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct FsEntry {
+    #[prost(string, tag = "1")]
+    pub name: String,
+    #[prost(enumeration = "FsEntryKind", tag = "2")]
+    pub kind: i32,
+    #[prost(uint64, tag = "3")]
+    pub size: u64,
+    /// Milissegundos desde 1970 (UTC); 0 se desconhecido.
+    #[prost(int64, tag = "4")]
+    pub mtime_ms: i64,
+}
+
+/// Quem envia oferece um arquivo para `rel_path` dentro de `root` de quem recebe.
+#[derive(Clone, PartialEq, Message)]
+pub struct FileOffer {
+    #[prost(uint32, tag = "1")]
+    pub xfer_id: u32,
+    #[prost(uint32, tag = "2")]
+    pub root: u32,
+    #[prost(string, tag = "3")]
+    pub rel_path: String,
+    #[prost(uint64, tag = "4")]
+    pub size: u64,
+    #[prost(int64, tag = "5")]
+    pub mtime_ms: i64,
+}
+
+/// Download: pede que o peer ofereça `path` de `root` com este `xfer_id`.
+#[derive(Clone, PartialEq, Message)]
+pub struct FileRequest {
+    #[prost(uint32, tag = "1")]
+    pub xfer_id: u32,
+    #[prost(uint32, tag = "2")]
+    pub root: u32,
+    #[prost(string, tag = "3")]
+    pub path: String,
+}
+
+/// Aceita a oferta a partir de `offset` (tamanho do `.part`); `prefix_blake3` é o BLAKE3
+/// desses bytes, vazio quando `offset` = 0. Prefixo diferente = `FileError(RESUME_MISMATCH)`.
+#[derive(Clone, PartialEq, Message)]
+pub struct FileAccept {
+    #[prost(uint32, tag = "1")]
+    pub xfer_id: u32,
+    #[prost(uint64, tag = "2")]
+    pub offset: u64,
+    #[prost(bytes = "vec", tag = "3")]
+    pub prefix_blake3: Vec<u8>,
+}
+
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct FileCancel {
+    #[prost(uint32, tag = "1")]
+    pub xfer_id: u32,
+}
+
+/// Fim do envio, com o BLAKE3 do arquivo inteiro.
+#[derive(Clone, PartialEq, Message)]
+pub struct FileDone {
+    #[prost(uint32, tag = "1")]
+    pub xfer_id: u32,
+    #[prost(bytes = "vec", tag = "2")]
+    pub blake3: Vec<u8>,
+}
+
+/// Recusa ou falha de uma transferência, nos dois sentidos.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct FileError {
+    #[prost(uint32, tag = "1")]
+    pub xfer_id: u32,
+    #[prost(enumeration = "FileErrorCode", tag = "2")]
+    pub code: i32,
+}
+
+// ---------------------------------------------------------------------------------------------
 // Áudio (reservado)
 
 #[derive(Clone, Copy, PartialEq, Message)]
@@ -733,6 +893,51 @@ pub enum AudioStopReason {
     DeviceError = 4,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum FsAccess {
+    Unspecified = 0,
+    /// Só listar e baixar.
+    Read = 1,
+    /// Só enviar para ela.
+    Write = 2,
+    ReadWrite = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum FsEntryKind {
+    Unspecified = 0,
+    Dir = 1,
+    File = 2,
+    /// Dispositivo, socket etc.: aparece, mas não pode ser baixado.
+    Other = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum FileErrorCode {
+    Unspecified = 0,
+    NotFound = 1,
+    /// Sem `Permissions.files`, raiz sem o acesso pedido ou recusado pela pessoa.
+    Denied = 2,
+    /// Caminho recusado por `resolve_in_root`.
+    BadPath = 3,
+    NoSpace = 4,
+    /// O BLAKE3 do arquivo recebido não bate com o do `FileDone`.
+    HashMismatch = 5,
+    /// O `.part` não bate com o arquivo de quem envia: recomeçar do zero.
+    ResumeMismatch = 6,
+    Io = 7,
+    /// Mais transferências simultâneas que `crate::files::limits::PARALLEL`.
+    Busy = 8,
+    Cancelled = 9,
+    /// O arquivo de origem mudou durante o envio.
+    Changed = 10,
+    /// Stream de dados com cabeçalho errado ou bytes a mais.
+    Protocol = 11,
+}
+
 // ---------------------------------------------------------------------------------------------
 // Limites e enquadramento
 
@@ -765,6 +970,18 @@ fn at_most(field: &'static str, value: usize, max: usize) -> Result<(), InvalidM
         })
     } else {
         Ok(())
+    }
+}
+
+fn exactly(field: &'static str, value: usize, want: usize) -> Result<(), InvalidMessage> {
+    if value == want {
+        Ok(())
+    } else {
+        Err(InvalidMessage {
+            field,
+            value: value as u64,
+            max: want as u64,
+        })
     }
 }
 
@@ -831,6 +1048,36 @@ impl Control {
             return Ok(());
         };
         match msg {
+            Msg::FsRoots(m) => {
+                at_most("roots", m.roots.len(), limits::FS_ROOTS)?;
+                for r in &m.roots {
+                    at_most("root.name", r.name.len(), limits::FS_ROOT_NAME_LEN)?;
+                    if r.id == crate::files::INBOX_ROOT {
+                        return Err(InvalidMessage {
+                            field: "root.id",
+                            value: 0,
+                            max: 0,
+                        });
+                    }
+                }
+                Ok(())
+            }
+            Msg::FsList(FsList { path, .. }) | Msg::FileRequest(FileRequest { path, .. }) => {
+                at_most("path", path.len(), files::PATH_LEN)
+            }
+            Msg::FsListing(m) => {
+                at_most("entries", m.entries.len(), files::LISTING_ENTRIES)?;
+                for e in &m.entries {
+                    at_most("entry.name", e.name.len(), files::NAME_LEN)?;
+                }
+                Ok(())
+            }
+            Msg::FileOffer(m) => at_most("rel_path", m.rel_path.len(), files::PATH_LEN),
+            Msg::FileAccept(m) => {
+                let want = if m.offset > 0 { 32 } else { 0 };
+                exactly("prefix_blake3", m.prefix_blake3.len(), want)
+            }
+            Msg::FileDone(m) => exactly("blake3", m.blake3.len(), 32),
             Msg::Hello(m) => {
                 at_most("app_version", m.app_version.len(), limits::SHORT_TEXT_LEN)?;
                 platform(m.platform.as_ref())?;
@@ -889,7 +1136,10 @@ impl Control {
             | Msg::MouseMove(_)
             | Msg::MouseButton(_)
             | Msg::Scroll(_)
-            | Msg::CursorShapeRef(_) => Ok(()),
+            | Msg::CursorShapeRef(_)
+            | Msg::FsRootsRequest(_)
+            | Msg::FileCancel(_)
+            | Msg::FileError(_) => Ok(()),
         }
     }
 }
@@ -1162,6 +1412,70 @@ mod tests {
                 stream_id: 0xF0,
                 reason: AudioStopReason::ByController.into(),
             }),
+            Msg::FsRootsRequest(FsRootsRequest {}),
+            Msg::FsRoots(FsRoots {
+                roots: vec![FsRoot {
+                    id: 1,
+                    name: "Documentos".into(),
+                    access: FsAccess::ReadWrite.into(),
+                }],
+            }),
+            Msg::FsList(FsList {
+                req_id: 3,
+                root: 1,
+                path: "projetos/relatório".into(),
+                start: 512,
+            }),
+            Msg::FsListing(FsListing {
+                req_id: 3,
+                entries: vec![
+                    FsEntry {
+                        name: "fotos".into(),
+                        kind: FsEntryKind::Dir.into(),
+                        size: 0,
+                        mtime_ms: 1_760_000_000_000,
+                    },
+                    FsEntry {
+                        name: "a.txt".into(),
+                        kind: FsEntryKind::File.into(),
+                        size: 12,
+                        mtime_ms: 0,
+                    },
+                ],
+                more: true,
+                error: FileErrorCode::Unspecified.into(),
+            }),
+            Msg::FileOffer(FileOffer {
+                xfer_id: 9,
+                root: crate::files::INBOX_ROOT,
+                rel_path: "pasta/vídeo.mkv".into(),
+                size: 10 << 30,
+                mtime_ms: 1_760_000_000_123,
+            }),
+            Msg::FileRequest(FileRequest {
+                xfer_id: 10,
+                root: 1,
+                path: "a.txt".into(),
+            }),
+            Msg::FileAccept(FileAccept {
+                xfer_id: 9,
+                offset: 0,
+                prefix_blake3: Vec::new(),
+            }),
+            Msg::FileAccept(FileAccept {
+                xfer_id: 9,
+                offset: 1 << 33,
+                prefix_blake3: vec![7; 32],
+            }),
+            Msg::FileCancel(FileCancel { xfer_id: 9 }),
+            Msg::FileDone(FileDone {
+                xfer_id: 9,
+                blake3: vec![0xab; 32],
+            }),
+            Msg::FileError(FileError {
+                xfer_id: 9,
+                code: FileErrorCode::ResumeMismatch.into(),
+            }),
         ]
     }
 
@@ -1297,5 +1611,63 @@ mod tests {
             priority: 42,
         };
         assert_eq!(msg.priority(), Priority::Unspecified);
+    }
+
+    #[test]
+    fn limites_de_arquivos() {
+        let e = invalida(Msg::FileAccept(FileAccept {
+            xfer_id: 1,
+            offset: 5,
+            prefix_blake3: Vec::new(),
+        }));
+        assert_eq!(e.field, "prefix_blake3");
+        let e = invalida(Msg::FileAccept(FileAccept {
+            xfer_id: 1,
+            offset: 0,
+            prefix_blake3: vec![0; 32],
+        }));
+        assert_eq!(e.field, "prefix_blake3");
+        let e = invalida(Msg::FileDone(FileDone {
+            xfer_id: 1,
+            blake3: vec![0; 31],
+        }));
+        assert_eq!(e.field, "blake3");
+        let e = invalida(Msg::FileRequest(FileRequest {
+            xfer_id: 1,
+            root: 1,
+            path: "a".repeat(files::PATH_LEN + 1),
+        }));
+        assert_eq!(e.field, "path");
+        let e = invalida(Msg::FsRoots(FsRoots {
+            roots: vec![FsRoot {
+                id: crate::files::INBOX_ROOT,
+                name: String::new(),
+                access: FsAccess::Read.into(),
+            }],
+        }));
+        assert_eq!(e.field, "root.id");
+    }
+
+    #[test]
+    fn pagina_cheia_de_listagem_cabe_num_frame() {
+        let entries = (0..files::LISTING_ENTRIES)
+            .map(|_| FsEntry {
+                name: "n".repeat(files::LISTING_BYTES / files::LISTING_ENTRIES),
+                kind: FsEntryKind::File.into(),
+                size: u64::MAX,
+                mtime_ms: i64::MIN,
+            })
+            .collect();
+        let msg = Control::from(Msg::FsListing(FsListing {
+            req_id: u32::MAX,
+            entries,
+            more: true,
+            error: 0,
+        }));
+        assert!(
+            msg.encoded_len() <= limits::FRAME_LEN,
+            "{}",
+            msg.encoded_len()
+        );
     }
 }
