@@ -23,12 +23,12 @@ C → H  Hello {
           clock: t_client_ns
        }
 H → C  HelloAck {
-          proto_version, host_name, platform, displays: [DisplayInfo{id, name, w, h, refresh, scale, primary}],
+          proto_version, host_name, platform, displays: [DisplayInfo] (completo em `13-multimonitor.md` §3: posição, tamanho físico e lógico, escala, rotação, `shared`),
           encode_caps: [...], permissions: Permissions, consent: Required|NotRequired,
           clock: t_host_ns  (+ eco de t_client_ns p/ estimar offset/RTT)
        }
 H → C  ConsentResult { granted, by_user?, permissions }        (se Required)
-C → H  StartVideo { display_id, wanted: QualityPrefs }
+C → H  StartVideo { display_id, wanted: QualityPrefs, priority }   (um por monitor; vários podem estar ativos)
 H → C  CodecSelected { display_id, codec, profile, chroma, w, h, fps_target, bitrate_kbps, color: ColorInfo, stream_id }
 ...    (vídeo começa por datagrama; primeiro frame é keyframe/refresh completo)
 ```
@@ -39,14 +39,16 @@ A identidade do controlador **não** vem do `Hello` — vem do `Overlay::identif
 | Grupo | Mensagens |
 |---|---|
 | Sessão | `Hello`, `HelloAck`, `ConsentResult`, `Close{reason}`, `Ping{t}`/`Pong{t,t_echo}` |
-| Vídeo | `StartVideo`, `StopVideo`, `CodecSelected`, `RequestKeyframe{display}`, `PictureLoss{display, last_good_seq}`, `Nack{display, frame_seq, missing_frag_bitmap}`, `QualityPrefs{fps_max, mode: Auto|Text|Motion|LowBandwidth, chroma444}`, `SwitchDisplay` |
-| Input | Teclado: ver `11-teclado.md` §3 (`KeyboardInfo`, `Key`, `KeyShortcut`, `KeyChar`, `KeyboardMode`, `ReleaseAll`), `MouseMove{x,y,abs|rel}`, `MouseButton{btn, down}`, `Scroll{dx,dy,precise}`, `Touch{id, phase, x, y, pressure}`, `Gamepad{...}` (futuro) |
-| Cursor | `CursorPos{x,y,visible}`, `CursorShapeRef{hash}` (shape completo no stream de cursor) |
+| Vídeo | `StartVideo{display_id, wanted, priority}`, `CodecSelected{display_id, stream_id, ...}`, `RequestKeyframe{display}`, `PictureLoss{display, last_good_seq}`, `Nack{display, frame_seq, missing_frag_bitmap}`, `QualityPrefs{fps_max, mode: Auto|Text|Motion|LowBandwidth, chroma444}`, `StopVideo{display_id}`, `SetPriority{display_id, FOCUSED|VISIBLE}`, `VideoStopped{display_id, reason}`, `DisplaysChanged{displays}` (sem `SwitchDisplay`: trocar = Stop + Start) |
+| Input | Teclado: ver `11-teclado.md` §3 (`KeyboardInfo`, `Key`, `KeyShortcut`, `KeyChar`, `KeyboardMode`, `ReleaseAll`), `MouseMove{display_id, x, y (u16 normalizado no monitor) | rel}`, `MouseButton{btn, down}`, `Scroll{dx,dy,precise}`, `Touch{id, phase, x, y, pressure}`, `Gamepad{...}` (futuro) |
+| Cursor | `CursorPos{display_id, x, y, visible}`, `CursorShapeRef{hash}` (shape completo no stream de cursor) |
 | Clipboard | `ClipboardOffer{formats}`, `ClipboardData{format, bytes}` (texto/HTML/PNG; arquivos → transferência explícita) |
 | Arquivos | `FileOffer{id, name, size, hash}`, `FileAccept`, `FileCancel`, `FileProgress` |
 | QoS | `ReceiverReport{display, recv_kbps, loss_pct, jitter_ms, decode_ms, render_ms, queue_frames}` (a cada 250 ms) |
 | Áudio | `StartAudio{codec=opus, rate, channels}`, `StopAudio` |
 | Chat | `ChatMessage{text}` |
+
+Multi-monitor (`13-multimonitor.md` §3): **um stream de vídeo por monitor**, cada um com encoder, keyframes e `stream_id` próprios, respondido por um `CodecSelected` por `display_id`. Host recusa `StartVideo` acima do seu limite (`Error{TOO_MANY_STREAMS}`; padrão 2 com openh264). Parser: no máximo 16 `DisplayInfo` por mensagem, `name` ≤ 128 bytes.
 
 Regras: campos novos sempre opcionais; `proto_version` maior só quando quebrar; mensagens desconhecidas no `oneof` são ignoradas e logadas.
 

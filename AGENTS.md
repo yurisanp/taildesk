@@ -9,6 +9,7 @@ Desktop remoto + troca de arquivos em Rust, **Windows x64 e Linux x64 (Ubuntu/De
 ## Decisões travadas (mudar só com ADR em `docs/context/08-roadmap.md`)
 1. Rede só pela trait `Overlay` (`taildesk-overlay`): embutido = crate `tailscale` **=0.6.1**; sistema = tailscaled + LocalAPI (`taildesk-tsapi`). Nunca escrever rendezvous/relay próprio.
 2. Transporte QUIC (`quinn`): stream bidi 0 = controle; streams uni = arquivos; datagramas = mídia com header de 16 bytes (`taildesk-proto::media`).
+   Vídeo é **por monitor** desde a fase 1: um stream, encoder e `stream_id` por `display_id`; mouse com `display_id` (`13-multimonitor.md`).
 3. Identidade do peer vem de `Overlay::identify()`, nunca do conteúdo das mensagens.
 4. Vídeo: openh264 primeiro, depois Media Foundation (Windows) e VA-API (Linux), sempre com probe + fallback.
 5. Linux host: Wayland (portal + PipeWire, input pelo portal/libei) é caminho principal; X11 secundário.

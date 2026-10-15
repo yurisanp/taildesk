@@ -17,7 +17,7 @@ Codinome: **`taildesk`** no lugar de `halyard` (crates `taildesk-*`).
 | Ver e controlar (teclado físico + texto, mouse, scroll, cursor separado) | Áudio, chat, gamepad, toque |
 | Troca de arquivos nos dois sentidos + navegador de arquivos remoto | Clipboard de arquivos (fase 4), sync automático |
 | H.264 (SW primeiro, HW em seguida) | AV1/HEVC/VP9 (fase 4), PyroWave (pós-MVP) |
-| Multi-monitor (troca de tela, não mosaico) | Monitores virtuais, mosaico |
+| Multi-monitor escolhido pelo controlador: **um por vez** (abas) e **janelas separadas** (`13-multimonitor.md`) | Mosaico (todos numa janela), monitores virtuais |
 | Modo assistido (consentimento na tela do host) | Não-assistido, tela de login/UAC (fase 5) |
 
 ## 2. Decisões ajustadas para Windows + Linux
@@ -36,6 +36,7 @@ atuais (Fedora 43, Ubuntu 25.10+) só oferecem sessão Wayland e o KDE caminha p
 - **Host Linux X11** = XShm + XDamage + XFixes + XTest (`x11rb`), como caminho secundário.
 - O **controlador** Linux funciona igual em X11 e Wayland (Slint/winit + wgpu).
 - Sem tela de login em Wayland no MVP (limitação do SO, não do produto).
+- **Multi-monitor no Wayland**: quem escolhe os monitores é a pessoa no host, no diálogo do portal (`SelectSources` com `multiple=true`, um stream PipeWire por monitor). O controlador só escolhe entre os liberados; monitor novo ou fora da seleção exige novo diálogo. Input absoluto vai por stream (`NotifyPointerMotionAbsolute`). Detalhes em `13-multimonitor.md` §4.2.
 
 ### 2.6 Distros Linux-alvo: Ubuntu, Fedora e Arch
 Pedido do Yuri (15/10/2026): **Fedora e Arch Linux** são alvos de primeira classe, ao lado do Ubuntu/Debian.
@@ -133,10 +134,10 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 | Fase | Entrega | Pronto quando |
 |---|---|---|
 | **0 — Fundações** | Workspace, CI, `taildesk-proto`, `EmbeddedOverlay`, spike quinn-sobre-tailscale-rs, `taildesk-cli bench-net` | **Gate G0**: QUIC sobre o overlay embutido entre um Windows e um Linux, conexão direta e via DERP, com números de throughput/RTT/CPU. Meta mínima: 30 Mbit/s estáveis direto. |
-| **1 — Ver** | Captura (DXGI no Windows, portal+PipeWire no Wayland, XShm no X11), openh264, datagramas, janela wgpu | `taildesk-cli connect <host>` mostra a tela remota 1080p30 nos 4 sentidos (Win↔Win, Win↔Linux, Linux↔Linux). |
-| **2 — Controlar** | Input com tradução automática de layouts (`11-teclado.md`: US-Intl ↔ ABNT2 etc.), cursor separado, consentimento, UI Slint com lista de peers da tailnet | Usar o host remoto para trabalho normal de escritório; matriz de teclado de `11-teclado.md` §5 passando; latência < 60 ms em LAN. |
+| **1 — Ver** | Captura (DXGI no Windows, portal+PipeWire no Wayland, XShm no X11), openh264, datagramas, janela wgpu. **Protocolo por monitor desde já**: um stream de vídeo por monitor, `DisplayInfo` completo, `StartVideo`/`StopVideo` por `display_id`, mouse com `display_id`; Wayland pede `multiple=true` | `taildesk-cli connect <host> --display N` mostra qualquer monitor do host em 1080p30 nos 4 sentidos (Win↔Win, Win↔Linux, Linux↔Linux). |
+| **2 — Controlar** | Input com tradução automática de layouts (`11-teclado.md`: US-Intl ↔ ABNT2 etc.), cursor separado, consentimento, UI Slint com lista de peers da tailnet; multi-monitor **um por vez** (abas e atalhos, input por monitor); **spike de 2 janelas Slint com vídeo wgpu** (2 texturas NV12 a 60 fps) | Usar o host remoto para trabalho normal de escritório; matriz de teclado de `11-teclado.md` §5 passando; troca de monitor < 300 ms em LAN; latência < 60 ms em LAN. |
 | **3 — Arquivos** | §3 completo: enviar/receber, navegador remoto, retomada, hash | 10 GB em ambos os sentidos sem travar o vídeo; retomada após queda de rede. |
-| **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor, clipboard texto/imagem, `SystemOverlay` + `whois` | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
+| **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor em **janelas separadas** (destacar/recolocar aba, prioridades, hotplug, "seguir o mouse", "usar todos os meus monitores"), clipboard texto/imagem, `SystemOverlay` + `whois` | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
 | **5 — Produção** | Serviço Windows (UAC/login), não-assistido, `restore_token` Wayland, instalador MSI assinado, repositório COPR e AUR (os pacotes básicos já saem no Releases, §8), auditoria | Instalação limpa em máquina nova e acesso sem ninguém na frente (Windows). |
 
 ## 6. Decisões do Yuri (15/10/2026)
@@ -156,6 +157,9 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 | Identidade de usuário ausente no modo embutido | Tags + nós confiáveis + consentimento; `whois` no modo sistema |
 | DXGI DD falha em notebook híbrido | Fallback WGC |
 | openh264 pesado em 1440p/4K | É só ponte; HW na fase 4 |
+| Vários monitores ao mesmo tempo multiplicam encode e banda | Qualidade cheia só no monitor em foco; os outros visíveis a 5–15 fps; abas escondidas param de codificar; **máximo de 2 monitores simultâneos com openh264** (até 4 com HW, conforme o probe) |
+| Várias janelas Slint com vídeo wgpu ao mesmo tempo sem exemplo oficial | Spike na fase 2 antes de prometer "janelas separadas"; mesmo `wgpu::Device` em todas as janelas |
+| Portal do KDE ignorava o stream no input absoluto (multimonitor quebrado) | Correção no MR 210 do xdg-desktop-portal-kde; testar Fedora KDE e Arch KDE com a versão das distros |
 | Caractere fora do layout do host em Wayland não tem injeção padrão | Portal `NotifyKeyboardKeysym`; senão aviso no HUD (`11-teclado.md` §2.4) |
 
 ## 8. Releases (desde 15/10/2026)

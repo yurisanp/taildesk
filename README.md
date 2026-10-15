@@ -9,6 +9,7 @@ Acesso remoto (desktop remoto + troca de arquivos) em **Rust**, para **Windows e
 O contexto completo está em [`docs/context/`](docs/context/README.md). Comece por:
 - [`10-plano-windows-linux.md`](docs/context/10-plano-windows-linux.md): escopo do MVP, decisões e fases.
 - [`11-teclado.md`](docs/context/11-teclado.md): tradução automática entre layouts (US-Intl ↔ ABNT2).
+- [`13-multimonitor.md`](docs/context/13-multimonitor.md): multi-monitor (um por vez, janelas separadas).
 - [`06-arquitetura.md`](docs/context/06-arquitetura.md) e [`07-protocolo.md`](docs/context/07-protocolo.md).
 
 Os documentos `00`–`09` usam o codinome antigo `halyard`; leia como `taildesk`.

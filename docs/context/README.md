@@ -26,6 +26,7 @@ Codinome usado nos exemplos: **`halyard`** (placeholder — troque à vontade).
 | [`08-roadmap.md`](08-roadmap.md) | Fases, critérios de aceite, ADRs, riscos e perguntas em aberto. | Ambos |
 | [`10-plano-windows-linux.md`](10-plano-windows-linux.md) | Plano do MVP TailDesk: Windows + Linux, desktop remoto + arquivos. Vale por cima de 00–09 no MVP. | Ambos |
 | [`11-teclado.md`](11-teclado.md) | Tradução automática entre layouts de teclado (ex.: US-Intl ↔ ABNT2). | Ambos |
+| [`13-multimonitor.md`](13-multimonitor.md) | Multi-monitor: um por vez, janelas separadas, protocolo por monitor, captura por SO. | Ambos |
 | [`09-fontes.md`](09-fontes.md) | Links de referência e versões verificadas. | Ambos |
 
 ## Resumo em 10 linhas
