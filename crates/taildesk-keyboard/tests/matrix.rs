@@ -4,10 +4,10 @@
 
 use std::collections::BTreeSet;
 
-use taildesk_keyboard::fixtures::{abnt2, us, us_intl_windows};
+use taildesk_keyboard::fixtures::{abnt2, us, us_intl_windows, xkb_br_abnt2, xkb_us, xkb_us_intl};
 use taildesk_keyboard::{
     Controller, Hid, Host, Inject, KeyMsg, Keymap, Level, Locks, Mode, Mods, Output, ReverseMap,
-    Translation, effective_translation, is_modifier, is_non_printing, keypad_nav,
+    Translation, effective_translation, is_modifier, is_non_printing, keypad_nav, layout_tag,
 };
 
 const L_CTRL: Hid = 0xE0;
@@ -121,10 +121,13 @@ impl HostOs {
                     self.text.push(c);
                 }
             },
-            (Some(p), Some(Output::Dead(d))) => {
-                self.text.push(alone(&self.keymap, p));
-                self.text.push(alone(&self.keymap, d));
-            }
+            (Some(p), Some(Output::Dead(d))) => match self.keymap.compose(p, d) {
+                Some(r) => self.text.push(r),
+                None => {
+                    self.text.push(alone(&self.keymap, p));
+                    self.text.push(alone(&self.keymap, d));
+                }
+            },
         }
     }
 }
@@ -156,7 +159,11 @@ struct Session {
 
 impl Session {
     fn new(local: Keymap, remote: Keymap) -> Self {
-        let tr = effective_translation(Mode::Auto, &local.name, &remote.name);
+        let tr = effective_translation(
+            Mode::Auto,
+            &layout_tag(&local.name),
+            &layout_tag(&remote.name),
+        );
         Self::with(local, remote, tr)
     }
 
@@ -266,16 +273,38 @@ fn without(m: Mods, bit: Mods) -> Mods {
     r
 }
 
-/// Os pares obrigatórios de §5. ABNT2 do Windows e do Linux têm a mesma tabela nos fixtures.
+/// Os pares obrigatórios de §5. Os lados Linux usam o dump real do libxkbcommon.
 fn pairs() -> Vec<(&'static str, Keymap, Keymap)> {
     vec![
-        ("Win US-Intl -> Linux ABNT2", us_intl_windows(), abnt2()),
-        ("Linux ABNT2 -> Win US-Intl", abnt2(), us_intl_windows()),
-        ("Win ABNT2 -> Linux US", abnt2(), us()),
-        ("Linux US -> Win ABNT2", us(), abnt2()),
-        ("ABNT2 -> ABNT2", abnt2(), abnt2()),
-        ("US -> US-Intl", us(), us_intl_windows()),
-        ("US-Intl -> US", us_intl_windows(), us()),
+        (
+            "Win US-Intl -> Linux ABNT2",
+            us_intl_windows(),
+            xkb_br_abnt2(),
+        ),
+        (
+            "Linux ABNT2 -> Win US-Intl",
+            xkb_br_abnt2(),
+            us_intl_windows(),
+        ),
+        ("Win ABNT2 -> Linux US", abnt2(), xkb_us()),
+        ("Linux US -> Win ABNT2", xkb_us(), abnt2()),
+        // ABNT2 dos dois lados: Físico só no mesmo SO (as mortas sozinhas diferem).
+        ("Win ABNT2 -> Win ABNT2", abnt2(), abnt2()),
+        ("Linux ABNT2 -> Linux ABNT2", xkb_br_abnt2(), xkb_br_abnt2()),
+        ("Win ABNT2 -> Linux ABNT2", abnt2(), xkb_br_abnt2()),
+        ("Linux ABNT2 -> Win ABNT2", xkb_br_abnt2(), abnt2()),
+        ("Linux US -> Win US-Intl", xkb_us(), us_intl_windows()),
+        ("Win US-Intl -> Linux US", us_intl_windows(), xkb_us()),
+        (
+            "Linux US-Intl -> Linux ABNT2",
+            xkb_us_intl(),
+            xkb_br_abnt2(),
+        ),
+        (
+            "Linux ABNT2 -> Linux US-Intl",
+            xkb_br_abnt2(),
+            xkb_us_intl(),
+        ),
     ]
 }
 
@@ -319,6 +348,14 @@ fn equal_layouts_go_physical() {
     assert_eq!(s.os.text, "é");
     let s = Session::new(us_intl_windows(), abnt2());
     assert_eq!(s.controller.translation(), Translation::Hybrid);
+    let s = Session::new(xkb_br_abnt2(), xkb_br_abnt2());
+    assert_eq!(s.controller.translation(), Translation::Physical);
+    // Windows ABNT2 -> Linux ABNT2 vai pelo híbrido: `´` + espaço dá `'` no Linux.
+    let mut s = Session::new(abnt2(), xkb_br_abnt2());
+    assert_eq!(s.controller.translation(), Translation::Hybrid);
+    s.tap(0x2F);
+    s.tap(0x2C);
+    assert_eq!(s.os.text, "´");
 }
 
 /// Requisito do Yuri: `'` + `c` no Windows US-Intl é `ç` no host ABNT2, e `'t` continua `'t`.
