@@ -60,9 +60,10 @@ cargo xtask check                      # fmt + clippy -D warnings + testes (igua
 cargo run -p taildesk                  # app gráfico (janela + bandeja)
 cargo run -p taildesk-cli -- --version
 ```
-No Linux o build precisa do `fontconfig` e da `libpipewire-0.3` de desenvolvimento e do `libclang`:
-`libfontconfig1-dev libpipewire-0.3-dev libclang-dev` (Ubuntu/Debian),
-`fontconfig-devel pipewire-devel clang-devel` (Fedora) ou `fontconfig pipewire clang` (Arch).
+No Linux o build precisa do `fontconfig` e da `libpipewire-0.3` de desenvolvimento, do `libclang` e do `nasm`:
+`libfontconfig1-dev libpipewire-0.3-dev libclang-dev nasm` (Ubuntu/Debian),
+`fontconfig-devel pipewire-devel clang-devel gcc-c++ nasm` (Fedora) ou `fontconfig pipewire clang nasm` (Arch).
+Sem o `nasm` o openh264 compila sem SIMD e o encode fica ~4x mais lento (o build avisa). No Windows, instale o NASM e ponha no PATH.
 `cargo run -p taildesk-cli -- portal [--video]` testa a sessão do portal e a captura de cada monitor; `--video` mede também o encode H.264.
 No Windows, `cargo run -p taildesk-cli -- captura-dxgi [segundos] [--video]` lista os monitores e mede a captura de todos.
 `taildesk-cli atualizar [--pre] [--instalar]` procura a versão nova e, no AppImage, instala.
