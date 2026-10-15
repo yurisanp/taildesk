@@ -99,7 +99,8 @@ por sessão, uma janela própria (ou aba, a decidir no protótipo).
 - Estados por dispositivo: online com TailDesk, online sem TailDesk, offline, não suportado.
   O modo embutido do tailscale-rs pode não expor todos os dados (SO, usuário); mostrar o que houver.
 - Favoritos (★) no topo; recentes logo abaixo.
-- Ações rápidas no detalhe: Conectar, Enviar arquivo (sem abrir sessão), Copiar endereço.
+- Ações rápidas no detalhe: Conectar, **Testar conexão** (abre a tela §5.10 com esse dispositivo),
+  Enviar arquivo (sem abrir sessão), Copiar endereço.
 - Rodapé da barra lateral: status do próprio PC ("Aceitando conexões" / "Desativado") e avisos,
   como no Tailscale.
 
@@ -113,13 +114,14 @@ não responder em 60 s, dizer qual dos dois.
 ┌──────────────────────────────────────────────┐
 │  notebook-yuri quer acessar este computador  │
 │  Usuário: yuri@  ·  Fedora 43  ·  100.64.1.7 │
-│  ✓ ver a tela   ✓ controlar   ✓ arquivos     │
+│  ✓ ver a tela  ✓ controlar  ✓ arquivos  ✓ som│
 │  [ ] Lembrar deste dispositivo               │
 │        [Recusar]          [Permitir]         │
 └──────────────────────────────────────────────┘
 ```
 - Sempre em primeiro plano, foco inicial em **Recusar** (proteção contra Enter acidental).
-- Permissões desmarcáveis pelo host antes de aceitar.
+- Permissões desmarcáveis pelo host antes de aceitar. **Som** ("Ouvir o som deste computador")
+  vem ligado por padrão e só aparece se Configurações permitir (fase 4, `15-audio.md` §8).
 - "Lembrar" grava na lista local de nós confiáveis (`node_stable_id`, `10-plano` §2.1); a lista
   é editável em Configurações. Mesmo lembrado, o host vê o aviso de sessão ativa (§5.5).
 - Inferência a validar: um alerta extra "Nunca aceite pedidos de quem ligou dizendo ser
@@ -127,7 +129,9 @@ não responder em 60 s, dizer qual dos dois.
 
 ### 5.5 Indicador de sessão ativa (no host)
 Faixa pequena e arrastável no topo da tela do host: "notebook-yuri controla este PC ·
-vendo monitores 1 e 2 · arquivos ✓ · [Pausar controle] [Encerrar]", mais ícone colorido na bandeja. Em Wayland, o próprio
+monitores 1 e 2 · compartilhando tela e som · [Desligar som] [Pausar controle] [Encerrar]".
+Desligar o som no host corta o áudio sem encerrar; o controlador vê "O computador remoto desligou
+o som", mais ícone colorido na bandeja. Em Wayland, o próprio
 GNOME/KDE também mostra seu indicador de compartilhamento; não brigar com ele.
 
 ### 5.6 Janela da sessão (no controlador)
@@ -141,15 +145,18 @@ GNOME/KDE também mostra seu indicador de compartilhamento; não brigar com ele.
             │                                                     └────────┘ │
 ```
 - **Barra**: nome do host (menu com detalhes), abas de monitores (§5.6.1, só com 2+ monitores),
-  indicador de teclado (clique abre Auto/Físico/Texto), arquivos (abre painel §5.7), tela cheia,
-  "⋯" (Ctrl+Alt+Del para o host Windows, ajustar à janela / tamanho real, qualidade,
-  mostrar HUD), desconectar.
+  indicador de teclado (clique abre Auto/Físico/Texto), **Som** (§5.6.2), arquivos (abre painel
+  §5.7), tela cheia, "⋯" (Ctrl+Alt+Del para o host Windows, ajustar à janela / tamanho real,
+  qualidade, mostrar HUD, **Diagnóstico da conexão** = §5.10 com os números da sessão), desconectar.
 - Barra recolhe em tela cheia; reaparece com o mouse no topo, com uma alça sempre visível e
   com atalho (`Ctrl+Alt+Home` sugerido; a validar contra conflitos nos dois SOs).
 - **Captura de teclado**: em foco, Win/Alt+Tab vão para o remoto (`10-plano` §2.3); deixar claro
   como "sair" (atalho mostrado ao entrar em tela cheia, como faz o navegador).
 - **HUD** desligado por padrão; aparece sozinho por alguns segundos quando a conexão vira relay
-  ou a qualidade cai ("Conexão via relay, qualidade reduzida").
+  ou a qualidade cai ("Conexão via relay, qualidade reduzida"). Mostra a **classe de rede** do
+  adaptador ("9 ms · direto · LAN"; classes LAN · Rápida · Média · Lenta · Mínima, `14` §2) e, ao
+  clicar, expande o gráfico de bitrate/FPS/RTT. Rede lenta com vários monitores: "Rede lenta: só o
+  monitor em foco é atualizado".
 - **Toast de teclado** (de `11-teclado.md` §2.4): "Não foi possível digitar ‘ß’ neste host"
   com no máximo um aviso a cada poucos segundos para não poluir.
 
@@ -174,6 +181,13 @@ GNOME/KDE também mostra seu indicador de compartilhamento; não brigar com ele.
   desplugado no host fecha a aba (ou mostra "Monitor desconectado no host" na janela destacada) e
   volta para o principal; reconexão restaura os mesmos monitores e o mesmo modo.
 - **Mosaico** (todos numa janela) fica fora do MVP.
+
+#### 5.6.2 Som do computador remoto (fase 4, `15-audio.md` §8)
+- Botão **Som** na barra (só na janela principal da sessão; um áudio por sessão, independente dos
+  monitores). O menu tem **Ligado/Desligado**: desligado não é mudo, **nenhum áudio é transmitido**.
+- **Volume local** separado, com o aviso "Volume (continua recebendo áudio)", para não confundir com
+  desligar. Perfil Automático / Voz / Música. Estado lembrado por dispositivo.
+- Se o host não permitiu ou desligou o som, o botão vira "Sem som" e explica ao clicar.
 - Esta regra é sobre **monitores dentro de uma sessão**; cada sessão (host) continua em janela própria (§11).
 
 ### 5.7 Painel de arquivos (dentro da sessão)
@@ -193,12 +207,28 @@ abrir pasta. Serve também como registro de auditoria legível (`10-plano` §3).
 - **Este computador**: aceitar conexões (sim/não), pedir permissão sempre ou lembrar
   dispositivos, dispositivos confiáveis (lista com revogar), raízes de arquivos permitidas,
   pasta de entrada.
-- **Sessão**: qualidade (Automática / Nitidez / Fluidez), teclado padrão (Auto), tela cheia ao conectar,
+- **Este computador** também: "Permitir que quem se conecta ouça o som deste computador" e
+  "Permitir testes de conexão" (testes não mostram a tela, então não pedem consentimento; ficam no
+  registro de auditoria).
+- **Sessão**: qualidade (Automática / Nitidez / Fluidez, mais "Economizar dados"), som do computador
+  remoto ligado ou desligado por padrão, teclado padrão (Auto), tela cheia ao conectar,
   modo de monitores (Um por vez / Janelas separadas), "Seguir o mouse" e "Usar todos os meus
   monitores" (distribui as janelas de monitores em tela cheia nos monitores deste PC).
 - **Rede**: modo embutido vs Tailscale do sistema (quando existir), tailnet atual, sair.
-- **Sobre / diagnóstico**: versão, copiar relatório de diagnóstico (inspirado na janela de
-  debug do Tailscale).
+- **Sobre / diagnóstico**: versão, abrir o teste de conexão (§5.10), copiar relatório de
+  diagnóstico (inspirado na janela de debug do Tailscale) e o selo do Slint (atribuição da licença).
+
+### 5.10 Teste de conexão (`14-selecao-adaptativa.md` §7)
+Janela própria, aberta por "Testar conexão" no detalhe do dispositivo, por "⋯ → Diagnóstico da
+conexão" na sessão (só números ao vivo, sem sondagem) ou por Configurações → Diagnóstico.
+- Cabeçalho "Não mostra a tela do outro lado e não controla nada" e botão Testar de novo.
+- Medições com faixa de cor: caminho (direto na LAN, direto pela internet, via relay), latência,
+  variação, perda, banda nos dois sentidos, codecs das duas máquinas.
+- **Perfil escolhido e o porquê**, em frases.
+- **Demonstração** com padrão de teste sintético codificado pelo host, perfis forçáveis
+  (Automático, LAN, Rápida, Média, Lenta, Mínima) e **Simular rede** (4G, Wi-Fi ruim, Outro país),
+  só nesse teste.
+- Copiar relatório (sem chaves nem IPs públicos completos).
 
 ## 6. Fluxos principais
 
@@ -225,6 +255,10 @@ abrir pasta. Serve também como registro de auditoria legível (`10-plano` §3).
 | Reconectando | "Conexão perdida. Reconectando…" |
 | Caractere impossível | "Não foi possível digitar ‘ß’ em **notebook-yuri**." |
 | Arquivo salvo | "**relatorio.pdf** salvo em Downloads/TailDesk." |
+| Som desligado no controlador | "Desligado: nenhum áudio é transmitido." |
+| Host desligou o som | "O computador remoto desligou o som." |
+| Volume | "Volume (continua recebendo áudio)" |
+| Rede lenta e vários monitores | "Rede lenta: só o monitor em foco é atualizado." |
 
 Português como idioma principal, inglês desde o início pela estrutura de i18n do Slint (`@tr`).
 

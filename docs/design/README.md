@@ -11,14 +11,15 @@ cargo run -p taildesk-prototipo -- --tela pedido      # pedido de acesso no host
 cargo run -p taildesk-prototipo -- --tema escuro      # força o tema (padrão: o do sistema)
 ```
 
-Telas isoladas (`--tela`): `principal`, `transferencias`, `configuracoes`, `pedido`, `faixa`,
+Telas isoladas (`--tela`): `principal`, `teste`, `diagnostico`, `sessao-som`, `transferencias`, `configuracoes`, `pedido`, `faixa`,
 `sessao`, `sessao-monitores`, `sessao-wayland`, `sessao-com-janela`, `sessao-destacada`, `sessao-arquivos`, `sessao-navegar`, `sessao-relay`, `sessao-esperando`, `sessao-reconectando`.
 
 O que dá para clicar: busca e seleção de dispositivos, Conectar (abre a janela da sessão, que passa
 por "Encontrando…" e "Esperando permitir…"), Enviar arquivo, Copiar, abas da janela principal,
-"Simular pedido recebido" (pedido de acesso → Permitir → faixa de sessão ativa no host). Na sessão:
+"Testar conexão" (aba de teste com perfis e simulação de rede), "Simular pedido recebido" (pedido de
+acesso → Permitir → faixa de sessão ativa no host, com "Desligar som"). Na sessão:
 abas de monitores (⧉ abre o monitor em janela própria; fechar a janela devolve a aba;
-`▾` mostra o layout do host e "Seguir o mouse"), menu do teclado (Auto/Físico/Texto), Arquivos, Recolher/Fixar barra, `⋯` com simulações de relay,
+`▾` mostra o layout do host e "Seguir o mouse"), menu do teclado (Auto/Físico/Texto), Som (liga/desliga, volume local, perfil), Arquivos, Recolher/Fixar barra, `⋯` com Diagnóstico da conexão e simulações de relay,
 queda de conexão e caractere impossível.
 
 ## Capturas
@@ -32,5 +33,6 @@ queda de conexão e caractere impossível.
 | ![Sessão via relay, barra recolhida](capturas/sessao-relay.png) | ![Configurações](capturas/configuracoes.png) |
 | ![Menu de monitores](capturas/sessao-monitores.png) | ![Host Wayland com monitor não liberado, tema escuro](capturas/sessao-wayland-escuro.png) |
 | ![Aba do monitor 2 aberta em janela](capturas/sessao-com-janela.png) | ![Janela própria do monitor 2](capturas/sessao-destacada.png) |
+| ![Teste de conexão](capturas/teste-conexao.png) | ![Som do computador remoto e HUD com a classe de rede](capturas/sessao-som.png) |
 
 Geradas no Linux com `Xvfb` + `SLINT_BACKEND=winit-software` + `import -window root`.

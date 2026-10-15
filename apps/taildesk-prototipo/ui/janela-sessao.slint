@@ -1,4 +1,5 @@
 // Janela da sessão no controlador (levantamento §5.3, §5.6 e §5.7). A "tela remota" é um desenho estático.
+import { Slider } from "std-widgets.slint";
 import { Tema } from "tema.slint";
 import { Botao, Separador, BarraProgresso, Toast, Cartao } from "componentes.slint";
 
@@ -363,6 +364,11 @@ export component JanelaSessao inherits Window {
     in property <int> monitor-unico: -1;
     in property <bool> host-wayland: false;
     in-out property <bool> seguir-mouse: false;
+    // Áudio (15-audio.md §8): desligar corta o tráfego; o volume é só local.
+    in-out property <bool> som: true;
+    in-out property <float> volume: 70;
+    in-out property <int> perfil-som: 0;
+    in property <bool> som-permitido: true;
     in-out property <Etapa> etapa: Etapa.procurando;
     in-out property <bool> via-relay: false;
     in-out property <ModoTeclado> modo-teclado: ModoTeclado.auto;
@@ -379,8 +385,10 @@ export component JanelaSessao inherits Window {
     callback desconectar();
     callback destacar(int);
     callback voltar-para-abas();
+    callback diagnostico();
 
     public function abrir-menu-monitores() { menu-monitores.show(); }
+    public function abrir-menu-som() { menu-som.show(); }
 
     property <int> monitor-exibido: root.monitor-unico >= 0 ? root.monitor-unico : root.monitor;
     property <bool> destacada: root.monitor-unico >= 0;
@@ -519,6 +527,16 @@ export component JanelaSessao inherits Window {
             }
             if !root.destacada: VerticalLayout {
                 alignment: center;
+                BotaoBarra {
+                    texto: !root.som-permitido ? @tr("Sem som") : root.som ? @tr("Som ▾") : @tr("Som desligado ▾");
+                    ativo: root.som && root.som-permitido;
+                    clicado => {
+                        if root.som-permitido { menu-som.show(); } else { root.toast = @tr("O computador remoto desligou o som."); }
+                    }
+                }
+            }
+            if !root.destacada: VerticalLayout {
+                alignment: center;
                 BotaoBarra { texto: @tr("Arquivos"); ativo: root.painel-arquivos; clicado => { root.painel-arquivos = !root.painel-arquivos; } }
             }
             VerticalLayout {
@@ -601,6 +619,41 @@ export component JanelaSessao inherits Window {
         }
     }
 
+    menu-som := PopupWindow {
+        x: barra.x + barra.width - 560px;
+        y: barra.y + barra.height + 6px;
+        width: 360px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Tema.superficie;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tema.borda;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Tema.sombra;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                Text { text: @tr("Som do computador remoto"); color: Tema.texto; font-size: Tema.fonte; font-weight: 700; }
+                ItemMenu {
+                    titulo: root.som ? @tr("Ligado") : @tr("Desligado");
+                    descricao: root.som ? @tr("Clique para desligar: nenhum áudio é transmitido.") : @tr("Desligado: nenhum áudio é transmitido.");
+                    marcado: root.som;
+                    clicado => { root.som = !root.som; }
+                }
+                Text { text: @tr("Volume (continua recebendo áudio)"); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+                Slider { minimum: 0; maximum: 100; value <=> root.volume; enabled: root.som; }
+                Text { text: @tr("Perfil"); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+                HorizontalLayout {
+                    spacing: 4px;
+                    BotaoBarra { texto: @tr("Automático"); ativo: root.perfil-som == 0; clicado => { root.perfil-som = 0; } }
+                    BotaoBarra { texto: @tr("Voz"); ativo: root.perfil-som == 1; clicado => { root.perfil-som = 1; } }
+                    BotaoBarra { texto: @tr("Música"); ativo: root.perfil-som == 2; clicado => { root.perfil-som = 2; } }
+                }
+            }
+        }
+    }
+
     menu-teclado := PopupWindow {
         x: barra.x + (root.monitores.length > 1 && !root.destacada ? 430px : 180px);
         y: barra.y + barra.height + 6px;
@@ -662,6 +715,7 @@ export component JanelaSessao inherits Window {
                     clicado => { root.ajustar = !root.ajustar; }
                 }
                 ItemMenu { titulo: @tr("Mostrar informações da conexão"); marcado: root.hud; clicado => { root.hud = !root.hud; } }
+                ItemMenu { titulo: @tr("Diagnóstico da conexão"); clicado => { root.diagnostico(); } }
                 Separador { }
                 ItemMenu {
                     titulo: @tr("Simular: conexão via relay");
@@ -690,7 +744,7 @@ export component JanelaSessao inherits Window {
         VerticalLayout {
             padding: 10px;
             spacing: 2px;
-            Text { text: root.via-relay ? @tr("48 ms · via relay") : @tr("9 ms · direto"); color: root.via-relay ? #ffcc4d : #7ee2a8; font-size: Tema.fonte; font-weight: 700; }
+            Text { text: root.via-relay ? @tr("48 ms · via relay · Média") : @tr("9 ms · direto · LAN"); color: root.via-relay ? #ffcc4d : #7ee2a8; font-size: Tema.fonte; font-weight: 700; }
             Text { text: root.via-relay ? "1080p · 30 fps · 6 Mbit/s" : "1080p · 60 fps · 18 Mbit/s"; color: #ffffff; font-size: Tema.fonte-pequena; }
             Text { text: "H.264 · openh264"; color: #ffffffaa; font-size: 11px; }
         }

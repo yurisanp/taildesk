@@ -67,6 +67,7 @@ component ItemDispositivo inherits Rectangle {
 component PainelDetalhe inherits Rectangle {
     in property <Dispositivo> d;
     callback conectar();
+    callback testar();
     callback enviar-arquivo();
     callback copiar(string);
     background: Tema.superficie;
@@ -92,10 +93,15 @@ component PainelDetalhe inherits Rectangle {
             }
             Botao {
                 horizontal-stretch: 1;
-                texto: @tr("Enviar arquivo");
+                texto: @tr("Testar conexão");
                 habilitado: Textos.conectavel(root.d.estado);
-                clicado => { root.enviar-arquivo(); }
+                clicado => { root.testar(); }
             }
+        }
+        Botao {
+            texto: @tr("Enviar arquivo");
+            habilitado: Textos.conectavel(root.d.estado);
+            clicado => { root.enviar-arquivo(); }
         }
         Separador { }
         LinhaInfo {
@@ -133,6 +139,7 @@ component SecaoDispositivos inherits Rectangle {
     in-out property <string> busca;
     callback busca-mudou(string);
     callback conectar(Dispositivo);
+    callback testar(Dispositivo);
     callback enviar-arquivo(Dispositivo);
     callback copiar(string);
     callback como-instalar();
@@ -180,6 +187,7 @@ component SecaoDispositivos inherits Rectangle {
             width: 300px;
             d: root.dispositivos[root.selecionado];
             conectar => { root.conectar(self.d); }
+            testar => { root.testar(self.d); }
             enviar-arquivo => { root.enviar-arquivo(self.d); }
             copiar(t) => { root.copiar(t); }
         }
@@ -270,6 +278,7 @@ component OpcaoConfig inherits HorizontalLayout {
 
 component SecaoConfiguracoes inherits ScrollView {
     in-out property <bool> aceitando;
+    callback diagnostico();
     VerticalLayout {
         padding: 20px;
         spacing: 14px;
@@ -298,6 +307,18 @@ component SecaoConfiguracoes inherits ScrollView {
                 LinhaInfo { rotulo: @tr("Pastas que outros podem navegar"); valor: "~/Documentos, ~/Downloads"; acao: @tr("Alterar"); }
                 Separador { }
                 LinhaInfo { rotulo: @tr("Pasta de entrada"); valor: "~/Downloads/TailDesk"; acao: @tr("Alterar"); }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Permitir que quem se conecta ouça o som deste computador");
+                    descricao: @tr("A pessoa ainda pode desmarcar o som no pedido de acesso.");
+                    ligado: true;
+                }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Permitir testes de conexão");
+                    descricao: @tr("Testes não mostram a tela nem controlam nada; ficam no registro de auditoria.");
+                    ligado: true;
+                }
             }
         }
 
@@ -306,7 +327,13 @@ component SecaoConfiguracoes inherits ScrollView {
             VerticalLayout {
                 padding-left: 16px;
                 padding-right: 16px;
-                LinhaInfo { rotulo: @tr("Qualidade"); valor: @tr("Automática"); acao: @tr("Alterar"); }
+                LinhaInfo { rotulo: @tr("Qualidade"); valor: @tr("Automática · economizar dados desligado"); acao: @tr("Alterar"); }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Som do computador remoto");
+                    descricao: @tr("Ligado por padrão ao conectar. Desligado, nenhum áudio é transmitido.");
+                    ligado: true;
+                }
                 Separador { }
                 LinhaInfo { rotulo: @tr("Teclado"); valor: @tr("Automático (traduz entre layouts diferentes)"); acao: @tr("Alterar"); }
                 Separador { }
@@ -339,7 +366,7 @@ component SecaoConfiguracoes inherits ScrollView {
                 padding-right: 16px;
                 LinhaInfo { rotulo: @tr("Tailnet"); valor: "yuri@github · Tailscale embutido"; acao: @tr("Sair"); }
                 Separador { }
-                LinhaInfo { rotulo: @tr("Diagnóstico"); valor: @tr("Versão 0.0.1 · sem erros"); acao: @tr("Copiar relatório"); }
+                LinhaInfo { rotulo: @tr("Diagnóstico"); valor: @tr("Versão 0.0.1 · sem erros"); acao: @tr("Abrir teste de conexão"); acionar => { root.diagnostico(); } }
             }
         }
 
@@ -368,8 +395,10 @@ export component JanelaPrincipal inherits Window {
 
     callback busca-mudou(string);
     callback conectar(Dispositivo);
+    callback testar(Dispositivo);
     callback enviar-arquivo(Dispositivo);
     callback simular-pedido();
+    callback diagnostico();
 
     HorizontalLayout {
         Rectangle {
@@ -427,12 +456,13 @@ export component JanelaPrincipal inherits Window {
             busca <=> root.busca;
             busca-mudou(t) => { root.busca-mudou(t); }
             conectar(d) => { root.conectar(d); }
+            testar(d) => { root.testar(d); }
             enviar-arquivo(d) => { root.enviar-arquivo(d); }
             copiar(t) => { root.toast = @tr("Copiado: {}", t); }
             como-instalar => { root.toast = @tr("Instale o TailDesk nesse dispositivo e abra o app; ele aparece aqui sozinho."); }
         }
         if root.secao == 1: SecaoTransferencias { horizontal-stretch: 1; }
-        if root.secao == 2: SecaoConfiguracoes { horizontal-stretch: 1; aceitando <=> root.aceitando; }
+        if root.secao == 2: SecaoConfiguracoes { horizontal-stretch: 1; aceitando <=> root.aceitando; diagnostico => { root.diagnostico(); } }
     }
 
     Toast {

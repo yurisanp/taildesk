@@ -16,11 +16,11 @@ mod ui {
 }
 
 use ui::{
-    Dispositivo, Estado, Etapa, FaixaHost, JanelaPedido, JanelaPrincipal, JanelaSessao, Monitor,
-    Tema,
+    Dispositivo, Estado, Etapa, FaixaHost, JanelaPedido, JanelaPrincipal, JanelaSessao,
+    JanelaTeste, Monitor, Tema,
 };
 
-const TELAS: &str = "principal, transferencias, configuracoes, pedido, faixa, sessao, sessao-monitores, sessao-wayland, sessao-com-janela, sessao-destacada, sessao-arquivos, sessao-navegar, sessao-relay, sessao-esperando, sessao-reconectando";
+const TELAS: &str = "principal, teste, diagnostico, sessao-som, transferencias, configuracoes, pedido, faixa, sessao, sessao-monitores, sessao-wayland, sessao-com-janela, sessao-destacada, sessao-arquivos, sessao-navegar, sessao-relay, sessao-esperando, sessao-reconectando";
 
 fn dispositivo(
     nome: &str,
@@ -236,6 +236,7 @@ where
 /// Janelas abertas além da principal; ficam vivas enquanto estiverem aqui.
 #[derive(Default)]
 struct Abertas {
+    testes: Vec<JanelaTeste>,
     sessoes: Vec<JanelaSessao>,
     pedido: Option<JanelaPedido>,
     faixa: Option<FaixaHost>,
@@ -255,6 +256,13 @@ fn abrir_sessao(
     sessao.set_host_wayland(d.so.contains("Wayland"));
     ligar_monitores(&sessao, &d.nome, tema, abertas);
     let fraca = sessao.as_weak();
+    let abertas_diag = abertas.clone();
+    sessao.on_diagnostico(move || {
+        if let Some(s) = fraca.upgrade() {
+            abrir_teste(s.get_host(), true, tema, &abertas_diag);
+        }
+    });
+    let fraca = sessao.as_weak();
     let abertas_desconectar = abertas.clone();
     sessao.on_desconectar(move || {
         if let Some(s) = fraca.upgrade() {
@@ -270,6 +278,21 @@ fn abrir_sessao(
     sessao.show().expect("mostrar sessão");
     abertas.borrow_mut().sessoes.push(sessao.clone_strong());
     sessao
+}
+
+/// Aba "Teste de conexão"; `da_sessao` = diagnóstico aberto de dentro da sessão.
+fn abrir_teste(
+    host: SharedString,
+    da_sessao: bool,
+    tema: TemaEscolhido,
+    abertas: &Rc<RefCell<Abertas>>,
+) {
+    let teste = JanelaTeste::new().expect("janela de teste");
+    aplicar_tema(&teste, tema);
+    teste.set_host(host);
+    teste.set_da_sessao(da_sessao);
+    teste.show().expect("mostrar teste");
+    abertas.borrow_mut().testes.push(teste);
 }
 
 fn abrir_pedido(tema: TemaEscolhido, abertas: &Rc<RefCell<Abertas>>) {
@@ -290,6 +313,7 @@ fn abrir_pedido(tema: TemaEscolhido, abertas: &Rc<RefCell<Abertas>>) {
         aplicar_tema(&faixa, tema);
         faixa.set_origem(p.get_origem());
         faixa.set_arquivos(p.get_arquivos());
+        faixa.set_audio(p.get_audio());
         let fraca_faixa = faixa.as_weak();
         faixa.on_encerrar(move || {
             if let Some(f) = fraca_faixa.upgrade() {
@@ -337,6 +361,10 @@ fn principal(tema: TemaEscolhido, secao: i32) -> Result<JanelaPrincipal, slint::
     });
     let a = abertas.clone();
     janela.on_simular_pedido(move || abrir_pedido(tema, &a));
+    let a = abertas.clone();
+    janela.on_testar(move |d| abrir_teste(d.nome, false, tema, &a));
+    let a = abertas.clone();
+    janela.on_diagnostico(move || abrir_teste("desktop-casa".into(), false, tema, &a));
     // Mantém as janelas filhas vivas enquanto a principal existir.
     std::mem::forget(abertas);
     Ok(janela)
@@ -379,6 +407,23 @@ fn main() -> Result<(), slint::PlatformError> {
         "principal" => principal(tema, 0)?.run(),
         "transferencias" => principal(tema, 1)?.run(),
         "configuracoes" => principal(tema, 2)?.run(),
+        "teste" | "diagnostico" => {
+            let t = JanelaTeste::new()?;
+            aplicar_tema(&t, tema);
+            t.set_da_sessao(tela == "diagnostico");
+            t.run()
+        }
+        "sessao-som" => {
+            let s = sessao_estatica(tema, Etapa::Conectada)?;
+            s.set_hud(true);
+            let abrir = s.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
+                if let Some(s) = abrir.upgrade() {
+                    s.invoke_abrir_menu_som();
+                }
+            });
+            s.run()
+        }
         "pedido" => {
             let p = JanelaPedido::new()?;
             aplicar_tema(&p, tema);

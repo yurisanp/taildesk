@@ -1,0 +1,178 @@
+// Aba "Teste de conexão" (14-selecao-adaptativa.md §7.2): mesmo motor do `taildesk-cli bench-net`.
+import { ComboBox } from "std-widgets.slint";
+import { Tema } from "tema.slint";
+import { Botao, Cartao, Separador, Toast } from "componentes.slint";
+
+component Medida inherits HorizontalLayout {
+    in property <string> rotulo;
+    in property <string> valor;
+    in property <color> faixa: Tema.online;
+    spacing: 12px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    Text { width: 110px; text: root.rotulo; color: Tema.texto-2; font-size: Tema.fonte; vertical-alignment: center; }
+    VerticalLayout {
+        alignment: center;
+        Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.faixa; }
+    }
+    Text { horizontal-stretch: 1; text: root.valor; color: Tema.texto; font-size: Tema.fonte; vertical-alignment: center; wrap: word-wrap; }
+}
+
+component OpcaoPerfil inherits Rectangle {
+    in property <string> texto;
+    in property <bool> ativo;
+    callback clicado();
+    accessible-role: radio-button;
+    accessible-label: texto;
+    width: rotulo.preferred-width + 20px;
+    height: 28px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: ativo ? Tema.primaria : Tema.borda;
+    background: ativo ? Tema.primaria.with-alpha(0.15) : transparent;
+    TouchArea { clicked => { root.clicado(); } }
+    rotulo := Text { text: root.texto; color: root.ativo ? Tema.primaria : Tema.texto; font-size: Tema.fonte-pequena; }
+}
+
+export component JanelaTeste inherits Window {
+    title: @tr("Teste de conexão · {} · TailDesk", root.host);
+    preferred-width: 820px;
+    preferred-height: 700px;
+    background: Tema.fundo;
+    default-font-family: "Inter";
+
+    in property <string> host: "desktop-casa";
+    // Vindo de "⋯ → Diagnóstico da conexão": números da sessão ao vivo, sem sondagem nem demonstração.
+    in property <bool> da-sessao: false;
+    in-out property <int> perfil: 0;
+    in-out property <int> simulacao: 0;
+    in-out property <string> toast;
+
+    property <[string]> perfis: [@tr("Automático"), "LAN", @tr("Rápida"), @tr("Média"), @tr("Lenta"), @tr("Mínima")];
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 10px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 2px;
+                Text {
+                    text: root.da-sessao ? @tr("Diagnóstico da conexão · {}", root.host) : @tr("Teste de conexão · {}", root.host);
+                    font-size: Tema.fonte-titulo;
+                    font-weight: 700;
+                    color: Tema.texto;
+                }
+                Text {
+                    text: root.da-sessao ? @tr("Números da sessão ao vivo.") : @tr("Não mostra a tela do outro lado e não controla nada.");
+                    font-size: Tema.fonte-pequena;
+                    color: Tema.texto-2;
+                }
+            }
+            if !root.da-sessao: VerticalLayout {
+                alignment: center;
+                Botao { texto: @tr("Testar de novo"); primario: true; }
+            }
+        }
+        Cartao {
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                Medida { rotulo: @tr("Caminho"); valor: @tr("Direto · mesma rede local    Tailscale: embutido"); }
+                Separador { }
+                Medida { rotulo: @tr("Latência"); valor: @tr("2 ms (mín 1 · p95 4)    Variação 0,4 ms    Perda 0,0 %"); }
+                Separador { }
+                Medida { rotulo: @tr("Banda"); valor: @tr("↑ 420 Mbit/s    ↓ 390 Mbit/s    Datagrama máx. 1 182 B"); }
+                Separador { }
+                Medida {
+                    rotulo: @tr("Máquinas");
+                    valor: @tr("Esta: H.264 HW (Intel) · {}: H.264 HW (NVIDIA) · 1080p em 3 ms", root.host);
+                    faixa: Tema.online;
+                }
+            }
+        }
+        Cartao {
+            VerticalLayout {
+                padding: 16px;
+                spacing: 4px;
+                Text { text: @tr("Perfil escolhido: LAN"); font-size: 15px; font-weight: 700; color: Tema.texto; }
+                Text { text: @tr("H.264 por hardware, 1440p 60 fps, até 50 Mbit/s."); font-size: Tema.fonte; color: Tema.texto; }
+                Text {
+                    wrap: word-wrap;
+                    text: @tr("Por quê: caminho direto, 2 ms, banda medida 390 Mbit/s, encoder por hardware nos dois lados.");
+                    font-size: Tema.fonte-pequena;
+                    color: Tema.texto-2;
+                }
+            }
+        }
+        if !root.da-sessao: Cartao {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text { text: @tr("Demonstração"); font-weight: 700; color: Tema.texto; font-size: Tema.fonte; vertical-alignment: center; horizontal-stretch: 1; }
+                    for p[i] in root.perfis: OpcaoPerfil {
+                        texto: p;
+                        ativo: i == root.perfil;
+                        clicado => { root.perfil = i; }
+                    }
+                }
+                // Padrão de teste sintético codificado pelo host: texto pequeno, gradiente, movimento e relógio em código de barras.
+                Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 150px;
+                    border-radius: Tema.raio;
+                    background: @linear-gradient(90deg, #111827 0%, #4b5563 50%, #f9fafb 100%);
+                    clip: true;
+                    Text { x: 14px; y: 12px; text: "Lorem ipsum 9px · 11px · 13px  çãé ÇÃÉ"; color: #ffffff; font-size: 11px; }
+                    Rectangle { x: parent.width * 0.62; y: parent.height * 0.4; width: 40px; height: 40px; border-radius: 20px; background: #f59e0b; }
+                    HorizontalLayout {
+                        x: 14px;
+                        y: parent.height - 34px;
+                        height: 22px;
+                        spacing: 2px;
+                        for b in [3, 1, 2, 1, 3, 2, 1, 1, 3, 1, 2, 2, 1, 3]: Rectangle { width: b * 3px; background: #ffffff; }
+                    }
+                    Text { x: parent.width - 220px; y: parent.height - 30px; text: @tr("ponta a ponta: 14 ms · 60 fps"); color: #111827; font-size: 12px; font-weight: 600; }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: @tr("Simular rede:"); color: Tema.texto; font-size: Tema.fonte; vertical-alignment: center; }
+                    ComboBox {
+                        width: 220px;
+                        model: [@tr("Desligado"), "4G", @tr("Wi-Fi ruim"), @tr("Outro país"), @tr("Personalizado")];
+                        current-index <=> root.simulacao;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.simulacao == 0 ? "" : @tr("Só neste teste; nunca em sessões reais.");
+                        color: Tema.texto-2;
+                        font-size: Tema.fonte-pequena;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+        if root.da-sessao: Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            alignment: end;
+            Botao { texto: @tr("Copiar relatório"); clicado => { root.toast = @tr("Relatório copiado (sem chaves e sem IPs públicos completos)."); } }
+        }
+    }
+
+    Toast {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 70px;
+        texto: root.toast;
+    }
+    Timer {
+        interval: 3s;
+        running: root.toast != "";
+        triggered => { root.toast = ""; }
+    }
+}
