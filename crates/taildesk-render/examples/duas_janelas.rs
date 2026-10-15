@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use slint::wgpu_30::{WGPUConfiguration, wgpu};
-use slint::{ComponentHandle, Image, Timer, TimerMode};
+use slint::{CloseRequestResponse, ComponentHandle, Image, Timer, TimerMode};
 use taildesk_render::{Conversor, Faixa, Formato, Matriz, Plano, Superficie};
 
 slint::slint! {
@@ -105,6 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let conversor = Rc::new(Conversor::new(&device));
     let mut janelas = Vec::new();
+    let abertas = Rc::new(Cell::new(0usize));
     for (n, tom) in [(1, 60u8), (2, 170u8)] {
         let janela = JanelaVideo::new()?;
         let superficie = Superficie::new(
@@ -133,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (device, queue, conversor) = (device.clone(), queue.clone(), conversor.clone());
         let mut quadro = 0u32;
         let mut desde = Instant::now();
-        let timer = Timer::default();
+        let timer = Rc::new(Timer::default());
         timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
             let Some(janela) = fraca.upgrade() else {
                 return;
@@ -152,7 +153,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 desde = Instant::now();
             }
         });
+        // Fechar a janela para o vídeo dela; fechar a última encerra o programa.
+        {
+            let (timer, abertas) = (timer.clone(), abertas.clone());
+            janela.window().on_close_requested(move || {
+                timer.stop();
+                abertas.set(abertas.get() - 1);
+                if abertas.get() == 0 {
+                    let _ = slint::quit_event_loop();
+                }
+                CloseRequestResponse::HideWindow
+            });
+        }
         janela.show()?;
+        abertas.set(abertas.get() + 1);
         janelas.push((janela, timer));
     }
     slint::run_event_loop_until_quit()?;
