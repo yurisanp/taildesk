@@ -4729,6 +4729,7 @@ dependencies = [
  "ashpd",
  "futures-util",
  "taildesk-keyboard",
+ "taildesk-proto",
  "windows-sys 0.61.2",
  "xkbcommon-dl",
  "zbus",

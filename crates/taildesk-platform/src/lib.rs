@@ -4,6 +4,7 @@
 //! (`docs/context/10-plano-windows-linux.md`).
 
 pub mod instancia;
+pub mod mouse;
 pub mod teclado;
 #[cfg(target_os = "linux")]
 pub mod wayland;
