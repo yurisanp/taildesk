@@ -343,3 +343,91 @@ async fn refusals() {
     assert!(!tmp.0.join("fora").exists());
     assert!(!Path::new(&local).join("passwd").exists());
 }
+
+/// Arquivo grande enquanto o host manda datagramas no ritmo de vídeo (60/s) para o
+/// controlador: mede a vazão do arquivo e o atraso dos datagramas. Ignorado no CI pelo
+/// tamanho; rode com `TAILDESK_BIG_MB=10240 cargo test --release -p taildesk-files
+/// --test service_quic -- --ignored --nocapture`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "arquivo grande; rodar à mão"]
+async fn big_file_does_not_stall_datagrams() {
+    let mb: u64 = std::env::var("TAILDESK_BIG_MB")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1024);
+    let tmp = TempDir::new("grande");
+    let src = tmp.dir("local").join("disco.img");
+    // Arquivo esparso: a leitura é rápida e o teste mede o caminho de rede e de gravação.
+    fs::File::create(&src)
+        .unwrap()
+        .set_len(mb * 1024 * 1024)
+        .unwrap();
+
+    let (mut host, mut ctl) =
+        session(host_config(&tmp), Config::closed(Side::Controller, "c")).await;
+
+    // "Vídeo": datagramas de 1200 bytes com o instante de envio, 60 por segundo.
+    let start = std::time::Instant::now();
+    let video_conn = host._conn.clone();
+    let video = tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_millis(16));
+        loop {
+            tick.tick().await;
+            let mut d = vec![0u8; 1200];
+            d[..8].copy_from_slice(&(start.elapsed().as_micros() as u64).to_le_bytes());
+            if video_conn.send_datagram(d.into()).is_err() {
+                break;
+            }
+        }
+    });
+    let rx_conn = ctl._conn.clone();
+    let delays = tokio::spawn(async move {
+        let mut delays = Vec::new();
+        while let Ok(d) = rx_conn.read_datagram().await {
+            let sent = u64::from_le_bytes(d[..8].try_into().unwrap());
+            delays.push(start.elapsed().as_micros() as u64 - sent);
+        }
+        delays
+    });
+
+    let t0 = std::time::Instant::now();
+    ctl.files
+        .send_file(&src, INBOX_ROOT, "disco.img")
+        .await
+        .unwrap();
+    let (_, _, path) = loop {
+        let e = tokio::time::timeout(Duration::from_secs(3600), host.events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        if let Event::Finished { .. } = e {
+            break finished(e);
+        }
+        if let Event::Failed { .. } = e {
+            panic!("{e:?}");
+        }
+    };
+    let secs = t0.elapsed().as_secs_f64();
+    finished(ctl.next().await);
+    video.abort();
+    ctl._conn.close(0u32.into(), b"fim");
+    let mut delays = delays.await.unwrap();
+    delays.sort_unstable();
+    let pct = |p: f64| delays[((delays.len() - 1) as f64 * p) as usize] as f64 / 1000.0;
+    println!(
+        "{mb} MiB em {secs:.1} s = {:.0} Mbit/s; datagramas: {} recebidos, atraso p50 {:.1} ms, p99 {:.1} ms, máx {:.1} ms",
+        mb as f64 * 8.0 * 1.048_576 / secs,
+        delays.len(),
+        pct(0.5),
+        pct(0.99),
+        pct(1.0)
+    );
+    assert_eq!(fs::metadata(&path).unwrap().len(), mb * 1024 * 1024);
+    let expected = secs * 60.0;
+    assert!(
+        delays.len() as f64 > expected * 0.9,
+        "datagramas perdidos: {} de ~{expected:.0}",
+        delays.len()
+    );
+    assert!(pct(0.99) < 100.0, "p99 do atraso alto demais");
+}
