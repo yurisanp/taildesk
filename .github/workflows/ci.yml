@@ -41,7 +41,7 @@ jobs:
         include:
           - distro: fedora
             image: fedora:latest
-            deps: dnf install -y --setopt=install_weak_deps=False gcc git curl pkgconf-pkg-config fontconfig-devel pipewire-devel clang-devel
+            deps: dnf install -y --setopt=install_weak_deps=False gcc gcc-c++ git curl pkgconf-pkg-config fontconfig-devel pipewire-devel clang-devel
           - distro: archlinux
             image: archlinux:latest
             deps: pacman -Syu --noconfirm --needed base-devel git curl fontconfig pipewire clang
