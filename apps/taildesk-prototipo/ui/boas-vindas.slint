@@ -1,0 +1,338 @@
+// Primeira execução (levantamento §5.1): o TailDesk usa o Tailscale instalado no computador,
+// sem Tailscale embutido. Passo 1 detecta se ele está instalado e conectado e orienta quando não.
+import { Tema } from "tema.slint";
+import { Botao, Cartao, Separador, Toast } from "componentes.slint";
+
+export enum EstadoTailscale { verificando, nao-instalado, desconectado, conectado }
+
+component Etapinha inherits HorizontalLayout {
+    in property <int> numero;
+    in property <string> texto;
+    in property <bool> ativa;
+    in property <bool> feita;
+    spacing: 8px;
+    Rectangle {
+        width: 22px;
+        height: 22px;
+        border-radius: 11px;
+        background: root.ativa || root.feita ? Tema.primaria : Tema.superficie-2;
+        Text {
+            text: root.feita ? "✓" : root.numero;
+            color: root.ativa || root.feita ? Tema.sobre-primaria : Tema.texto-2;
+            font-size: Tema.fonte-pequena;
+            font-weight: 700;
+        }
+    }
+    Text {
+        text: root.texto;
+        vertical-alignment: center;
+        font-size: Tema.fonte-pequena;
+        font-weight: root.ativa ? 700 : 400;
+        color: root.ativa ? Tema.texto : Tema.texto-2;
+    }
+}
+
+component Distro inherits Rectangle {
+    in property <string> texto;
+    in property <bool> ativa;
+    callback clicado();
+    accessible-role: radio-button;
+    accessible-label: texto;
+    accessible-checked: ativa;
+    width: rotulo.preferred-width + 20px;
+    height: 26px;
+    border-radius: 13px;
+    border-width: 1px;
+    border-color: ativa ? Tema.primaria : Tema.borda;
+    background: ativa ? Tema.primaria.with-alpha(0.15) : transparent;
+    TouchArea { clicked => { root.clicado(); } }
+    rotulo := Text { text: root.texto; color: root.ativa ? Tema.primaria : Tema.texto; font-size: Tema.fonte-pequena; }
+}
+
+// Comando de terminal com botão Copiar.
+component Comando inherits Rectangle {
+    in property <string> texto;
+    callback copiar(string);
+    height: 40px;
+    border-radius: Tema.raio;
+    background: Tema.superficie-2;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 6px;
+        spacing: 8px;
+        Text {
+            horizontal-stretch: 1;
+            text: "$ " + root.texto;
+            font-family: "DejaVu Sans Mono";
+            font-size: Tema.fonte-pequena;
+            color: Tema.texto;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            Botao { texto: @tr("Copiar"); discreto: true; altura: 26px; clicado => { root.copiar(root.texto); } }
+        }
+    }
+}
+
+component Opcao inherits Rectangle {
+    in property <string> titulo;
+    in property <string> descricao;
+    in property <bool> ativa;
+    callback clicado();
+    accessible-role: radio-button;
+    accessible-label: titulo;
+    accessible-checked: ativa;
+    border-radius: Tema.raio;
+    border-width: ativa ? 2px : 1px;
+    border-color: ativa ? Tema.primaria : Tema.borda;
+    background: ativa ? Tema.primaria.with-alpha(0.08) : transparent;
+    TouchArea { clicked => { root.clicado(); } }
+    VerticalLayout {
+        padding: 12px;
+        spacing: 3px;
+        Text { text: root.titulo; font-weight: 600; color: Tema.texto; font-size: Tema.fonte; }
+        Text { text: root.descricao; color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+    }
+}
+
+export component JanelaBoasVindas inherits Window {
+    title: @tr("Bem-vindo ao TailDesk");
+    preferred-width: 600px;
+    preferred-height: 620px;
+    min-width: 520px;
+    min-height: 560px;
+    background: Tema.fundo;
+    default-font-family: "Inter";
+
+    in-out property <int> passo: 1;
+    in-out property <EstadoTailscale> tailscale: EstadoTailscale.nao-instalado;
+    // "windows", "ubuntu", "fedora" ou "arch": decide o texto de instalação e de login.
+    in-out property <string> sistema: "ubuntu";
+    in property <bool> wayland: true;
+    in property <string> tailnet: "yuri@github";
+    in property <string> este-pc: "notebook-yuri";
+    in property <string> versao: "1.104.1";
+    in-out property <bool> aceitar: true;
+    // No protótipo, cada verificação avança um estado, como se a pessoa estivesse instalando.
+    in property <bool> simular: true;
+    in-out property <string> toast;
+
+    callback concluir(bool);
+    callback verificar();
+    verificar => {
+        if root.tailscale == EstadoTailscale.nao-instalado {
+            root.tailscale = EstadoTailscale.desconectado;
+        } else if root.tailscale == EstadoTailscale.desconectado {
+            root.tailscale = EstadoTailscale.conectado;
+        }
+    }
+
+    property <bool> linux: root.sistema != "windows";
+    property <int> ultimo-passo: root.wayland && root.aceitar ? 3 : 2;
+    property <string> instalar: root.sistema == "arch" ? "sudo pacman -S tailscale" : "curl -fsSL https://tailscale.com/install.sh | sh";
+
+    Timer {
+        interval: 5s;
+        running: root.simular && root.passo == 1 && root.tailscale != EstadoTailscale.conectado;
+        triggered => { root.verificar(); }
+    }
+
+    VerticalLayout {
+        padding: 28px;
+        spacing: 18px;
+
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 8px;
+                background: Tema.primaria;
+                Text { text: "T"; color: Tema.sobre-primaria; font-weight: 800; font-size: 18px; }
+            }
+            Text { text: @tr("Bem-vindo ao TailDesk"); font-size: Tema.fonte-titulo; font-weight: 700; color: Tema.texto; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            spacing: 16px;
+            alignment: start;
+            Etapinha { numero: 1; texto: @tr("Tailscale"); ativa: root.passo == 1; feita: root.passo > 1; }
+            Etapinha { numero: 2; texto: @tr("Acesso a este PC"); ativa: root.passo == 2; feita: root.passo > 2; }
+            if root.ultimo-passo == 3: Etapinha { numero: 3; texto: @tr("Permissões do sistema"); ativa: root.passo == 3; }
+        }
+
+        Cartao {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                alignment: start;
+
+                if root.passo == 1: VerticalLayout {
+                    spacing: 12px;
+                    Text {
+                        text: @tr("O TailDesk usa o Tailscale deste computador para encontrar e conectar suas máquinas. Ele não vem embutido: precisa estar instalado e conectado à sua tailnet.");
+                        wrap: word-wrap;
+                        color: Tema.texto-2;
+                        font-size: Tema.fonte;
+                    }
+                    Separador { }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 12px;
+                                height: 12px;
+                                border-radius: 6px;
+                                background: root.tailscale == EstadoTailscale.conectado ? Tema.online : root.tailscale == EstadoTailscale.desconectado ? Tema.relay : Tema.perigo;
+                            }
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            wrap: word-wrap;
+                            font-weight: 700;
+                            font-size: 15px;
+                            color: Tema.texto;
+                            text: root.tailscale == EstadoTailscale.verificando ? @tr("Procurando o Tailscale…")
+                                : root.tailscale == EstadoTailscale.nao-instalado ? @tr("O Tailscale não está instalado.")
+                                : root.tailscale == EstadoTailscale.desconectado ? @tr("O Tailscale está instalado, mas não está conectado.")
+                                : @tr("Conectado à tailnet {} como {}.", root.tailnet, root.este-pc);
+                        }
+                    }
+
+                    if root.tailscale == EstadoTailscale.nao-instalado: VerticalLayout {
+                        spacing: 10px;
+                        HorizontalLayout {
+                            alignment: start;
+                            Botao { texto: @tr("Baixar o Tailscale"); primario: true; clicado => { root.toast = @tr("Abrindo tailscale.com/download no navegador"); } }
+                        }
+                        if root.linux: VerticalLayout {
+                            spacing: 8px;
+                            Text { text: @tr("Ou instale pelo terminal:"); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                Distro { texto: "Ubuntu / Debian"; ativa: root.sistema == "ubuntu"; clicado => { root.sistema = "ubuntu"; } }
+                                Distro { texto: "Fedora"; ativa: root.sistema == "fedora"; clicado => { root.sistema = "fedora"; } }
+                                Distro { texto: "Arch"; ativa: root.sistema == "arch"; clicado => { root.sistema = "arch"; } }
+                            }
+                            Comando { texto: root.instalar; copiar(t) => { root.toast = @tr("Copiado: {}", t); } }
+                            Comando { texto: "sudo systemctl enable --now tailscaled"; copiar(t) => { root.toast = @tr("Copiado: {}", t); } }
+                        }
+                        Text { text: @tr("Versão recomendada: 1.102 ou mais nova."); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+                    }
+
+                    if root.tailscale == EstadoTailscale.desconectado: VerticalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: root.linux
+                                ? @tr("Entre na sua tailnet. O navegador abre a página de login do Tailscale.")
+                                : @tr("Abra o Tailscale pela bandeja do sistema e faça login.");
+                            wrap: word-wrap;
+                            color: Tema.texto-2;
+                            font-size: Tema.fonte;
+                        }
+                        HorizontalLayout {
+                            alignment: start;
+                            Botao {
+                                texto: root.linux ? @tr("Entrar no Tailscale") : @tr("Abrir o Tailscale");
+                                primario: true;
+                                clicado => { root.toast = root.linux ? @tr("Abrindo a página de login no navegador") : @tr("Abrindo o Tailscale"); }
+                            }
+                        }
+                        if root.linux: VerticalLayout {
+                            spacing: 8px;
+                            Text { text: @tr("Se preferir o terminal, ou se o serviço estiver parado:"); color: Tema.texto-2; font-size: Tema.fonte-pequena; }
+                            Comando { texto: "sudo tailscale up"; copiar(t) => { root.toast = @tr("Copiado: {}", t); } }
+                            Text { text: @tr("Para o TailDesk funcionar sem sudo, deixe seu usuário operar o Tailscale:"); color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+                            Comando { texto: "sudo tailscale set --operator=$USER"; copiar(t) => { root.toast = @tr("Copiado: {}", t); } }
+                        }
+                    }
+
+                    if root.tailscale == EstadoTailscale.conectado: Text {
+                        text: @tr("Tailscale {} · tudo certo. Você pode continuar.", root.versao);
+                        color: Tema.texto-2;
+                        font-size: Tema.fonte;
+                    }
+
+                    if root.tailscale != EstadoTailscale.conectado: HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            text: @tr("Verificando de novo a cada 5 segundos…");
+                            color: Tema.texto-2;
+                            font-size: Tema.fonte-pequena;
+                        }
+                        Botao { texto: @tr("Verificar de novo"); discreto: true; altura: 28px; clicado => { root.verificar(); } }
+                    }
+                }
+
+                if root.passo == 2: VerticalLayout {
+                    spacing: 12px;
+                    Text { text: @tr("Este computador pode ser acessado?"); font-weight: 700; font-size: 15px; color: Tema.texto; }
+                    Opcao {
+                        titulo: @tr("Sim, pedindo minha permissão a cada vez");
+                        descricao: @tr("Quem estiver na sua tailnet pode pedir acesso. Nada acontece sem você aceitar.");
+                        ativa: root.aceitar;
+                        clicado => { root.aceitar = true; }
+                    }
+                    Opcao {
+                        titulo: @tr("Não, só vou acessar outros computadores");
+                        descricao: @tr("Dá para mudar depois em Configurações.");
+                        ativa: !root.aceitar;
+                        clicado => { root.aceitar = false; }
+                    }
+                }
+
+                if root.passo == 3: VerticalLayout {
+                    spacing: 12px;
+                    Text { text: @tr("O sistema vai pedir permissão"); font-weight: 700; font-size: 15px; color: Tema.texto; }
+                    Text {
+                        text: @tr("Quando alguém se conectar, o Linux mostra uma janela própria pedindo para compartilhar a tela e permitir o controle. Ela é do sistema, não do TailDesk.");
+                        wrap: word-wrap;
+                        color: Tema.texto-2;
+                        font-size: Tema.fonte;
+                    }
+                    Text {
+                        text: @tr("Marque todos os monitores que quem conecta pode ver: no Wayland é este computador que escolhe os monitores.");
+                        wrap: word-wrap;
+                        color: Tema.texto-2;
+                        font-size: Tema.fonte;
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            if root.passo > 1: Botao { texto: @tr("Voltar"); discreto: true; clicado => { root.passo -= 1; } }
+            Rectangle { horizontal-stretch: 1; }
+            Botao {
+                texto: root.passo == root.ultimo-passo ? @tr("Concluir") : @tr("Continuar");
+                primario: true;
+                habilitado: root.passo > 1 || root.tailscale == EstadoTailscale.conectado;
+                clicado => {
+                    if root.passo == root.ultimo-passo {
+                        root.concluir(root.aceitar);
+                    } else {
+                        root.passo += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    Toast {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 76px;
+        texto: root.toast;
+    }
+    Timer {
+        interval: 3s;
+        running: root.toast != "";
+        triggered => { root.toast = ""; }
+    }
+}
