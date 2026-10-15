@@ -8,6 +8,8 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+taildesk-overlay.workspace = true
+taildesk-proto.workspace = true
 
 
 [lints]

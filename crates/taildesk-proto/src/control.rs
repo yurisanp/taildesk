@@ -909,6 +909,10 @@ pub enum CloseReason {
     ConsentDenied = 3,
     VersionMismatch = 4,
     ProtocolError = 5,
+    /// Ninguém respondeu ao pedido de acesso no host (60 s, `12-levantamento-ux.md` §5.3).
+    ConsentTimeout = 6,
+    /// O host não aceita conexões deste peer (configuração ou política).
+    NotAllowed = 7,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
@@ -1479,6 +1483,14 @@ mod tests {
             Msg::Close(Close {
                 reason: CloseReason::ByHost.into(),
                 message: "tchau".into(),
+            }),
+            Msg::Close(Close {
+                reason: CloseReason::ConsentTimeout.into(),
+                message: String::new(),
+            }),
+            Msg::Close(Close {
+                reason: CloseReason::NotAllowed.into(),
+                message: String::new(),
             }),
             Msg::Ping(Ping { t_ns: 5 }),
             Msg::Pong(Pong {
