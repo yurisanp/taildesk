@@ -4739,6 +4739,10 @@ version = "0.1.0"
 [[package]]
 name = "taildesk-session"
 version = "0.1.0"
+dependencies = [
+ "taildesk-overlay",
+ "taildesk-proto",
+]
 
 [[package]]
 name = "taildesk-transport"
