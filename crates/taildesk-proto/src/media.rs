@@ -20,6 +20,9 @@ pub const HEADER_LEN: usize = 16;
 /// Versão do header escrita nos 2 bits mais altos do primeiro byte.
 pub const HEADER_VERSION: u8 = 1;
 
+/// Primeiro `stream_id` de áudio. Vídeo (um stream por monitor) usa `0..AUDIO_STREAM_MIN`.
+pub const AUDIO_STREAM_MIN: u8 = 0xF0;
+
 /// Tipo de payload do datagrama.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
