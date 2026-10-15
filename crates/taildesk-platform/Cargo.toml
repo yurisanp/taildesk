@@ -13,6 +13,10 @@ taildesk-keyboard.workspace = true
 # Pergunta ao D-Bus se há bandeja (StatusNotifierWatcher). O Slint já traz o zbus para a bandeja.
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"
+# Portais RemoteDesktop e ScreenCast (MIT). Sem tokio: o zbus do Slint usa async-io e os dois
+# têm de concordar no runtime do zbus.
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "remote_desktop", "screencast"] }
+futures-util = { version = "0.3", default-features = false }
 # Lê o layout do teclado (keymap XKB); carregado em tempo de execução, sem pacote -dev.
 xkbcommon-dl = "0.4"
 
