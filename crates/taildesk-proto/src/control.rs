@@ -51,6 +51,12 @@ pub mod limits {
     pub const COORD_MAX: u32 = u16::MAX as u32;
     /// Canais de áudio.
     pub const AUDIO_CHANNELS: u32 = 2;
+    /// Texto de um `KeyChar`, em bytes (uma tecla, ou a string de um IME).
+    pub const KEY_TEXT_LEN: usize = 256;
+    /// Teclas físicas extras em `KeyboardInfo.extra_hid`.
+    pub const EXTRA_HID: usize = 32;
+    /// Maior HID usage de teclado (página 0x07).
+    pub const HID_MAX: u32 = 0xFFFF;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -61,7 +67,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 40, 41, 42, 60, 61, 100, 101, 102, 103, 104"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 100, 101, 102, 103, 104"
     )]
     pub msg: Option<Msg>,
 }
@@ -113,6 +119,20 @@ pub enum Msg {
     #[prost(message, tag = "42")]
     Scroll(Scroll),
 
+    // Teclado (`11-teclado.md` §3)
+    #[prost(message, tag = "50")]
+    KeyboardLayoutChanged(KeyboardLayoutChanged),
+    #[prost(message, tag = "51")]
+    KeyboardMode(KeyboardMode),
+    #[prost(message, tag = "52")]
+    Key(Key),
+    #[prost(message, tag = "53")]
+    KeyShortcut(KeyShortcut),
+    #[prost(message, tag = "54")]
+    KeyChar(KeyChar),
+    #[prost(message, tag = "55")]
+    ReleaseAll(ReleaseAll),
+
     // Cursor
     #[prost(message, tag = "60")]
     CursorPos(CursorPos),
@@ -160,6 +180,9 @@ pub struct Hello {
     /// Relógio do controlador (ns), ecoado no `HelloAck`.
     #[prost(uint64, tag = "7")]
     pub clock_ns: u64,
+    /// Layout do teclado do controlador.
+    #[prost(message, optional, tag = "8")]
+    pub keyboard: Option<KeyboardInfo>,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -225,6 +248,9 @@ pub struct HelloAck {
     /// `Hello.clock_ns` ecoado, para estimar offset e RTT.
     #[prost(uint64, tag = "9")]
     pub client_clock_ns: u64,
+    /// Layout do teclado do host.
+    #[prost(message, optional, tag = "10")]
+    pub keyboard: Option<KeyboardInfo>,
 }
 
 /// O que o controlador pode fazer nesta sessão.
@@ -442,6 +468,76 @@ pub struct Nack {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Teclado (`11-teclado.md` §3)
+
+/// Layout de um lado, no `Hello`/`HelloAck` e em [`KeyboardLayoutChanged`]. A tradução usa as
+/// tabelas lidas do SO de cada lado; `layout_tag` só decide "iguais ou diferentes", UI e logs.
+#[derive(Clone, PartialEq, Message)]
+pub struct KeyboardInfo {
+    /// KLID no Windows (`"00020409"`) ou `"xkb:us(intl)"` no Linux.
+    #[prost(string, tag = "1")]
+    pub os_layout_id: String,
+    /// Normalizado: `"us-intl"`, `"br-abnt2"`, `"us"`...
+    #[prost(string, tag = "2")]
+    pub layout_tag: String,
+    /// Teclas físicas que existem além do básico (0x87 e 0x85 no ABNT2).
+    #[prost(uint32, repeated, tag = "3")]
+    pub extra_hid: Vec<u32>,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct KeyboardLayoutChanged {
+    #[prost(message, optional, tag = "1")]
+    pub info: Option<KeyboardInfo>,
+}
+
+/// C→H: escolha do usuário para este host.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct KeyboardMode {
+    #[prost(enumeration = "KeyboardModeKind", tag = "1")]
+    pub mode: i32,
+}
+
+/// C→H: tecla física (HID usage, página 0x07).
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct Key {
+    #[prost(uint32, tag = "1")]
+    pub hid: u32,
+    #[prost(bool, tag = "2")]
+    pub down: bool,
+    /// Só no modo Físico: bit 0 = Caps Lock, bit 1 = Num Lock do controlador.
+    #[prost(uint32, optional, tag = "3")]
+    pub locks: Option<u32>,
+}
+
+/// C→H: atalho pela letra. `base_char` é o que a tecla produz sem modificador no controlador.
+#[derive(Clone, PartialEq, Message)]
+pub struct KeyShortcut {
+    #[prost(string, tag = "1")]
+    pub base_char: String,
+    #[prost(uint32, tag = "2")]
+    pub hid_hint: u32,
+    /// Bits: 0 Shift, 1 Ctrl, 2 Alt, 3 Meta.
+    #[prost(uint32, tag = "3")]
+    pub mods: u32,
+    #[prost(bool, tag = "4")]
+    pub down: bool,
+}
+
+/// C→H: texto já resolvido no controlador (teclas mortas compostas).
+#[derive(Clone, PartialEq, Message)]
+pub struct KeyChar {
+    #[prost(string, tag = "1")]
+    pub text: String,
+    #[prost(uint32, tag = "2")]
+    pub hid_hint: u32,
+}
+
+/// C→H: soltar tudo que estiver apertado (perda de foco).
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct ReleaseAll {}
+
+// ---------------------------------------------------------------------------------------------
 // Mouse e cursor
 
 /// C→H: posição do mouse. Absoluta é normalizada dentro de um monitor; relativa é para jogos e
@@ -603,6 +699,15 @@ pub enum Feature {
     Files = 2,
     Audio = 3,
     MultiDisplay = 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum KeyboardModeKind {
+    /// Layouts iguais: físico; diferentes: híbrido.
+    Auto = 0,
+    Physical = 1,
+    Text = 2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
@@ -813,6 +918,30 @@ fn displays(list: &[DisplayInfo]) -> Result<(), InvalidMessage> {
     Ok(())
 }
 
+fn hid(field: &'static str, value: u32) -> Result<(), InvalidMessage> {
+    at_most(field, value as usize, limits::HID_MAX as usize)
+}
+
+fn keyboard(k: Option<&KeyboardInfo>) -> Result<(), InvalidMessage> {
+    if let Some(k) = k {
+        at_most(
+            "keyboard.os_layout_id",
+            k.os_layout_id.len(),
+            limits::SHORT_TEXT_LEN,
+        )?;
+        at_most(
+            "keyboard.layout_tag",
+            k.layout_tag.len(),
+            limits::SHORT_TEXT_LEN,
+        )?;
+        at_most("keyboard.extra_hid", k.extra_hid.len(), limits::EXTRA_HID)?;
+        for &h in &k.extra_hid {
+            hid("keyboard.extra_hid", h)?;
+        }
+    }
+    Ok(())
+}
+
 fn audio_prefs(p: Option<&AudioPrefs>) -> Result<(), InvalidMessage> {
     match p {
         Some(p) => at_most(
@@ -833,12 +962,14 @@ impl Control {
         match msg {
             Msg::Hello(m) => {
                 at_most("app_version", m.app_version.len(), limits::SHORT_TEXT_LEN)?;
+                keyboard(m.keyboard.as_ref())?;
                 platform(m.platform.as_ref())?;
                 at_most("decode_caps", m.decode_caps.len(), limits::CODEC_CAPS)?;
                 at_most("features", m.features.len(), limits::FEATURES)
             }
             Msg::HelloAck(m) => {
                 at_most("host_name", m.host_name.len(), limits::SHORT_TEXT_LEN)?;
+                keyboard(m.keyboard.as_ref())?;
                 platform(m.platform.as_ref())?;
                 displays(&m.displays)?;
                 at_most("encode_caps", m.encode_caps.len(), limits::CODEC_CAPS)
@@ -861,6 +992,18 @@ impl Control {
             Msg::CursorPos(m) => {
                 coord("x", m.x)?;
                 coord("y", m.y)
+            }
+            Msg::KeyboardLayoutChanged(m) => keyboard(m.info.as_ref()),
+            Msg::Key(m) => hid("hid", m.hid),
+            Msg::KeyShortcut(m) => {
+                // Um caractere só (até 4 bytes em UTF-8).
+                at_most("base_char", m.base_char.chars().count(), 1)?;
+                at_most("base_char", m.base_char.len(), 4)?;
+                hid("hid_hint", m.hid_hint)
+            }
+            Msg::KeyChar(m) => {
+                at_most("text", m.text.len(), limits::KEY_TEXT_LEN)?;
+                hid("hid_hint", m.hid_hint)
             }
             Msg::StartAudio(m) => {
                 audio_stream(m.stream_id)?;
@@ -889,7 +1032,9 @@ impl Control {
             | Msg::MouseMove(_)
             | Msg::MouseButton(_)
             | Msg::Scroll(_)
-            | Msg::CursorShapeRef(_) => Ok(()),
+            | Msg::CursorShapeRef(_)
+            | Msg::KeyboardMode(_)
+            | Msg::ReleaseAll(_) => Ok(()),
         }
     }
 }
@@ -1009,6 +1154,13 @@ mod tests {
             hw: false,
             gpu_output: false,
         };
+        let teclado = |id: &str, tag: &str, extra: Vec<u32>| {
+            Some(KeyboardInfo {
+                os_layout_id: id.into(),
+                layout_tag: tag.into(),
+                extra_hid: extra,
+            })
+        };
         let perms = Permissions {
             view: true,
             control: true,
@@ -1029,6 +1181,7 @@ mod tests {
                 }),
                 features: vec![Feature::Files.into(), Feature::MultiDisplay.into()],
                 clock_ns: 1_234_567_890,
+                keyboard: teclado("00020409", "us-intl", vec![]),
             }),
             Msg::HelloAck(HelloAck {
                 proto_version: PROTO_VERSION,
@@ -1040,7 +1193,35 @@ mod tests {
                 consent: Consent::Required.into(),
                 clock_ns: 99,
                 client_clock_ns: 1_234_567_890,
+                keyboard: teclado("xkb:br(abnt2)", "br-abnt2", vec![0x87, 0x85]),
             }),
+            Msg::KeyboardLayoutChanged(KeyboardLayoutChanged {
+                info: teclado("00010416", "br-abnt2", vec![0x87, 0x85]),
+            }),
+            Msg::KeyboardMode(KeyboardMode {
+                mode: KeyboardModeKind::Physical.into(),
+            }),
+            Msg::Key(Key {
+                hid: 0x04,
+                down: true,
+                locks: Some(0b01),
+            }),
+            Msg::Key(Key {
+                hid: 0xE1,
+                down: false,
+                locks: None,
+            }),
+            Msg::KeyShortcut(KeyShortcut {
+                base_char: "ç".into(),
+                hid_hint: 0x33,
+                mods: 0b0010,
+                down: true,
+            }),
+            Msg::KeyChar(KeyChar {
+                text: "é".into(),
+                hid_hint: 0x08,
+            }),
+            Msg::ReleaseAll(ReleaseAll {}),
             Msg::ConsentResult(ConsentResult {
                 granted: true,
                 permissions: Some(perms),
@@ -1203,8 +1384,8 @@ mod tests {
 
     #[test]
     fn tag_desconhecida_vira_none() {
-        // Campo 55 (faixa do teclado, ainda sem mensagem), tipo length-delimited, vazio.
-        let corpo = [(55 << 3 | 2) as u8 | 0x80, 55 >> 4, 0];
+        // Campo 75 (faixa do clipboard, ainda sem mensagem), tipo length-delimited, vazio.
+        let corpo = [(75 << 3 | 2) as u8 | 0x80, 75 >> 4, 0];
         let mut fio = vec![corpo.len() as u8];
         fio.extend_from_slice(&corpo);
         let (msg, n) = decode_frame(&fio).unwrap().unwrap();
@@ -1269,6 +1450,36 @@ mod tests {
             invalida(Msg::StopAudio(StopAudio { stream_id: 0x100 })).field,
             "stream_id"
         );
+    }
+
+    #[test]
+    fn limites_do_teclado() {
+        let e = invalida(Msg::KeyChar(KeyChar {
+            text: "a".repeat(limits::KEY_TEXT_LEN + 1),
+            hid_hint: 0,
+        }));
+        assert_eq!(e.field, "text");
+        let e = invalida(Msg::KeyShortcut(KeyShortcut {
+            base_char: "ab".into(),
+            hid_hint: 0x04,
+            mods: 2,
+            down: true,
+        }));
+        assert_eq!(e.field, "base_char");
+        let e = invalida(Msg::Key(Key {
+            hid: 0x1_0000,
+            down: true,
+            locks: None,
+        }));
+        assert_eq!(e.field, "hid");
+        let e = invalida(Msg::KeyboardLayoutChanged(KeyboardLayoutChanged {
+            info: Some(KeyboardInfo {
+                os_layout_id: String::new(),
+                layout_tag: String::new(),
+                extra_hid: vec![0x87; limits::EXTRA_HID + 1],
+            }),
+        }));
+        assert_eq!(e.field, "keyboard.extra_hid");
     }
 
     #[test]

@@ -4661,6 +4661,9 @@ version = "0.1.0"
 [[package]]
 name = "taildesk-keyboard"
 version = "0.1.0"
+dependencies = [
+ "taildesk-proto",
+]
 
 [[package]]
 name = "taildesk-media"
