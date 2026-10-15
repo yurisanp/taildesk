@@ -4,7 +4,8 @@
 //! `Hello`, decide pela [`HostSettings`] e, se for preciso, pede o diálogo à interface
 //! ([`EventoHost::Pedido`]). Ao vivo, filtra cada mensagem pelas permissões
 //! ([`HostSession::admits`]), traduz o teclado para o layout do host e entrega à [`Entrada`],
-//! e liga o serviço de arquivos. No fim (qualquer fim) solta teclas e botões presos.
+//! liga o serviço de arquivos e entrega os pedidos de vídeo à [`Midia`]. No fim (qualquer fim)
+//! solta teclas e botões presos e larga a mídia (o que para a captura).
 
 use std::future::Future;
 use std::io;
@@ -54,6 +55,40 @@ pub trait Entrada: Send + 'static {
     fn soltar_mouse(&mut self) -> impl Future<Output = ()> + Send;
 }
 
+/// Por onde a mídia de uma sessão sai: datagramas e streams na conexão, mensagens
+/// (`CodecSelected`, `VideoStopped`, cursor) na fila do stream de controle.
+#[derive(Clone, Debug)]
+pub struct CanalMidia {
+    pub conn: quinn::Connection,
+    pub saida: mpsc::Sender<taildesk_proto::control::Control>,
+}
+
+impl CanalMidia {
+    /// Põe `msg` na fila do controle sem esperar (da thread da captura ou do encode). Fila cheia
+    /// descarta: só serve para o que pode se perder (posição do cursor).
+    pub fn tentar_enviar(&self, msg: Msg) -> bool {
+        self.saida.try_send(controle(msg)).is_ok()
+    }
+
+    pub async fn enviar(&self, msg: Msg) -> bool {
+        self.saida.send(controle(msg)).await.is_ok()
+    }
+}
+
+/// Vídeo (e depois áudio) de uma sessão ao vivo: recebe `StartVideo`, `StopVideo`,
+/// `SetPriority`, `RequestKeyframe` e `PictureLoss`. Soltar para tudo.
+pub trait Midia: Send + 'static {
+    fn mensagem(&mut self, msg: &Msg) -> impl Future<Output = ()> + Send;
+}
+
+/// Host sem vídeo (testes, CLI de arquivos).
+#[derive(Debug, Default)]
+pub struct SemMidia;
+
+impl Midia for SemMidia {
+    async fn mensagem(&mut self, _: &Msg) {}
+}
+
 /// O que o host diz de si no `HelloAck`.
 #[derive(Clone, Debug, Default)]
 pub struct Descricao {
@@ -68,10 +103,14 @@ pub struct Descricao {
 /// Este computador, visto pela sessão.
 pub trait Maquina: Send + Sync + 'static {
     type Entrada: Entrada;
+    type Midia: Midia;
     fn descricao(&self) -> Descricao;
     /// Mouse e teclado para uma sessão com controle. `None` = indisponível (portal recusado,
     /// por exemplo): a sessão segue só vendo.
     fn entrada(&self) -> impl Future<Output = Option<Self::Entrada>> + Send;
+    /// Vídeo para uma sessão ao vivo (ver é sempre permitido). Chamado depois de
+    /// [`Maquina::entrada`], então pode reaproveitar o que ela abriu (a sessão do portal).
+    fn midia(&self, canal: CanalMidia) -> impl Future<Output = Self::Midia> + Send;
 }
 
 /// Configuração do host para todas as sessões.
@@ -385,6 +424,12 @@ async fn ao_vivo<M: Maquina>(
         entrada,
         buf: Vec::new(),
     };
+    let mut midia = maquina
+        .midia(CanalMidia {
+            conn: conn.clone(),
+            saida: saida.clone(),
+        })
+        .await;
 
     // Arquivos: o serviço confere `files` e as raízes sozinho.
     let quem = peer
@@ -484,6 +529,11 @@ async fn ao_vivo<M: Maquina>(
                     | Msg::FileDone(_)
                     | Msg::FileCancel(_)
                     | Msg::FileError(_) => arquivos.handle(msg).await,
+                    Msg::StartVideo(_)
+                    | Msg::StopVideo(_)
+                    | Msg::SetPriority(_)
+                    | Msg::RequestKeyframe(_)
+                    | Msg::PictureLoss(_) => midia.mensagem(&msg).await,
                     // O layout e o modo escolhidos valem no controlador, que traduz.
                     Msg::KeyboardLayoutChanged(_) | Msg::KeyboardMode(_) => {}
                     _ => {
@@ -504,6 +554,7 @@ async fn ao_vivo<M: Maquina>(
         }
     };
     teclado.soltar_tudo().await;
+    drop(midia);
     aceitar.abort();
     repassar.abort();
     motivo

@@ -1,21 +1,24 @@
 //! Este computador como controlador: "Conectar" abre a janela da sessão (`12-levantamento-ux.md`
 //! §5.3 e §5.6), com as etapas de conexão, abas dos monitores, mouse sobre o vídeo, teclado
-//! traduzido e o cursor do host desenhado por cima do vídeo.
+//! traduzido, o vídeo do monitor ativo e o cursor do host desenhado por cima do vídeo.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 
 use slint::platform::PointerEventButton;
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::{
     CloseRequestResponse, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel,
 };
+use taildesk_codec::{DecoderOpenH264, QuadroYuv};
 use taildesk_keyboard::{Controller, Hid, KeyMsg, Keymap, Level, Mode, Mods, Translation};
+use taildesk_media::video::RecepcaoVideo;
 use taildesk_overlay::{Overlay, SystemOverlay};
 use taildesk_proto::control::{
-    AbsPos, Button, Control, Feature, Hello, KeyboardInfo, MouseButton, MouseMove, Msg, Platform,
-    Scroll, mouse_move,
+    AbsPos, Button, CodecSelected, Control, Feature, Hello, KeyboardInfo, MouseButton, MouseMove,
+    Msg, Platform, RequestKeyframe, Scroll, mouse_move,
 };
 use taildesk_session::conexao::PORTA;
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
@@ -25,6 +28,7 @@ use taildesk_tsapi::LocalApi;
 use taildesk_ui::{AbaMonitor, JanelaSessao};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::video::{Recepcoes, Tela, ler_datagramas, travar};
 use crate::{config, no_app};
 
 type IdLocal = u64;
@@ -83,6 +87,7 @@ fn texto_fim(r: EndReason, host: &str) -> String {
 
 /// Uma sessão aberta numa janela.
 struct SessaoUi {
+    id: IdLocal,
     janela: JanelaSessao,
     host: String,
     saida: Option<mpsc::Sender<Control>>,
@@ -102,10 +107,18 @@ struct SessaoUi {
     /// Último ponto do mouse sobre o vídeo, para desenhar o cursor sem esperar o host.
     local: Option<(u32, u16, u16)>,
     botoes: u8,
+    /// Recepção e decode do monitor ativo (a task dos datagramas entrega aqui).
+    recepcoes: Recepcoes,
+    tela: Tela,
+    /// Monitor do vídeo que a janela mostra agora.
+    video_display: Option<u32>,
 }
 
 impl SessaoUi {
     fn enviar(&self, msg: Msg) {
+        if let Msg::StopVideo(v) = &msg {
+            self.parar_video(v.display_id);
+        }
         if let Some(s) = &self.saida {
             let _ = s.try_send(Control { msg: Some(msg) });
         }
@@ -114,6 +127,63 @@ impl SessaoUi {
     fn enviar_todas(&self, msgs: Vec<Msg>) {
         for m in msgs {
             self.enviar(m);
+        }
+    }
+
+    /// `CodecSelected`: começa a receber e decodificar o vídeo desse monitor.
+    fn iniciar_video(&mut self, c: &CodecSelected) {
+        let Ok(stream) = u8::try_from(c.stream_id) else {
+            return;
+        };
+        let display = c.display_id;
+        let decoder = match DecoderOpenH264::novo() {
+            Ok(d) => d,
+            Err(e) => {
+                self.janela
+                    .set_etapa(format!("Não foi possível decodificar o vídeo: {e}").into());
+                return;
+            }
+        };
+        let (caixa, id) = (self.tela.caixa(), self.id);
+        let ao_quadro = Box::new(move |_: u32, q: &QuadroYuv<'_>| {
+            if caixa.guardar(q) {
+                na_sessao(id, SessaoUi::mostrar_quadro);
+            }
+        });
+        let saida = self.saida.clone();
+        let pedir_chave = Arc::new(move || {
+            if let Some(s) = &saida {
+                let _ = s.try_send(Control {
+                    msg: Some(Msg::RequestKeyframe(RequestKeyframe {
+                        display_id: display,
+                    })),
+                });
+            }
+        });
+        match RecepcaoVideo::iniciar(display, stream, Box::new(decoder), ao_quadro, pedir_chave) {
+            Ok(r) => {
+                let mut m = travar(&self.recepcoes);
+                m.retain(|_, (d, _)| *d != display);
+                m.insert(stream, (display, r));
+            }
+            Err(e) => eprintln!("taildesk: vídeo: {e}"),
+        }
+        if self.video_display != Some(display) {
+            // Outro monitor: não deixa o quadro do anterior na tela.
+            self.janela.set_tem_video(false);
+            self.video_display = Some(display);
+        }
+    }
+
+    fn parar_video(&self, display: u32) {
+        travar(&self.recepcoes).retain(|_, (d, _)| *d != display);
+    }
+
+    /// Chamado pelo decode (pela fila da interface) quando há quadro novo.
+    fn mostrar_quadro(&mut self) {
+        if let Some(img) = self.tela.proxima_imagem() {
+            self.janela.set_quadro(img);
+            self.janela.set_tem_video(true);
         }
     }
 
@@ -239,6 +309,7 @@ impl SessaoUi {
                         self.janela.set_terminou(true);
                         self.janela.set_etapa(texto_fim(r, &self.host).into());
                         self.saida = None;
+                        travar(&self.recepcoes).clear();
                     }
                 }
             }
@@ -294,7 +365,11 @@ impl SessaoUi {
                     self.cursor.on_pos(p);
                 }
                 Msg::CursorShapeRef(r) => self.cursor.on_shape_ref(r),
-                Msg::VideoStopped(v) => self.monitores.on_video_stopped(&v, &mut out),
+                Msg::CodecSelected(c) => self.iniciar_video(&c),
+                Msg::VideoStopped(v) => {
+                    self.parar_video(v.display_id);
+                    self.monitores.on_video_stopped(&v, &mut out);
+                }
                 _ => {}
             },
         }
@@ -454,6 +529,11 @@ fn na_sessao_ja<R>(id: IdLocal, f: impl FnOnce(&mut SessaoUi) -> R) -> Option<R>
 }
 
 impl Controlador {
+    /// Alguma janela de sessão aberta.
+    pub fn ativa(&self) -> bool {
+        !self.sessoes.borrow().is_empty()
+    }
+
     /// "Conectar" num dispositivo da lista.
     pub fn conectar(&self, rt: &tokio::runtime::Handle, nome: String, ip: String) {
         let Ok(ip) = ip.parse::<IpAddr>() else {
@@ -541,9 +621,11 @@ impl Controlador {
             extra_hid: Vec::new(),
         };
         let (fechar_tx, fechar_rx) = oneshot::channel();
+        let recepcoes = Recepcoes::default();
         self.sessoes.borrow_mut().insert(
             id,
             SessaoUi {
+                id,
                 janela,
                 host: nome.clone(),
                 saida: None,
@@ -559,9 +641,12 @@ impl Controlador {
                 mods_presos: Vec::new(),
                 local: None,
                 botoes: 0,
+                recepcoes: recepcoes.clone(),
+                tela: Tela::default(),
+                video_display: None,
             },
         );
-        rt.spawn(rodar(id, nome, ip, info, fechar_rx));
+        rt.spawn(rodar(id, nome, ip, info, recepcoes, fechar_rx));
     }
 }
 
@@ -584,6 +669,7 @@ async fn rodar(
     nome: String,
     ip: IpAddr,
     teclado: KeyboardInfo,
+    recepcoes: Recepcoes,
     mut fechar_rx: oneshot::Receiver<()>,
 ) {
     let remoto = SocketAddr::new(ip, PORTA);
@@ -648,6 +734,7 @@ async fn rodar(
     }
     let saida = sessao.saida();
     na_sessao(id, move |s| s.saida = Some(saida));
+    let datagramas = tokio::spawn(ler_datagramas(sessao.conexao().clone(), recepcoes));
     loop {
         tokio::select! {
             ev = eventos.recv() => match ev {
@@ -657,6 +744,7 @@ async fn rodar(
             _ = &mut fechar_rx => break,
         }
     }
+    datagramas.abort();
     sessao.encerrar().await;
     drop(endpoint);
 }

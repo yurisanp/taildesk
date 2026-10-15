@@ -13,7 +13,7 @@ use taildesk_overlay::{Overlay, SystemOverlay};
 use taildesk_proto::control::{KeyboardInfo, Msg, Permissions, Platform};
 use taildesk_session::conexao::PORTA;
 use taildesk_session::conexao::host::{
-    ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, IdSessao, Maquina, servir,
+    CanalMidia, ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, IdSessao, Maquina, servir,
 };
 use taildesk_session::{ConsentAnswer, ConsentPrompt, HostSettings};
 use taildesk_transport::{Identity, server_endpoint};
@@ -21,6 +21,7 @@ use taildesk_tsapi::LocalApi;
 use taildesk_ui::{JanelaFaixa, JanelaPedido};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::midia_host::{Fonte, MidiaApp};
 use crate::{avisar, config, no_app};
 
 /// Nome da identidade do host no cofre.
@@ -86,12 +87,63 @@ pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Mouse e teclado
+// Mouse, teclado e vídeo
 
 #[derive(Debug, Default)]
 struct MaquinaApp {
+    /// Uma sessão do portal (RemoteDesktop + ScreenCast) para o app todo: input e captura saem
+    /// dela, e o diálogo do compositor aparece uma vez só.
     #[cfg(target_os = "linux")]
     portal: tokio::sync::Mutex<Option<Arc<taildesk_platform::wayland::SessaoPortal>>>,
+}
+
+#[cfg(target_os = "linux")]
+impl MaquinaApp {
+    /// Abre (uma vez) a sessão do portal: o compositor mostra o diálogo dele.
+    async fn portal(&self) -> Option<Arc<taildesk_platform::wayland::SessaoPortal>> {
+        use taildesk_platform::wayland::SessaoPortal;
+        let mut portal = self.portal.lock().await;
+        if portal.is_none() {
+            match SessaoPortal::abrir(true).await {
+                Ok(s) => *portal = Some(Arc::new(s)),
+                Err(e) => {
+                    eprintln!("taildesk: portal de controle remoto recusado ou indisponível: {e}");
+                    avisar(format!("Sem acesso à tela e ao controle: {e}"));
+                    return None;
+                }
+            }
+        }
+        portal.clone()
+    }
+}
+
+/// Monitores liberados no diálogo do portal, como o protocolo descreve.
+#[cfg(target_os = "linux")]
+fn monitores_do_portal(
+    portal: &taildesk_platform::wayland::SessaoPortal,
+) -> Vec<taildesk_proto::control::DisplayInfo> {
+    portal
+        .monitores()
+        .iter()
+        .map(|m| {
+            let (w, h) = (m.tamanho_logico.0.max(1), m.tamanho_logico.1.max(1));
+            taildesk_proto::control::DisplayInfo {
+                id: m.display_id,
+                name: String::new(),
+                x: m.posicao.0,
+                y: m.posicao.1,
+                width: w,
+                height: h,
+                logical_width: w,
+                logical_height: h,
+                scale: 1.0,
+                refresh_mhz: 0,
+                primary: m.display_id == 0,
+                rotation: 0,
+                shared: true,
+            }
+        })
+        .collect()
 }
 
 fn nome_do_computador() -> String {
@@ -168,7 +220,7 @@ fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
         .collect()
 }
 
-/// No Linux os monitores só se sabem depois do diálogo do portal; a captura manda
+/// No Linux os monitores só se sabem depois do diálogo do portal; a mídia manda
 /// `DisplaysChanged` quando abrir.
 #[cfg(not(windows))]
 fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
@@ -177,6 +229,7 @@ fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
 
 impl Maquina for MaquinaApp {
     type Entrada = EntradaApp;
+    type Midia = MidiaApp;
 
     fn descricao(&self) -> Descricao {
         let (keymap, os_layout_id) = teclado_do_host();
@@ -213,23 +266,10 @@ impl Maquina for MaquinaApp {
         })
     }
 
-    /// Abre (uma vez) a sessão do portal RemoteDesktop: o compositor mostra o diálogo dele.
     #[cfg(target_os = "linux")]
     async fn entrada(&self) -> Option<EntradaApp> {
-        use taildesk_platform::wayland::SessaoPortal;
-        let mut portal = self.portal.lock().await;
-        if portal.is_none() {
-            match SessaoPortal::abrir(true).await {
-                Ok(s) => *portal = Some(Arc::new(s)),
-                Err(e) => {
-                    eprintln!("taildesk: portal de controle remoto recusado ou indisponível: {e}");
-                    avisar(format!("Sem controle de mouse e teclado: {e}"));
-                    return None;
-                }
-            }
-        }
         Some(EntradaApp {
-            portal: portal.clone()?,
+            portal: self.portal().await?,
             presos: Default::default(),
         })
     }
@@ -237,6 +277,40 @@ impl Maquina for MaquinaApp {
     #[cfg(not(any(windows, target_os = "linux")))]
     async fn entrada(&self) -> Option<EntradaApp> {
         None
+    }
+
+    #[cfg(windows)]
+    async fn midia(&self, canal: CanalMidia) -> MidiaApp {
+        let monitores = monitores();
+        // Sem monitor (sessão sem console, DXGI indisponível): nada a capturar.
+        let fonte = if monitores.is_empty() {
+            Fonte::Nenhuma
+        } else {
+            Fonte::Dxgi
+        };
+        MidiaApp::new(canal, fonte, monitores)
+    }
+
+    /// Os monitores só se sabem depois do diálogo do portal: saem num `DisplaysChanged`.
+    #[cfg(target_os = "linux")]
+    async fn midia(&self, canal: CanalMidia) -> MidiaApp {
+        let Some(portal) = self.portal().await else {
+            return MidiaApp::new(canal, Fonte::Nenhuma, Vec::new());
+        };
+        let monitores = monitores_do_portal(&portal);
+        canal
+            .enviar(Msg::DisplaysChanged(
+                taildesk_proto::control::DisplaysChanged {
+                    displays: monitores.clone(),
+                },
+            ))
+            .await;
+        MidiaApp::new(canal, Fonte::Portal(portal), monitores)
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    async fn midia(&self, canal: CanalMidia) -> MidiaApp {
+        MidiaApp::new(canal, Fonte::Nenhuma, Vec::new())
     }
 }
 
@@ -403,6 +477,11 @@ fn responder(sessao: IdSessao, resposta: ConsentAnswer) {
 }
 
 impl Ui {
+    /// Algum pedido de acesso ou sessão ao vivo neste host.
+    pub fn ativa(&self) -> bool {
+        !self.pedidos.borrow().is_empty() || !self.faixas.borrow().is_empty()
+    }
+
     pub fn evento(&self, ev: EventoHost, settings: &Arc<Mutex<HostSettings>>) {
         match ev {
             EventoHost::Pedido {
@@ -432,7 +511,7 @@ impl Ui {
                     avisar(format!("Arquivo recebido: {}", path.display()));
                 }
             }
-            // A mídia (fase 1) entra aqui.
+            // O vídeo vai direto para a `MidiaApp`; aqui só chegaria o que ninguém trata ainda.
             EventoHost::Mensagem { .. } => {}
         }
     }
