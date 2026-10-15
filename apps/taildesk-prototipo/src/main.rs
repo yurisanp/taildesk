@@ -139,10 +139,11 @@ fn marcar_destacado(
     m.destacado = destacado;
     monitores.set_row_data(indice, m);
     sessao.set_monitores_em_abas(em_abas(monitores));
-    if destacado && sessao.get_monitor() as usize == indice {
-        if let Some(livre) = monitores.iter().position(|m| m.liberado && !m.destacado) {
-            sessao.set_monitor(livre as i32);
-        }
+    if destacado
+        && sessao.get_monitor() as usize == indice
+        && let Some(livre) = monitores.iter().position(|m| m.liberado && !m.destacado)
+    {
+        sessao.set_monitor(livre as i32);
     }
 }
 
