@@ -278,7 +278,10 @@ component OpcaoConfig inherits HorizontalLayout {
 
 component SecaoConfiguracoes inherits ScrollView {
     in-out property <bool> aceitando;
+    in property <bool> tailscale-conectado: true;
     callback diagnostico();
+    callback abrir-tailscale();
+    callback boas-vindas();
     VerticalLayout {
         padding: 20px;
         spacing: 14px;
@@ -364,7 +367,14 @@ component SecaoConfiguracoes inherits ScrollView {
             VerticalLayout {
                 padding-left: 16px;
                 padding-right: 16px;
-                LinhaInfo { rotulo: @tr("Tailnet"); valor: "yuri@github · Tailscale 1.104.1"; acao: @tr("Sair"); }
+                LinhaInfo {
+                    rotulo: @tr("Tailscale deste computador");
+                    valor: root.tailscale-conectado ? @tr("Conectado · tailnet yuri@github · notebook-yuri · versão 1.104.1") : @tr("Desconectado · versão 1.104.1");
+                    acao: @tr("Abrir o Tailscale");
+                    acionar => { root.abrir-tailscale(); }
+                }
+                Separador { }
+                LinhaInfo { rotulo: @tr("Primeira execução"); valor: @tr("Verificar o Tailscale e o acesso a este PC de novo"); acao: @tr("Abrir"); acionar => { root.boas-vindas(); } }
                 Separador { }
                 LinhaInfo { rotulo: @tr("Diagnóstico"); valor: @tr("Versão 0.0.1 · sem erros"); acao: @tr("Abrir teste de conexão"); acionar => { root.diagnostico(); } }
             }
@@ -392,6 +402,8 @@ export component JanelaPrincipal inherits Window {
     in property <string> este-pc: "notebook-yuri";
     in-out property <bool> aceitando: true;
     in-out property <string> toast;
+    // O TailDesk usa o Tailscale do sistema; quando ele para, a janela avisa e espera.
+    in-out property <bool> tailscale-conectado: true;
 
     callback busca-mudou(string);
     callback conectar(Dispositivo);
@@ -399,6 +411,7 @@ export component JanelaPrincipal inherits Window {
     callback enviar-arquivo(Dispositivo);
     callback simular-pedido();
     callback diagnostico();
+    callback boas-vindas();
 
     HorizontalLayout {
         Rectangle {
@@ -446,23 +459,60 @@ export component JanelaPrincipal inherits Window {
                     altura: 28px;
                     clicado => { root.simular-pedido(); }
                 }
+                Botao {
+                    texto: root.tailscale-conectado ? @tr("Simular Tailscale parado") : @tr("Simular Tailscale de volta");
+                    discreto: true;
+                    altura: 28px;
+                    clicado => { root.tailscale-conectado = !root.tailscale-conectado; }
+                }
             }
         }
         Rectangle { width: 1px; background: Tema.borda; }
-        if root.secao == 0: SecaoDispositivos {
+        VerticalLayout {
             horizontal-stretch: 1;
-            dispositivos: root.dispositivos;
-            selecionado <=> root.selecionado;
-            busca <=> root.busca;
-            busca-mudou(t) => { root.busca-mudou(t); }
-            conectar(d) => { root.conectar(d); }
-            testar(d) => { root.testar(d); }
-            enviar-arquivo(d) => { root.enviar-arquivo(d); }
-            copiar(t) => { root.toast = @tr("Copiado: {}", t); }
-            como-instalar => { root.toast = @tr("Instale o TailDesk nesse dispositivo e abra o app; ele aparece aqui sozinho."); }
+            if !root.tailscale-conectado: Rectangle {
+                background: Tema.relay.with-alpha(0.16);
+                HorizontalLayout {
+                    padding: 10px;
+                    padding-left: 20px;
+                    spacing: 12px;
+                    Text {
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                        text: @tr("O Tailscale deste computador está desconectado. As conexões voltam quando ele reconectar.");
+                        color: Tema.texto;
+                        font-size: Tema.fonte;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Botao { texto: @tr("Abrir o Tailscale"); altura: 28px; clicado => { root.toast = @tr("Abrindo o Tailscale"); } }
+                    }
+                }
+            }
+            if root.secao == 0: SecaoDispositivos {
+                opacity: root.tailscale-conectado ? 1 : 0.5;
+                horizontal-stretch: 1;
+                dispositivos: root.dispositivos;
+                selecionado <=> root.selecionado;
+                busca <=> root.busca;
+                busca-mudou(t) => { root.busca-mudou(t); }
+                conectar(d) => { root.conectar(d); }
+                testar(d) => { root.testar(d); }
+                enviar-arquivo(d) => { root.enviar-arquivo(d); }
+                copiar(t) => { root.toast = @tr("Copiado: {}", t); }
+                como-instalar => { root.toast = @tr("Instale o TailDesk nesse dispositivo e abra o app; ele aparece aqui sozinho."); }
+            }
+            if root.secao == 1: SecaoTransferencias { horizontal-stretch: 1; }
+            if root.secao == 2: SecaoConfiguracoes {
+                horizontal-stretch: 1;
+                aceitando <=> root.aceitando;
+                tailscale-conectado: root.tailscale-conectado;
+                diagnostico => { root.diagnostico(); }
+                abrir-tailscale => { root.toast = @tr("Abrindo o Tailscale"); }
+                boas-vindas => { root.boas-vindas(); }
+            }
         }
-        if root.secao == 1: SecaoTransferencias { horizontal-stretch: 1; }
-        if root.secao == 2: SecaoConfiguracoes { horizontal-stretch: 1; aceitando <=> root.aceitando; diagnostico => { root.diagnostico(); } }
     }
 
     Toast {
