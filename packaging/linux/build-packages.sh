@@ -56,8 +56,10 @@ fi
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH=$arch "$tool" --no-appstream "$appdir" "$out/TailDesk-$version-$arch.AppImage"
 
 # 3. .deb e 4. .rpm (metadados em apps/taildesk/Cargo.toml)
+# Pre-release usa "~" (0.1.0~beta.1): ordena antes de 0.1.0 no dpkg e no rpm, que não aceita "-".
+pkgver="${version//-/\~}"
 cd "$root"
-cargo deb --no-build --no-strip -p taildesk --deb-version "$version" -o "$out/taildesk_${version}_amd64.deb"
-cargo generate-rpm -p apps/taildesk --set-metadata "version = \"$version\"" -o "$out/taildesk-$version-1.$arch.rpm"
+cargo deb --no-build --no-strip -p taildesk --deb-version "$pkgver" -o "$out/taildesk_${pkgver}_amd64.deb"
+cargo generate-rpm -p apps/taildesk --set-metadata "version = \"$pkgver\"" -o "$out/taildesk-$pkgver-1.$arch.rpm"
 
 ls -l "$out"
