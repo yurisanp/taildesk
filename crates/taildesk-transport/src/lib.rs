@@ -14,6 +14,8 @@ pub mod bench;
 pub mod endpoint;
 pub mod probe;
 pub mod tls;
+pub mod video;
 
 pub use endpoint::{client_endpoint, connect, server_endpoint};
 pub use tls::{Identity, Pin, peer_fingerprint};
+pub use video::SaidaQuic;

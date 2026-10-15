@@ -4921,6 +4921,7 @@ dependencies = [
 name = "taildesk-media"
 version = "0.1.0"
 dependencies = [
+ "taildesk-codec",
  "taildesk-proto",
 ]
 
@@ -4994,6 +4995,7 @@ dependencies = [
  "rcgen",
  "ring",
  "rustls",
+ "taildesk-codec",
  "taildesk-media",
  "taildesk-proto",
  "tokio",
