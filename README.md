@@ -30,7 +30,7 @@ Os documentos `00`–`09` usam o codinome antigo `halyard`; leia como `taildesk`
 | `taildesk-transport` | QUIC (quinn) sobre o overlay |
 | `taildesk-codec` | Encoders/decoders (openh264 → Media Foundation / VA-API) |
 | `taildesk-media` | Pipelines do host e do controlador |
-| `taildesk-platform` | Código por SO: instância única, bandeja, sessão do portal e captura PipeWire no Linux, teclado; captura no Windows, cursor e segredos nas próximas etapas |
+| `taildesk-platform` | Código por SO: instância única, bandeja, sessão do portal e captura PipeWire no Linux, captura DXGI no Windows, mouse, teclado; segredos nas próximas etapas |
 | `taildesk-render` | Vídeo em wgpu |
 | `taildesk-files` | Troca de arquivos; validação de caminhos (pronta, com testes) |
 | `taildesk-keyboard` | Tradução de layouts; classificação e busca reversa (pronta, com testes) |
@@ -64,6 +64,7 @@ No Linux o build precisa do `fontconfig` e da `libpipewire-0.3` de desenvolvimen
 `libfontconfig1-dev libpipewire-0.3-dev libclang-dev` (Ubuntu/Debian),
 `fontconfig-devel pipewire-devel clang-devel` (Fedora) ou `fontconfig pipewire clang` (Arch).
 `cargo run -p taildesk-cli -- portal` testa a sessão do portal e a captura de cada monitor.
+No Windows, `cargo run -p taildesk-cli -- captura-dxgi` lista os monitores e mede a captura de todos.
 O ícone da bandeja é gerado por `packaging/icone-bandeja.py`.
 Toolchain fixa em `rust-toolchain.toml` (1.97, MSRV do crate `tailscale`).
 

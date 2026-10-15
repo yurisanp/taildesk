@@ -27,79 +27,16 @@ use pw::spa::buffer::meta::MetaCursor;
 use pw::spa::param::video::{VideoFormat, VideoInfoRaw};
 use pw::spa::pod::Pod;
 
-/// Ordem dos bytes de cada pixel na memória.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FormatoPixel {
-    /// B, G, R, (ignorado). O mais comum no KDE e no GNOME.
-    Bgrx,
-    Rgbx,
-    Bgra,
-    Rgba,
-}
+pub use crate::captura::{Cursor, FormaCursor, FormatoPixel, Imagem, Quadro, Rotacao};
 
-impl FormatoPixel {
-    fn de(f: VideoFormat) -> Option<FormatoPixel> {
-        Some(match f {
-            VideoFormat::BGRx => FormatoPixel::Bgrx,
-            VideoFormat::RGBx => FormatoPixel::Rgbx,
-            VideoFormat::BGRA => FormatoPixel::Bgra,
-            VideoFormat::RGBA => FormatoPixel::Rgba,
-            _ => return None,
-        })
-    }
-}
-
-/// O que chegou de um monitor num buffer do PipeWire; vale só dentro do callback.
-#[derive(Debug)]
-pub struct Quadro<'a> {
-    pub display_id: u32,
-    /// Imagem nova; `None` quando só o cursor mudou.
-    pub imagem: Option<Imagem<'a>>,
-    /// Cursor, quando o compositor mandou dado novo. O vídeo sai sem cursor (modo metadado do
-    /// portal): quem consome envia posição e forma separadas para o controlador desenhar.
-    pub cursor: Option<Cursor<'a>>,
-}
-
-/// Imagem do monitor, emprestada do buffer mapeado.
-#[derive(Debug)]
-pub struct Imagem<'a> {
-    pub largura: u32,
-    pub altura: u32,
-    /// Bytes por linha (pode ser maior que `largura * 4`).
-    pub stride: usize,
-    pub formato: FormatoPixel,
-    /// `altura` linhas de `stride` bytes; a última pode ter só `largura * 4`.
-    pub dados: &'a [u8],
-}
-
-/// Posição do cursor no monitor (pixels do stream) e, quando mudou, a forma.
-#[derive(Debug)]
-pub struct Cursor<'a> {
-    /// `false` = cursor escondido (fora deste monitor ou sem imagem).
-    pub visivel: bool,
-    pub x: i32,
-    pub y: i32,
-    pub forma: Option<FormaCursor<'a>>,
-}
-
-/// Bitmap do cursor; o ponto (`hotspot_x`, `hotspot_y`) do bitmap fica em (`x`, `y`).
-#[derive(Debug)]
-pub struct FormaCursor<'a> {
-    pub largura: u32,
-    pub altura: u32,
-    pub stride: usize,
-    pub hotspot_x: i32,
-    pub hotspot_y: i32,
-    pub formato: FormatoPixel,
-    pub dados: &'a [u8],
-}
-
-impl Imagem<'_> {
-    /// Uma linha da imagem, só com os pixels visíveis.
-    pub fn linha(&self, y: u32) -> &[u8] {
-        let ini = y as usize * self.stride;
-        &self.dados[ini..ini + self.largura as usize * 4]
-    }
+fn formato_de(f: VideoFormat) -> Option<FormatoPixel> {
+    Some(match f {
+        VideoFormat::BGRx => FormatoPixel::Bgrx,
+        VideoFormat::RGBx => FormatoPixel::Rgbx,
+        VideoFormat::BGRA => FormatoPixel::Bgra,
+        VideoFormat::RGBA => FormatoPixel::Rgba,
+        _ => return None,
+    })
 }
 
 /// Como chegar ao PipeWire.
@@ -231,7 +168,7 @@ where
                 let mut info = VideoInfoRaw::default();
                 estado.formato = info.parse(param).ok().and_then(|_| {
                     let tam = info.size();
-                    FormatoPixel::de(info.format()).map(|f| (f, tam.width, tam.height))
+                    formato_de(info.format()).map(|f| (f, tam.width, tam.height))
                 });
                 // Com o formato fechado, pede o cursor como metadado de cada buffer.
                 let meta = meta_cursor();
@@ -272,6 +209,7 @@ where
                         altura,
                         stride,
                         formato,
+                        rotacao: Rotacao::Nenhuma,
                         dados,
                     };
                     imagem_valida(&imagem).then_some(imagem)
@@ -339,7 +277,7 @@ fn ler_cursor(m: &MetaCursor) -> Option<Cursor<'_>> {
     };
     if let Some(bitmap) = m.bitmap() {
         // Bitmap sem dados = cursor invisível.
-        match (bitmap.bitmap_data(), FormatoPixel::de(bitmap.format())) {
+        match (bitmap.bitmap_data(), formato_de(bitmap.format())) {
             (Some(dados), Some(formato)) => {
                 let tam = bitmap.size();
                 let hot = m.hotspot();
@@ -491,6 +429,7 @@ mod tests {
             altura: 4,
             stride: 16,
             formato: FormatoPixel::Bgrx,
+            rotacao: Rotacao::Nenhuma,
             dados: &dados,
         };
         assert!(imagem_valida(&q));

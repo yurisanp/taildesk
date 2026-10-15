@@ -5,60 +5,20 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-
-use taildesk_platform::captura_pipewire::{CapturaPipeWire, Conexao, FormatoPixel};
+use taildesk_platform::captura_pipewire::{CapturaPipeWire, Conexao};
 use taildesk_platform::wayland::{ErroPortal, SessaoPortal};
 
-/// Quadros e último formato por monitor, contados no callback da captura.
-#[derive(Clone, Copy, Debug, Default)]
-struct Contagem {
-    quadros: u32,
-    tamanho: (u32, u32),
-    formato: Option<FormatoPixel>,
-    cursores: u32,
-    forma: Option<(u32, u32)>,
-}
+use crate::medicao::Medidor;
 
 /// Captura `segundos` de cada monitor e imprime quadros por segundo, tamanho e formato.
 fn medir(conexao: Conexao, monitores: &[(u32, u32)], segundos: u64) -> std::io::Result<()> {
-    let contagem = Arc::new(Mutex::new(vec![Contagem::default(); monitores.len()]));
-    let c = Arc::clone(&contagem);
     let ids: Vec<u32> = monitores.iter().map(|m| m.0).collect();
-    let ids_cb = ids.clone();
-    let inicio = Instant::now();
-    let captura = CapturaPipeWire::iniciar(conexao, monitores, move |q| {
-        if let Some(i) = ids_cb.iter().position(|&d| d == q.display_id) {
-            let mut c = c.lock().unwrap();
-            if let Some(img) = &q.imagem {
-                c[i].quadros += 1;
-                c[i].tamanho = (img.largura, img.altura);
-                c[i].formato = Some(img.formato);
-            }
-            if let Some(cur) = &q.cursor {
-                c[i].cursores += 1;
-                if let Some(f) = &cur.forma {
-                    c[i].forma = Some((f.largura, f.altura));
-                }
-            }
-        }
-    })?;
+    let medidor = Medidor::novo(&ids);
+    let cb = medidor.clone();
+    let captura = CapturaPipeWire::iniciar(conexao, monitores, move |q| cb.registrar(q))?;
     std::thread::sleep(Duration::from_secs(segundos));
     drop(captura);
-    let s = inicio.elapsed().as_secs_f64();
-    for (id, c) in ids.iter().zip(contagem.lock().unwrap().iter()) {
-        println!(
-            "monitor {id}: {} quadros ({:.1}/s), {}x{} {:?}; cursor: {} atualizações, forma {:?}",
-            c.quadros,
-            f64::from(c.quadros) / s,
-            c.tamanho.0,
-            c.tamanho.1,
-            c.formato,
-            c.cursores,
-            c.forma
-        );
-    }
+    medidor.imprimir();
     Ok(())
 }
 
