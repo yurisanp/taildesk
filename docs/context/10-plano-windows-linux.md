@@ -13,7 +13,7 @@ Codinome: **`taildesk`** no lugar de `halyard` (crates `taildesk-*`).
 
 | Entra no MVP | Fica para depois |
 |---|---|
-| Host e controlador em Windows 10/11 x64 e Linux x64 | macOS, Android, iOS, Windows ARM64 |
+| Host e controlador em Windows 10/11 x64 e Linux x64 (Ubuntu/Debian, **Fedora**, **Arch**) | macOS, Android, iOS, Windows ARM64 |
 | Ver e controlar (teclado físico + texto, mouse, scroll, cursor separado) | Áudio, chat, gamepad, toque |
 | Troca de arquivos nos dois sentidos + navegador de arquivos remoto | Clipboard de arquivos (fase 4), sync automático |
 | H.264 (SW primeiro, HW em seguida) | AV1/HEVC/VP9 (fase 4), PyroWave (pós-MVP) |
@@ -36,6 +36,34 @@ atuais (Fedora 43, Ubuntu 25.10+) só oferecem sessão Wayland e o KDE caminha p
 - **Host Linux X11** = XShm + XDamage + XFixes + XTest (`x11rb`), como caminho secundário.
 - O **controlador** Linux funciona igual em X11 e Wayland (Slint/winit + wgpu).
 - Sem tela de login em Wayland no MVP (limitação do SO, não do produto).
+
+### 2.6 Distros Linux-alvo: Ubuntu, Fedora e Arch
+Pedido do Yuri (15/10/2026): **Fedora e Arch Linux** são alvos de primeira classe, ao lado do Ubuntu/Debian.
+
+| | Fedora (Workstation / KDE) | Arch Linux |
+|---|---|---|
+| Sessão gráfica | Só Wayland (GNOME e KDE) | Escolha do usuário: GNOME, KDE, e muitos usam compositores wlroots (Sway, Hyprland) |
+| Portal para o host | `xdg-desktop-portal-gnome` / `-kde`: ScreenCast + RemoteDesktop | GNOME/KDE iguais ao Fedora. **wlroots**: `xdg-desktop-portal-wlr` só tem ScreenCast, sem RemoteDesktop; Hyprland tem portal próprio com suporte parcial. Input nesses casos: protocolos `virtual-keyboard`/`wlr-virtual-pointer` ou uinput (fase 4, com aviso na UI) |
+| H.264 em software | `openh264` vem do repositório da Cisco, habilitado por padrão | `openh264` no repositório `extra` |
+| H.264/HEVC por hardware (VA-API) | **O Mesa do Fedora vem sem H.264/HEVC** por patentes: AMD e Intel antigas precisam do `mesa-va-drivers-freeworld` (RPM Fusion). O probe deve detectar isso e a UI deve explicar | Mesa completo; Intel usa `intel-media-driver` |
+| NVIDIA | Driver proprietário via RPM Fusion (NVENC) | `nvidia` / `nvidia-open` (NVENC) |
+| Segurança | SELinux enforcing: uinput e serviço de sistema precisam de política (fase 5) | Sem MAC por padrão |
+| Pacote | `.rpm` + repositório COPR | `PKGBUILD` no AUR (`taildesk-bin` e `taildesk-git`) |
+| Comum | Flatpak (Flathub) cobre os dois e o Ubuntu, mas só com portal (sem uinput) |
+
+Dependências de build que entram nas próximas fases (nomes de pacote):
+
+| Para quê | Fedora | Arch | Ubuntu/Debian |
+|---|---|---|---|
+| Captura Wayland | `pipewire-devel` | `pipewire` | `libpipewire-0.3-dev` |
+| bindgen | `clang-devel` | `clang` | `libclang-dev` |
+| Teclado | `libxkbcommon-devel` | `libxkbcommon` | `libxkbcommon-dev` |
+| X11 | `libxcb-devel` | `libxcb` | `libxcb1-dev` |
+| VA-API | `libva-devel` | `libva` | `libva-dev` |
+| Portal/segredos | `dbus-devel` | `dbus` | `libdbus-1-dev` |
+
+CI: além de `ubuntu-latest` e `windows-latest`, jobs em container `fedora:latest` e `archlinux:latest` rodam clippy e testes.
+Testes manuais de cada fase: Fedora Workstation (GNOME), Fedora KDE, Arch + KDE, Arch + Hyprland, Ubuntu LTS.
 
 ### 2.3 Windows
 - **Captura**: DXGI Desktop Duplication (dirty rects, cursor, e é o que funciona no desktop seguro na fase 5); WGC (`windows-capture`) como fallback em notebooks híbridos onde o DD falha.
@@ -123,7 +151,8 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 | Risco | Mitigação |
 |---|---|
 | quinn sobre o socket do tailscale-rs dá trabalho ou rende pouco | Spike e G0 na fase 0; plano B = modo sistema |
-| Portal Wayland varia entre GNOME e KDE (libei, restore_token) | Testar Fedora (GNOME) e Kubuntu/KDE neon desde a fase 1 |
+| Portal Wayland varia entre GNOME, KDE e wlroots (libei, restore_token, RemoteDesktop ausente no wlroots) | Testar Fedora GNOME/KDE e Arch KDE/Hyprland desde a fase 1 (§2.6) |
+| Fedora sem H.264/HEVC por hardware no Mesa padrão | openh264 da Cisco como padrão; probe detecta e a UI sugere o `mesa-va-drivers-freeworld` |
 | Identidade de usuário ausente no modo embutido | Tags + nós confiáveis + consentimento; `whois` no modo sistema |
 | DXGI DD falha em notebook híbrido | Fallback WGC |
 | openh264 pesado em 1440p/4K | É só ponte; HW na fase 4 |

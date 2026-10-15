@@ -1,6 +1,6 @@
 # TailDesk
 
-Acesso remoto (desktop remoto + troca de arquivos) em **Rust**, para **Windows e Linux**, usando a
+Acesso remoto (desktop remoto + troca de arquivos) em **Rust**, para **Windows e Linux** (Ubuntu, Fedora e Arch), usando a
 **tailnet do Tailscale** (servidor de controle do Tailscale) como rede e identidade. Sem servidor próprio de rendezvous ou relay.
 
 > Estado: esqueleto (fase 0). Nada conecta ainda.

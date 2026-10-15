@@ -4,7 +4,7 @@ Instruções para agentes de código. Antes de mudar arquitetura, leia `docs/con
 (vale por cima de `00`–`09` no MVP) e o documento da área (`06`, `07`, `11`).
 
 ## Produto
-Desktop remoto + troca de arquivos em Rust, **Windows x64 e Linux x64** no MVP, rede e identidade pela tailnet do Tailscale.
+Desktop remoto + troca de arquivos em Rust, **Windows x64 e Linux x64 (Ubuntu/Debian, Fedora, Arch)** no MVP, rede e identidade pela tailnet do Tailscale.
 
 ## Decisões travadas (mudar só com ADR em `docs/context/08-roadmap.md`)
 1. Rede só pela trait `Overlay` (`taildesk-overlay`): embutido = crate `tailscale` **=0.6.1**; sistema = tailscaled + LocalAPI (`taildesk-tsapi`). Nunca escrever rendezvous/relay próprio.
