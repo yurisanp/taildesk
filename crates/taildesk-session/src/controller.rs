@@ -42,6 +42,8 @@ pub enum EndReason {
     ByUser,
     /// Mensagem inesperada ou inválida.
     ProtocolError,
+    /// A conexão caiu (rede, host desligado ou o app do host fechou).
+    Lost,
 }
 
 fn end_reason(reason: i32) -> EndReason {
@@ -123,6 +125,13 @@ impl ControllerSession {
     pub fn end(&mut self) {
         if !matches!(self.state, ControllerState::Ended(_)) {
             self.state = ControllerState::Ended(EndReason::ByUser);
+        }
+    }
+
+    /// A conexão caiu antes de um `Close`.
+    pub fn lost(&mut self) {
+        if !matches!(self.state, ControllerState::Ended(_)) {
+            self.state = ControllerState::Ended(EndReason::Lost);
         }
     }
 }

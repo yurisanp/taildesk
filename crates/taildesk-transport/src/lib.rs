@@ -16,4 +16,4 @@ pub mod probe;
 pub mod tls;
 
 pub use endpoint::{client_endpoint, connect, server_endpoint};
-pub use tls::{Identity, Pin};
+pub use tls::{Identity, Pin, peer_fingerprint};

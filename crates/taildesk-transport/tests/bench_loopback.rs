@@ -61,3 +61,19 @@ async fn wrong_fingerprint_is_refused() {
     let client = client_endpoint(addr).unwrap();
     assert!(connect(&client, addr, Pin::Sha256(wrong)).await.is_err());
 }
+
+#[tokio::test]
+async fn first_contact_reports_the_fingerprint() {
+    let (server, addr, fp) = host().await;
+    tokio::spawn(async move {
+        if let Some(incoming) = server.accept().await
+            && let Ok(conn) = incoming.await
+        {
+            conn.closed().await;
+        }
+    });
+    let client = client_endpoint(addr).unwrap();
+    let conn = connect(&client, addr, Pin::FirstContact).await.unwrap();
+    assert_eq!(taildesk_transport::peer_fingerprint(&conn), Some(fp));
+    conn.close(0u32.into(), b"fim");
+}
