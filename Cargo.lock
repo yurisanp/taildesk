@@ -31,10 +31,16 @@ version = "0.0.1"
 [[package]]
 name = "taildesk-media"
 version = "0.0.1"
+dependencies = [
+ "taildesk-proto",
+]
 
 [[package]]
 name = "taildesk-overlay"
 version = "0.0.1"
+dependencies = [
+ "taildesk-proto",
+]
 
 [[package]]
 name = "taildesk-platform"

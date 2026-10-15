@@ -35,12 +35,50 @@ pub struct PeerIdentity {
     pub app_caps: Vec<String>,
 }
 
-/// Caminho de rede até um peer.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PathKind {
-    Direct { rtt: Option<Duration> },
-    Relayed { derp_region: Option<String> },
-    Unknown,
+pub use taildesk_proto::net::PathKind;
+
+/// Caminho de rede até um peer (`14-selecao-adaptativa.md` §1.1). É pista para a seleção
+/// adaptativa: a classe de rede sai sempre da medição.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PathInfo {
+    /// No modo embutido (tailscale-rs 0.6.1) costuma ser `Unknown`: a crate não expõe o caminho.
+    pub kind: PathKind,
+    /// RTT informado pelo overlay (ping do `tailscaled`), se houver.
+    pub rtt: Option<Duration>,
+    /// Região DERP do peer ("sao", "mia").
+    pub derp_region: Option<String>,
+    /// Ver [`same_lan_hint`].
+    pub same_lan_hint: bool,
+    /// Endereços de underlay do peer (os "Endpoints" do Tailscale).
+    pub peer_endpoints: Vec<SocketAddr>,
+}
+
+/// Pista de "mesmo roteador": algum endpoint IPv4 privado do peer está numa sub-rede de uma
+/// interface local, ou o IP público do peer é o nosso (mesmo NAT).
+///
+/// `local_nets` são os endereços das interfaces locais com o tamanho do prefixo.
+pub fn same_lan_hint(
+    local_nets: &[(IpAddr, u8)],
+    local_public: Option<IpAddr>,
+    peer_endpoints: &[SocketAddr],
+) -> bool {
+    peer_endpoints.iter().any(|ep| {
+        let ip = ep.ip();
+        if local_public.is_some_and(|p| p == ip) {
+            return true;
+        }
+        let IpAddr::V4(peer) = ip else { return false };
+        if !peer.is_private() {
+            return false;
+        }
+        local_nets.iter().any(|&(addr, prefix)| match addr {
+            IpAddr::V4(local) if prefix <= 32 => {
+                let mask = u32::MAX.checked_shl(32 - u32::from(prefix)).unwrap_or(0);
+                u32::from(local) & mask == u32::from(peer) & mask && local != peer
+            }
+            _ => false,
+        })
+    })
 }
 
 /// Socket de datagramas na tailnet, base do endpoint QUIC.
@@ -63,5 +101,42 @@ pub trait Overlay: Send + Sync + 'static {
     fn peers(&self) -> impl Future<Output = io::Result<Vec<PeerInfo>>> + Send;
     fn identify(&self, remote: SocketAddr)
     -> impl Future<Output = io::Result<PeerIdentity>> + Send;
-    fn path(&self, remote: IpAddr) -> impl Future<Output = PathKind> + Send;
+    fn path(&self, remote: IpAddr) -> impl Future<Output = PathInfo> + Send;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    fn ep(s: &str) -> SocketAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn same_subnet_private_endpoint_is_lan() {
+        let local = [(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 10)), 24)];
+        assert!(same_lan_hint(&local, None, &[ep("192.168.0.20:41641")]));
+        assert!(!same_lan_hint(&local, None, &[ep("192.168.1.20:41641")]));
+        // Nosso próprio endereço não conta.
+        assert!(!same_lan_hint(&local, None, &[ep("192.168.0.10:41641")]));
+    }
+
+    #[test]
+    fn same_public_ip_is_lan_and_public_subnets_are_not() {
+        let public: IpAddr = "203.0.113.7".parse().unwrap();
+        assert!(same_lan_hint(&[], Some(public), &[ep("203.0.113.7:3478")]));
+        let local = [(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)), 24)];
+        assert!(!same_lan_hint(&local, None, &[ep("203.0.113.8:3478")]));
+        assert!(!same_lan_hint(&local, None, &[]));
+    }
+
+    #[test]
+    fn odd_prefixes_do_not_panic() {
+        let peer = [ep("10.1.2.3:1")];
+        let any = [(IpAddr::V4(Ipv4Addr::new(10, 9, 9, 9)), 0)];
+        assert!(same_lan_hint(&any, None, &peer));
+        let bad = [(IpAddr::V4(Ipv4Addr::new(10, 1, 2, 4)), 40)];
+        assert!(!same_lan_hint(&bad, None, &peer));
+    }
 }
