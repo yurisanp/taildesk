@@ -1,10 +1,10 @@
 //! Camada de rede da tailnet.
 //!
-//! Todo acesso à rede passa pela trait [`Overlay`], com três backends previstos
-//! (`docs/context/01-tailscale.md` §3 e `10-plano-windows-linux.md` §2.1):
-//! - `EmbeddedOverlay`: crate `tailscale` (tailscale-rs) `=0.6.1`, padrão no Windows x64 e Linux.
-//! - `SystemOverlay`: `tailscaled` do sistema + LocalAPI (`taildesk-tsapi`), dá usuário e app caps.
-//! - `LanOverlay`: sockets do SO, só para desenvolvimento.
+//! Todo acesso à rede passa pela trait [`Overlay`]. O TailDesk usa **só o Tailscale instalado
+//! na máquina** (decisão do Yuri em 15/10/2026; sem tailscale-rs embutido):
+//! - [`SystemOverlay`]: `tailscaled` do sistema + LocalAPI (`taildesk-tsapi`). O IP da tailnet é
+//!   uma interface comum do SO, então os sockets são do SO; a LocalAPI dá peers, `whois` e caminho.
+//! - `LanOverlay`: sockets do SO sem Tailscale, só para desenvolvimento.
 //!
 //! A identidade do peer vem sempre de [`Overlay::identify`], nunca do conteúdo das mensagens.
 
@@ -28,7 +28,7 @@ pub struct PeerInfo {
 pub struct PeerIdentity {
     pub node_stable_id: String,
     pub hostname: String,
-    /// Login do usuário. `None` no modo embutido (tailscale-rs ainda não expõe whois).
+    /// Login do usuário dono do nó. `None` em nós com tag (não têm usuário).
     pub user_login: Option<String>,
     pub tags: Vec<String>,
     /// Conteúdo JSON bruto da app capability do TailDesk, quando disponível.
@@ -37,13 +37,17 @@ pub struct PeerIdentity {
 
 pub use taildesk_proto::net::PathKind;
 
+mod system;
+
+pub use system::{SystemOverlay, SystemSocket, path_from};
+
 /// Caminho de rede até um peer (`14-selecao-adaptativa.md` §1.1). É pista para a seleção
 /// adaptativa: a classe de rede sai sempre da medição.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PathInfo {
-    /// No modo embutido (tailscale-rs 0.6.1) costuma ser `Unknown`: a crate não expõe o caminho.
+    /// Vem do `ping` disco do `tailscaled`: direto (LAN ou internet) ou relay.
     pub kind: PathKind,
-    /// RTT informado pelo overlay (ping do `tailscaled`), se houver.
+    /// RTT do `ping` disco do `tailscaled`, se houver.
     pub rtt: Option<Duration>,
     /// Região DERP do peer ("sao", "mia").
     pub derp_region: Option<String>,

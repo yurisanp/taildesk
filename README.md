@@ -19,7 +19,7 @@ Os documentos `00`–`09` usam o codinome antigo `halyard`; leia como `taildesk`
 | Crate | Papel |
 |---|---|
 | `taildesk-proto` | Protocolo de fio; header binário de mídia (pronto, com testes) |
-| `taildesk-overlay` | Trait `Overlay` (tailscale-rs embutido, tailscaled do sistema, LAN de dev) |
+| `taildesk-overlay` | Trait `Overlay` (Tailscale instalado na máquina via LocalAPI, LAN de dev) |
 | `taildesk-tsapi` | Cliente da LocalAPI do tailscaled |
 | `taildesk-transport` | QUIC (quinn) sobre o overlay |
 | `taildesk-codec` | Encoders/decoders (openh264 → Media Foundation / VA-API) |

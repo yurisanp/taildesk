@@ -3,7 +3,8 @@
 > Pedido do Yuri em 15/10/2026: uma **suíte inteligente que escolha o melhor protocolo conforme a rede**
 > (mesmo roteador e muita banda → qualidade alta; longe → mais compressão) e uma **aba de teste e
 > demonstração da conexão**. Escopo do MVP (`10-plano-windows-linux.md`): Windows x64 e Linux x64,
-> overlay Tailscale, QUIC (`quinn`), openh264 primeiro e encoder de hardware depois.
+> overlay Tailscale **instalado na máquina** (decisão do Yuri em 15/10/2026: sem Tailscale
+> embutido), QUIC (`quinn`), openh264 primeiro e encoder de hardware depois.
 > Este arquivo **não altera** `06`, `07`, `10`, `12` nem `13`; a §10 lista o que precisaria mudar neles.
 
 ## 0. Resumo
@@ -18,13 +19,10 @@
 3. A classe vem de **medição própria**, não só do que o Tailscale diz: RTT do handshake, uma
    **rajada de sondagem** de ~300 ms antes do primeiro quadro, as estatísticas do `quinn` e o
    `ReceiverReport`. Os sinais do Tailscale (caminho direto/DERP, endereços do peer) servem de pista.
-4. **Achado importante**: no `tailscale` **0.6.1** embutido (versão mais nova da crate, que é
-   versionada à parte do cliente Tailscale 1.x) a conexão direta **existe, mas ainda é trabalho
-   em andamento**: o README do `main` diz "direct connections in many cases" e avisa que pode
-   cair para DERP "em mais casos" que o cliente oficial, e a crate **não expõe por qual caminho**
-   os pacotes vão (§1.1). Então o G0 precisa medir com que frequência o embutido fica direto.
-   Se ficar muito no DERP, o perfil LAN depende do **Tailscale do sistema** (`tailscaled`, cliente
-   1.x, com conexão direta madura) ou de um **atalho LAN** que precisaria de ADR (§6).
+4. **Só o Tailscale do sistema** (decisão do Yuri em 15/10/2026): o TailDesk exige o cliente
+   Tailscale instalado (≥ 1.102) e fala com o `tailscaled` pela LocalAPI. Ele faz conexão direta
+   madura e diz por onde os pacotes vão (`ping` com `Endpoint` ou região DERP, `CurAddr` no
+   `status`), então o perfil LAN funciona sem atalho próprio (§1.1, §6).
 5. A **aba "Teste de conexão"** é a interface gráfica do mesmo motor do `taildesk-cli bench-net`:
    mostra caminho, RTT, jitter, perda, banda nos dois sentidos, codecs das duas máquinas, a
    classe escolhida **e o porquê**, e tem uma **demonstração** com um padrão de teste animado
@@ -39,32 +37,26 @@
 
 ### 1.1 Do overlay Tailscale
 
-| Sinal | Embutido (`tailscale` =0.6.1) | Sistema (`tailscaled` + LocalAPI) |
-|---|---|---|
-| Caminho direto ou DERP | **Não exposto**. `NodeInfo` traz `derp_region` e `underlay_addresses` do peer, mas não diz por onde os pacotes passam agora | `GET /localapi/v0/status`: `CurAddr` (vazio = relay) e `Relay` por peer |
-| Latência ao peer pelo Tailscale | Não há API; medir no QUIC | `POST /localapi/v0/ping?ip=…&type=disco`: latência, endpoint usado, região DERP e `IsLocalIP` |
-| Endereços do peer (underlay) | `NodeInfo::underlay_addresses` (os "Endpoints" do Go) | `status` → `Addrs` |
-| Mudança de rede local | `ts_netmon` interno, sem evento público | `watch-ipn-bus` |
-| Região DERP e latências | `ts_netcheck` (interno) | `status` / `netcheck` |
+| Sinal | Tailscale do sistema (`tailscaled` + LocalAPI) |
+|---|---|
+| Caminho direto ou DERP | `POST /localapi/v0/ping?ip=…&type=disco`: `Endpoint` (direto) ou `DERPRegionCode`/`PeerRelay`; `GET /localapi/v0/status`: `CurAddr` (vazio = relay) e `Relay` por peer |
+| Latência ao peer pelo Tailscale | `ping` → `LatencySeconds` |
+| Endereços do peer (underlay) | `status` → `Addrs` |
+| Identidade do peer | `GET /localapi/v0/whois?addr=ip:porta` |
+| Mudança de rede local | `watch-ipn-bus` |
+| Região DERP e latências | `status` / `netcheck` |
 
-Conferido em 15/10/2026. A crate `tailscale` mais nova no crates.io é a **0.6.1** (18/09/2026);
-ela é versionada à parte do cliente Tailscale (o cliente do sistema está na série 1.10x: o Yuri
-citou 1.102 e a página de pacotes estáveis mostrava 1.104.1). As fontes da crate se contradizem:
-- o README publicado na 0.6.1 listava "Direct connections (NAT traversal, STUN, and Disco)" em
-  **Coming Soon**, e a documentação de `lib.rs` (igual no `main`) ainda diz "We currently rely on
-  DERP relays for all communication";
-- o CHANGELOG da 0.6.0 fala em paridade de conexão direta entre Linux, Windows e macOS, e o
-  README do `main` (sem release nova) já move para **Implemented** "Communicate with peers via
-  direct connections in many cases", mantendo o aviso de que pode cair para DERP "em mais casos".
+A LocalAPI é HTTP sobre o socket do `tailscaled`: `/var/run/tailscale/tailscaled.sock` no Linux
+(o usuário precisa ser operador: `tailscale set --operator=$USER`) e o *named pipe*
+`\\.\pipe\ProtectedPrefix\Administrators\Tailscale\tailscaled` no Windows. Implementado em
+`taildesk-tsapi` (cliente) e `taildesk-overlay::SystemOverlay` (caminho, peers, `whois`).
 
-Conclusão: o embutido **faz conexão direta em parte dos casos**, mas sem API para saber qual
-caminho está em uso. Tratar o caminho do modo embutido como **desconhecido até medir**, e o G0
-deve registrar com que frequência ele fica direto. O modo sistema usa o `tailscaled` 1.x, que
-tem conexão direta madura e informa o caminho pela LocalAPI.
+Histórico: o desenho original previa também um modo embutido (crate `tailscale` 0.6.1), que não
+expunha o caminho em uso. O Yuri decidiu em 15/10/2026 usar **só o Tailscale instalado**, o que
+tira essa incerteza.
 
-**Pista de "mesmo roteador"** (os dois modos): se algum `underlay_address` do peer é IPv4 privado
-na mesma sub-rede de uma interface local, ou o IP público do peer é igual ao nosso, a chance de
-LAN é alta. É só pista: decide o perfil inicial, nunca substitui a medição.
+**Pista de "mesmo roteador"**: se o `Endpoint` do `ping` é um IP privado (ou algum endereço do
+peer em `Addrs` é IPv4 privado na mesma sub-rede de uma interface local), a chance de LAN é alta. É só pista: decide o perfil inicial, nunca substitui a medição.
 
 ### 1.2 Do QUIC (`quinn::Connection::stats()` e `rtt()`)
 - `path.rtt` (suavizado), `path.cwnd`, `path.congestion_events`, `path.lost_packets`,
@@ -122,7 +114,7 @@ Os números são o ponto de partida; o simulador da §8 e as medições do G0 v�
   o quadro leva; perfil que estoura o orçamento de encode não é escolhido.
 
 ### 3.2 Início da sessão (sem atrasar o primeiro quadro)
-1. **Pista**: modo sistema diz direto/DERP; os dois modos olham "mesmo roteador" (§1.1).
+1. **Pista**: o `tailscaled` diz direto na LAN, direto pela internet ou DERP (§1.1).
 2. **RTT**: 5 pings no handshake (já previstos para o relógio).
 3. O vídeo **começa na classe Média** (ou Rápida se a pista for LAN), sem esperar.
 4. **Sondagem em paralelo**: degraus de 100 ms em 5 → 20 → 50 → 100 → 200 Mbit/s
@@ -141,8 +133,8 @@ Os números são o ponto de partida; o simulador da §8 e as medições do G0 v�
     (enchimento de FEC até a taxa da classe de cima) passou. Sobe uma classe por vez.
   - **Histerese**: depois de descer, só tenta subir após 15 s; no máximo uma troca de codec ou
     resolução a cada 10 s (cada uma custa um keyframe).
-- **Eventos que forçam reavaliação na hora**: mudança de caminho (modo sistema: `CurAddr`
-  mudou; embutido: degrau no `min_rtt` > 2× ou endereço do peer mudou), troca de rede local
+- **Eventos que forçam reavaliação na hora**: mudança de caminho (`CurAddr` ou o
+  `Endpoint` do `ping` mudou), troca de rede local
   (Wi-Fi ↔ cabo), migração de conexão QUIC.
 - Toda decisão gera uma **razão legível** ("perda de 4% por 1 s → Lenta"), que vai para o
   log, para o HUD e para a aba de teste.
@@ -166,7 +158,7 @@ message LinkInfo {
   PathKind path = 1;            // DIRECT_LAN | DIRECT_WAN | RELAYED | UNKNOWN
   string derp_region = 2;       // "sao", "mia"… vazio se direto/desconhecido
   bool same_lan_hint = 3;
-  OverlayMode overlay = 4;      // EMBEDDED | SYSTEM
+  OverlayMode overlay = 4;      // SYSTEM | LAN (dev); o valor 1 (antigo EMBEDDED) fica reservado
 }
 
 // C→H ou H→C: pede uma rajada de sondagem; o lado que recebe os datagramas responde
@@ -204,21 +196,14 @@ message BenchReport  { /* rtt min/med/p95, jitter, perda, kbps por sentido, mtu,
   monitor is updated".
 - `ProfileChanged` leva `display_id`, porque cada stream pode estar num perfil diferente.
 
-## 6. O caminho LAN (decisão para o Yuri)
+## 6. O caminho LAN (decidido)
 
 O pedido "mesmo roteador → protocolo melhor" depende de os pacotes **realmente** irem direto.
-Opções:
-
-| Opção | Como | Prós | Contras |
-|---|---|---|---|
-| **A. Confiar no tailscale-rs** | Usar o embutido como está; quando ele ficar no DERP, a classe máxima é Média | Zero código novo; respeita a decisão 1 do `AGENTS.md` | LAN só quando o embutido conseguir caminho direto, o que ainda é incompleto e invisível para o app |
-| **B. Tailscale do sistema** | Quem tem `tailscaled` instalado usa o modo sistema (já planejado logo após o embutido); ele faz conexão direta madura | Já está no plano; dá `ping`/`CurAddr` | Exige instalar o Tailscale; o embutido continua limitado |
-| **C. Atalho LAN** | Com a sessão já autenticada pela tailnet, os dois lados trocam endereços LAN e um token de uso único pelo stream de controle e abrem um **segundo caminho QUIC na LAN** (mesmo certificado *pinned*), migrando a mídia para ele; se cair, volta para a tailnet | LAN de verdade mesmo no modo embutido; abre caminho para PyroWave | Sai da trait `Overlay` (decisão 1): **precisa de ADR**; o tráfego LAN fica protegido só pelo TLS do QUIC, não pelo WireGuard; mais superfície de ataque na rede local |
-
-**Recomendação** (aprovada pelo Yuri em 15/10/2026): **B agora**, medir o embutido no G0, e
-escrever o ADR da **C** só se o G0 mostrar que o embutido fica muito no DERP. A identidade continuaria vindo de `Overlay::identify()` na
-conexão da tailnet (decisão 3); o atalho só carregaria mídia e arquivos de uma sessão já autorizada.
-O `01-tailscale.md` já previa um `DirectLanOverlay` "só para testes"; a C seria a versão de produção dele.
+Decisões do Yuri em 15/10/2026: primeiro "Tailscale do sistema agora" e, no mesmo dia, **só o
+Tailscale instalado na máquina, sem modo embutido**. O `tailscaled` faz conexão direta madura
+(na mesma rede local os pacotes vão pelo IP da LAN, dentro do WireGuard) e informa o caminho,
+então não há atalho LAN próprio nem ADR para isso. Se o `tailscaled` ficar no DERP, a classe
+máxima é Média e a aba de teste explica o motivo.
 
 ## 7. Aba "Teste de conexão"
 
@@ -237,7 +222,7 @@ O `01-tailscale.md` já previa um `DirectLanOverlay` "só para testes"; a C seri
 
 ```
 ┌ Teste de conexão · desktop-casa ──────────────────────────────── [Testar de novo] ┐
-│ Caminho      ● Direto · mesma rede local       Tailscale: embutido                 │
+│ Caminho      ● Direto · mesma rede local       Tailscale 1.104.1                   │
 │ Latência     2 ms  (mín 1 · p95 4)   Variação 0,4 ms   Perda 0,0 %                 │
 │ Banda        ↑ 420 Mbit/s   ↓ 390 Mbit/s       Datagrama máx. 1 182 B              │
 │ Máquinas     Esta: H.264 HW (Intel) · desktop-casa: H.264 HW (NVIDIA)              │
@@ -252,8 +237,9 @@ O `01-tailscale.md` já previa um `DirectLanOverlay` "só para testes"; a C seri
 ```
 
 1. **Caminho**: "Direto · mesma rede local", "Direto pela internet", "Via relay (São Paulo)" ou
-   "Desconhecido"; modo do Tailscale (embutido/sistema). No embutido sem certeza, diz
-   "provavelmente via relay" e explica que o modo do sistema pode melhorar.
+   "Desconhecido", e a versão do Tailscale instalado. Se o Tailscale não estiver instalado ou
+   conectado, a aba diz isso e como resolver ("Instale e conecte o Tailscale" / "Install and
+   connect Tailscale").
 2. **Medições**: latência mín/mediana/p95, variação (jitter), perda, banda nos dois sentidos,
    datagrama máximo, tempo de conexão. Cada número com uma faixa de cor (bom/ok/ruim).
 3. **Máquinas**: codecs de encode/decode das duas pontas, HW ou SW, e ms por quadro 1080p.
@@ -273,8 +259,10 @@ O `01-tailscale.md` já previa um `DirectLanOverlay` "só para testes"; a C seri
 7. **Copiar relatório**: texto + JSON (sem chaves, sem auth keys, sem IPs públicos completos)
    para colar em issue.
 
-Mesmo motor no terminal: `taildesk-cli bench-net <peer> [--json] [--impair 4g]` (já previsto
-na fase 0 do plano), o que deixa a aba fina: ela só desenha o resultado.
+Mesmo motor no terminal, já implementado na fase 0: o host roda `taildesk-cli bench-net --ouvir`
+(escuta no IP da tailnet, porta 7420) e o controlador `taildesk-cli bench-net <nome-na-tailnet>
+--pin <sha256> [--json]`, que mostra o caminho real vindo do `tailscaled`. `--impair 4g` vem na
+fase 4. A aba fica fina: ela só desenha o resultado.
 
 ### 7.3 HUD da sessão
 O HUD de `12` §5.6 ganha a classe atual ("12 ms · direto · LAN") e, ao clicar, expande o gráfico
@@ -306,11 +294,11 @@ Minimal"; "Economizar dados" / "Save data".
 
 | Fase do plano | Entrega |
 |---|---|
-| **0 — Fundações** | Motor do `bench-net` (RTT, banda, perda, caminho) e gravação de traces. **G0 registra o caminho real do embutido** (direto ou DERP) |
+| **0 — Fundações** | Motor do `bench-net` (RTT, banda, perda, caminho pelo `tailscaled`) e gravação de traces |
 | **1 — Ver** | Mensagens do §4 no protocolo; sondagem inicial; duas classes efetivas (rápida/lenta) só com bitrate e FPS do openh264; `ReceiverReport` com `owd_trend_us` |
 | **2 — Controlar** | Aba "Teste de conexão" com medições, caminho, máquinas e "por quê"; HUD com a classe; preferência Automática/Nitidez/Fluidez/Economizar dados |
 | **3 — Arquivos** | Fatia de banda dos arquivos por classe; conexão tarifada |
-| **4 — Qualidade** | As cinco classes com encoder HW e escada de resolução; orçamento multimonitor por classe; demonstração com padrão de teste; simulador `impair`; sinais do modo sistema; ADR do atalho LAN se o G0 pedir |
+| **4 — Qualidade** | As cinco classes com encoder HW e escada de resolução; orçamento multimonitor por classe; demonstração com padrão de teste; simulador `impair`; `watch-ipn-bus` para mudança de caminho |
 | **Pós-MVP** | Perfil LAN com HEVC/AV1 4:4:4 e PyroWave |
 
 ## 10. O que precisaria mudar nos outros documentos
@@ -318,9 +306,8 @@ Minimal"; "Economizar dados" / "Save data".
 Não editei estes arquivos; ficam para as threads donas.
 
 **`10-plano-windows-linux.md`** (thread "Arquitetura inicial do TailDesk")
-- §2.1 e §7: novo risco — no `tailscale` 0.6.1 a conexão direta ainda é trabalho em andamento
-  e a crate não diz qual caminho está em uso; o G0 deve medir e registrar com que frequência o
-  embutido fica direto, e a meta "30 Mbit/s estáveis direto" pode depender do modo sistema.
+- §2.1, §4 e G0: só o Tailscale instalado (sem crate `tailscale` embutida); o G0 vira "QUIC
+  sobre o IP da tailnet do `tailscaled`", que o `bench-net` já cobre.
 - §4: `taildesk-media::adapt`, feature `impair` em `taildesk-transport`, tipo de link e conexão
   tarifada em `taildesk-platform`; `PathInfo` no lugar de `PathKind` em `taildesk-overlay`.
 - §5: incluir as entregas da §9 deste arquivo em cada fase.
@@ -333,7 +320,10 @@ Não editei estes arquivos; ficam para as threads donas.
 
 **`06-arquitetura.md`** §3: `Overlay::path()` devolvendo `PathInfo`; módulo `adapt` puro em `media`.
 
-**`08-roadmap.md`**: reservar o ADR do atalho LAN (§6, opção C) caso o Yuri aprove.
+**`AGENTS.md` decisão 1, `01`, `04`, `05`, `06`**: trocar "embutido = crate `tailscale` =0.6.1"
+por "só o Tailscale instalado (≥ 1.102) + LocalAPI"; `user_login` sempre vem do `whois`.
+
+**`08-roadmap.md`**: ADR "só Tailscale do sistema" (decisão do Yuri em 15/10/2026).
 
 **`design/12-levantamento-ux.md`** (thread "Levantamento de design da interface")
 - §5.2: botão "Testar conexão" no detalhe do dispositivo.
@@ -345,12 +335,7 @@ Não editei estes arquivos; ficam para as threads donas.
 **`13-multimonitor.md`** §5: monitores ativos e perfil dos visíveis por classe (§5 daqui).
 
 ## 11. Fontes
-- `tailscale` 0.6.1 (crates.io, código publicado): README "Coming Soon: Direct connections",
-  `src/lib.rs` "We currently rely on DERP relays for all communication", `CHANGELOG.md` 0.6.0;
-  README do `main` (15/10/2026): "direct connections in many cases" em Implemented
-  <https://github.com/tailscale/tailscale-rs/blob/main/README.md>; pacotes estáveis do cliente:
-  <https://pkgs.tailscale.com/stable/>;
-  `ts_control` 0.6.1 `Node { underlay_addresses, derp_region }`. <https://crates.io/crates/tailscale/0.6.1>
-- LocalAPI do Tailscale (`status`, `ping`, `watch-ipn-bus`): <https://github.com/tailscale/tailscale/tree/main/ipn/localapi>
+- Pacotes estáveis do cliente Tailscale: <https://pkgs.tailscale.com/stable/>
+- LocalAPI do Tailscale (`status`, `ping`, `whois`, `watch-ipn-bus`): <https://github.com/tailscale/tailscale/tree/main/ipn/localapi>; tipos `ipnstate.PeerStatus` e `PingResult`: <https://github.com/tailscale/tailscale/blob/main/ipn/ipnstate/ipnstate.go>
 - `quinn` `ConnectionStats`/`PathStats`: <https://docs.rs/quinn/0.11.12/quinn/struct.ConnectionStats.html>
 - `03-codecs.md` §2, §6, §7 e `07-protocolo.md` §5 (laço de bitrate e ordem de degradação).

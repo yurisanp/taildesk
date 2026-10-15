@@ -4610,6 +4610,7 @@ name = "taildesk-cli"
 version = "0.0.1"
 dependencies = [
  "taildesk-media",
+ "taildesk-overlay",
  "taildesk-proto",
  "taildesk-transport",
  "tokio",
@@ -4639,6 +4640,8 @@ name = "taildesk-overlay"
 version = "0.0.1"
 dependencies = [
  "taildesk-proto",
+ "taildesk-tsapi",
+ "tokio",
 ]
 
 [[package]]
@@ -4682,6 +4685,11 @@ dependencies = [
 [[package]]
 name = "taildesk-tsapi"
 version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "taildesk-ui"
@@ -4883,6 +4891,7 @@ version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
+ "bytes",
  "libc",
  "mio",
  "pin-project-lite",
