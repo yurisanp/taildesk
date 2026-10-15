@@ -18,11 +18,13 @@
 3. A classe vem de **medição própria**, não só do que o Tailscale diz: RTT do handshake, uma
    **rajada de sondagem** de ~300 ms antes do primeiro quadro, as estatísticas do `quinn` e o
    `ReceiverReport`. Os sinais do Tailscale (caminho direto/DERP, endereços do peer) servem de pista.
-4. **Achado importante**: no `tailscale` **0.6.1** embutido a conexão direta ainda está marcada
-   como "coming soon" no README e a documentação da crate diz que o tráfego depende do DERP
-   (§1.1). Se isso se confirmar no gate G0, **o perfil LAN só é alcançável com o Tailscale do
-   sistema (`tailscaled`)** ou com um **atalho LAN** que precisaria de ADR (§6). Isso também
-   afeta a meta de 30 Mbit/s "direto" do G0.
+4. **Achado importante**: no `tailscale` **0.6.1** embutido (versão mais nova da crate, que é
+   versionada à parte do cliente Tailscale 1.x) a conexão direta **existe, mas ainda é trabalho
+   em andamento**: o README do `main` diz "direct connections in many cases" e avisa que pode
+   cair para DERP "em mais casos" que o cliente oficial, e a crate **não expõe por qual caminho**
+   os pacotes vão (§1.1). Então o G0 precisa medir com que frequência o embutido fica direto.
+   Se ficar muito no DERP, o perfil LAN depende do **Tailscale do sistema** (`tailscaled`, cliente
+   1.x, com conexão direta madura) ou de um **atalho LAN** que precisaria de ADR (§6).
 5. A **aba "Teste de conexão"** é a interface gráfica do mesmo motor do `taildesk-cli bench-net`:
    mostra caminho, RTT, jitter, perda, banda nos dois sentidos, codecs das duas máquinas, a
    classe escolhida **e o porquê**, e tem uma **demonstração** com um padrão de teste animado
@@ -45,13 +47,20 @@
 | Mudança de rede local | `ts_netmon` interno, sem evento público | `watch-ipn-bus` |
 | Região DERP e latências | `ts_netcheck` (interno) | `status` / `netcheck` |
 
-Conferido no código publicado da crate 0.6.1 (15/10/2026): o README lista "Direct connections
-(NAT traversal, STUN, and Disco)" em **Coming Soon** e avisa que a comunicação "pode cair para
-DERP em mais casos"; a documentação de `lib.rs` diz "We currently rely on DERP relays for all
-communication". O CHANGELOG da 0.6.0 fala em paridade de conexão direta entre Linux, Windows e
-macOS no `ts_netmon`, então há código de caminho direto, mas **incompleto**. Conclusão: tratar o
-caminho do modo embutido como **desconhecido até medir**, e o G0 deve registrar qual caminho
-realmente foi usado.
+Conferido em 15/10/2026. A crate `tailscale` mais nova no crates.io é a **0.6.1** (18/09/2026);
+ela é versionada à parte do cliente Tailscale (o cliente do sistema está na série 1.10x: o Yuri
+citou 1.102 e a página de pacotes estáveis mostrava 1.104.1). As fontes da crate se contradizem:
+- o README publicado na 0.6.1 listava "Direct connections (NAT traversal, STUN, and Disco)" em
+  **Coming Soon**, e a documentação de `lib.rs` (igual no `main`) ainda diz "We currently rely on
+  DERP relays for all communication";
+- o CHANGELOG da 0.6.0 fala em paridade de conexão direta entre Linux, Windows e macOS, e o
+  README do `main` (sem release nova) já move para **Implemented** "Communicate with peers via
+  direct connections in many cases", mantendo o aviso de que pode cair para DERP "em mais casos".
+
+Conclusão: o embutido **faz conexão direta em parte dos casos**, mas sem API para saber qual
+caminho está em uso. Tratar o caminho do modo embutido como **desconhecido até medir**, e o G0
+deve registrar com que frequência ele fica direto. O modo sistema usa o `tailscaled` 1.x, que
+tem conexão direta madura e informa o caminho pela LocalAPI.
 
 **Pista de "mesmo roteador"** (os dois modos): se algum `underlay_address` do peer é IPv4 privado
 na mesma sub-rede de uma interface local, ou o IP público do peer é igual ao nosso, a chance de
@@ -202,12 +211,12 @@ Opções:
 
 | Opção | Como | Prós | Contras |
 |---|---|---|---|
-| **A. Esperar o tailscale-rs** | Usar o embutido como está; se ficar no DERP, a classe máxima é Média | Zero código novo; respeita a decisão 1 do `AGENTS.md` | LAN nunca é LAN enquanto o upstream não fechar o caminho direto |
+| **A. Confiar no tailscale-rs** | Usar o embutido como está; quando ele ficar no DERP, a classe máxima é Média | Zero código novo; respeita a decisão 1 do `AGENTS.md` | LAN só quando o embutido conseguir caminho direto, o que ainda é incompleto e invisível para o app |
 | **B. Tailscale do sistema** | Quem tem `tailscaled` instalado usa o modo sistema (já planejado logo após o embutido); ele faz conexão direta madura | Já está no plano; dá `ping`/`CurAddr` | Exige instalar o Tailscale; o embutido continua limitado |
 | **C. Atalho LAN** | Com a sessão já autenticada pela tailnet, os dois lados trocam endereços LAN e um token de uso único pelo stream de controle e abrem um **segundo caminho QUIC na LAN** (mesmo certificado *pinned*), migrando a mídia para ele; se cair, volta para a tailnet | LAN de verdade mesmo no modo embutido; abre caminho para PyroWave | Sai da trait `Overlay` (decisão 1): **precisa de ADR**; o tráfego LAN fica protegido só pelo TLS do QUIC, não pelo WireGuard; mais superfície de ataque na rede local |
 
-**Recomendação**: **B agora**, medir o embutido no G0, e escrever o ADR da **C** só se o G0
-mostrar que o embutido fica no DERP. A identidade continuaria vindo de `Overlay::identify()` na
+**Recomendação** (aprovada pelo Yuri em 15/10/2026): **B agora**, medir o embutido no G0, e
+escrever o ADR da **C** só se o G0 mostrar que o embutido fica muito no DERP. A identidade continuaria vindo de `Overlay::identify()` na
 conexão da tailnet (decisão 3); o atalho só carregaria mídia e arquivos de uma sessão já autorizada.
 O `01-tailscale.md` já previa um `DirectLanOverlay` "só para testes"; a C seria a versão de produção dele.
 
@@ -309,9 +318,9 @@ Minimal"; "Economizar dados" / "Save data".
 Não editei estes arquivos; ficam para as threads donas.
 
 **`10-plano-windows-linux.md`** (thread "Arquitetura inicial do TailDesk")
-- §2.1 e §7: novo risco — o `tailscale` 0.6.1 ainda lista conexão direta como "coming soon";
-  o G0 deve medir e registrar o caminho real, e a meta "30 Mbit/s estáveis direto" pode só
-  ser atingível no modo sistema.
+- §2.1 e §7: novo risco — no `tailscale` 0.6.1 a conexão direta ainda é trabalho em andamento
+  e a crate não diz qual caminho está em uso; o G0 deve medir e registrar com que frequência o
+  embutido fica direto, e a meta "30 Mbit/s estáveis direto" pode depender do modo sistema.
 - §4: `taildesk-media::adapt`, feature `impair` em `taildesk-transport`, tipo de link e conexão
   tarifada em `taildesk-platform`; `PathInfo` no lugar de `PathKind` em `taildesk-overlay`.
 - §5: incluir as entregas da §9 deste arquivo em cada fase.
@@ -338,6 +347,9 @@ Não editei estes arquivos; ficam para as threads donas.
 ## 11. Fontes
 - `tailscale` 0.6.1 (crates.io, código publicado): README "Coming Soon: Direct connections",
   `src/lib.rs` "We currently rely on DERP relays for all communication", `CHANGELOG.md` 0.6.0;
+  README do `main` (15/10/2026): "direct connections in many cases" em Implemented
+  <https://github.com/tailscale/tailscale-rs/blob/main/README.md>; pacotes estáveis do cliente:
+  <https://pkgs.tailscale.com/stable/>;
   `ts_control` 0.6.1 `Node { underlay_addresses, derp_region }`. <https://crates.io/crates/tailscale/0.6.1>
 - LocalAPI do Tailscale (`status`, `ping`, `watch-ipn-bus`): <https://github.com/tailscale/tailscale/tree/main/ipn/localapi>
 - `quinn` `ConnectionStats`/`PathStats`: <https://docs.rs/quinn/0.11.12/quinn/struct.ConnectionStats.html>
