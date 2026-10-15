@@ -7,7 +7,7 @@ Instruções para agentes de código. Antes de mudar arquitetura, leia `docs/con
 Desktop remoto + troca de arquivos em Rust, **Windows x64 e Linux x64 (Ubuntu/Debian, Fedora, Arch)** no MVP, rede e identidade pela tailnet do Tailscale.
 
 ## Decisões travadas (mudar só com ADR em `docs/context/08-roadmap.md`)
-1. Rede só pela trait `Overlay` (`taildesk-overlay`): embutido = crate `tailscale` **=0.6.1**; sistema = `tailscaled` ≥ 1.102 + LocalAPI (`taildesk-tsapi`). A crate e o cliente têm numeração separada; a crate segue em 0.6.1 (mais nova no crates.io em 15/10/2026). Nunca escrever rendezvous/relay próprio.
+1. Rede só pela trait `Overlay` (`taildesk-overlay`): embutido = crate `tailscale` **=0.6.1**; sistema = `tailscaled` ≥ 1.102 (estável 1.104.1) + LocalAPI (`taildesk-tsapi`), que garante a classe LAN enquanto o G0 mede o embutido. A crate e o cliente têm numeração separada; a crate segue em 0.6.1 (mais nova no crates.io em 15/10/2026). Nunca escrever rendezvous/relay próprio.
 2. Transporte QUIC (`quinn`): stream bidi 0 = controle; streams uni = arquivos; datagramas = mídia com header de 16 bytes (`taildesk-proto::media`).
    Vídeo é **por monitor** desde a fase 1: um stream, encoder e `stream_id` por `display_id`; mouse com `display_id` (`13-multimonitor.md`).
    Áudio (fase 4): `kind=1`, `stream_id` ≥ 0xF0; sem `Permissions.audio` + `StartAudio` aceito o host não captura nem envia nada (`15-audio.md`).

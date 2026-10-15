@@ -37,7 +37,8 @@ O app escuta/conecta em sockets normais do SO no IP da interface `tailscale0`/ut
   - Endpoints úteis: `GET /localapi/v0/status` (peers, self, online, endpoints), `GET /localapi/v0/whois?addr=100.x.y.z:port` (**UserProfile + Node + CapMap** do peer que conectou).
   - Header obrigatório: `Host: local-tailscaled.sock` (o servidor rejeita outros hosts) e, em alguns builds, Basic auth com token.
   - **Não há crate Rust oficial** — escrever um cliente fino (`hyper` + `hyperlocal`/named pipe). É exatamente isso que `tailscale whois` faz.
-- **Versão alvo**: `tailscaled` / cliente Tailscale **1.102** (atual em 15/10/2026). Testes de contrato da LocalAPI contra ela; registrar a versão mínima suportada ao fechar a fase 4.
+- **Versão**: `tailscaled` / cliente Tailscale **mínimo 1.102**; estável em 15/10/2026 = 1.104.1. Testes de contrato da LocalAPI contra a mínima e a estável.
+- **Classe LAN**: por decisão do Yuri, o modo sistema é o que garante caminho direto/LAN agora; o embutido entra quando o G0 mostrar com que frequência ele fica direto.
 - **Ponto de atenção**: a LocalAPI é interna/não-versionada formalmente. Isolar atrás de uma trait e ter testes de contrato.
 
 ### 2.2 Modo **embutido** — `tailscale` crate (tailscale-rs, oficial)
