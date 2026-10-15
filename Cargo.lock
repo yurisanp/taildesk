@@ -4933,6 +4933,7 @@ dependencies = [
 name = "taildesk-session"
 version = "0.1.0"
 dependencies = [
+ "taildesk-keyboard",
  "taildesk-overlay",
  "taildesk-proto",
 ]
