@@ -4,6 +4,7 @@
 //! - [`policy`]: quem pode pedir acesso e o que oferecer (configuração "Este computador").
 //! - [`host`]: `Hello` -> diálogo de consentimento -> ao vivo; filtro de permissões por mensagem.
 //! - [`controller`]: "Conectando" -> "Esperando aceitar" -> ao vivo, ou o motivo do fim.
+//! - [`monitores`]: monitores um por vez (abas, atalhos, mouse por monitor).
 //! - [`cursor`]: cursor separado (posição e forma à parte do vídeo).
 //!
 //! Lógica pura, sem rede nem UI: quem usa liga as mensagens do stream de controle e o relógio.
@@ -11,6 +12,7 @@
 pub mod controller;
 pub mod cursor;
 pub mod host;
+pub mod monitores;
 pub mod policy;
 
 pub use controller::{ControllerSession, ControllerState, EndReason};
@@ -19,4 +21,5 @@ pub use host::{
     AckFields, CONSENT_TIMEOUT, ConsentAnswer, ConsentPrompt, HelloReply, HostSession, HostState,
     Need, need,
 };
+pub use monitores::{Aba, Atalho, UmPorVez, atalho};
 pub use policy::{Decision, HostSettings, TrustedDevice};
