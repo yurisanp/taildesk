@@ -10,7 +10,7 @@
 │ Renderer(wgpu) ◄─ Decoder(HW/SW) ◄─ JitterBuffer ◄─┐        │      │ Capturer ─► Converter(GPU) ─► Encoder(HW/SW) ─► Packetizer│
 │                                                    │        │      │ CursorSource ─────────────────────────────────────┐      │
 │                       Transport (QUIC: streams + datagrams) ◄═══════► Transport                                         ▼      │
-│                       Overlay (tailscale-rs | tailscaled)   │ tailnet│ Overlay           InputInjector ◄── control stream      │
+│                       Overlay (tailscaled + LocalAPI)      │ tailnet│ Overlay           InputInjector ◄── control stream      │
 └─────────────────────────────────────────────────────────────┘ (WG) └──────────────────────────────────────────────────────────┘
 ```
 
@@ -21,7 +21,7 @@ halyard/
 ├─ Cargo.toml                 # [workspace], edition 2024, resolver 3, profiles (release: lto="fat", codegen-units=1, panic="abort" p/ bins)
 ├─ crates/
 │  ├─ halyard-proto/          # .proto (prost) + cabeçalhos binários de mídia; sem dependências de SO
-│  ├─ halyard-overlay/        # trait Overlay + EmbeddedOverlay(tailscale) + SystemOverlay(LocalAPI) + LanOverlay(dev)
+│  ├─ halyard-overlay/        # trait Overlay + SystemOverlay(tailscaled/LocalAPI) + LanOverlay(dev)
 │  ├─ halyard-tsapi/          # cliente LocalAPI (status, whois) — unix socket / named pipe / macOS
 │  ├─ halyard-transport/      # quinn sobre Overlay (AsyncUdpSocket adapter), pinning de certificados, canais tipados
 │  ├─ halyard-codec/          # traits VideoEncoder/VideoDecoder, CodecRegistry, probe, negociação, rate control
@@ -60,7 +60,7 @@ pub trait Overlay: Send + Sync + 'static {
 pub struct PeerIdentity {
     pub node_stable_id: String,
     pub hostname: String,
-    pub user_login: Option<String>,            // None no modo embutido (ver Q1)
+    pub user_login: Option<String>,            // do whois da LocalAPI; None só em nó com tag
     pub tags: Vec<String>,
     pub app_caps: Vec<serde_json::Value>,      // conteúdo de "aglets.com.br/cap/halyard"
 }

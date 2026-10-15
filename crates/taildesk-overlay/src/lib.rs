@@ -1,10 +1,11 @@
 //! Camada de rede da tailnet.
 //!
-//! Todo acesso à rede passa pela trait [`Overlay`], com três backends previstos
-//! (`docs/context/01-tailscale.md` §3 e `10-plano-windows-linux.md` §2.1):
-//! - `EmbeddedOverlay`: crate `tailscale` (tailscale-rs) `=0.6.1`, padrão no Windows x64 e Linux.
-//! - `SystemOverlay`: `tailscaled` do sistema + LocalAPI (`taildesk-tsapi`), dá usuário e app caps.
-//! - `LanOverlay`: sockets do SO, só para desenvolvimento.
+//! Todo acesso à rede passa pela trait [`Overlay`] (`docs/context/01-tailscale.md` §3 e
+//! `10-plano-windows-linux.md` §2.1). O TailDesk usa só o Tailscale instalado na máquina
+//! (ADR-009), então há dois backends:
+//! - `SystemOverlay`: `tailscaled` ≥ 1.102 + LocalAPI (`taildesk-tsapi`), dá caminho, usuário
+//!   e app caps. É o único em produção.
+//! - `LanOverlay`: sockets do SO, só para desenvolvimento e testes.
 //!
 //! A identidade do peer vem sempre de [`Overlay::identify`], nunca do conteúdo das mensagens.
 
@@ -28,7 +29,7 @@ pub struct PeerInfo {
 pub struct PeerIdentity {
     pub node_stable_id: String,
     pub hostname: String,
-    /// Login do usuário. `None` no modo embutido (tailscale-rs ainda não expõe whois).
+    /// Login do usuário, do `whois` da LocalAPI. `None` em nó com tag.
     pub user_login: Option<String>,
     pub tags: Vec<String>,
     /// Conteúdo JSON bruto da app capability do TailDesk, quando disponível.
@@ -41,7 +42,7 @@ pub use taildesk_proto::net::PathKind;
 /// adaptativa: a classe de rede sai sempre da medição.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PathInfo {
-    /// No modo embutido (tailscale-rs 0.6.1) costuma ser `Unknown`: a crate não expõe o caminho.
+    /// Vem do `status` da LocalAPI (`CurAddr` direto ou `Relay`).
     pub kind: PathKind,
     /// RTT informado pelo overlay (ping do `tailscaled`), se houver.
     pub rtt: Option<Duration>,
