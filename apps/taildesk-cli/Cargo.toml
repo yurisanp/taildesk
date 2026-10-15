@@ -12,7 +12,10 @@ taildesk-proto.workspace = true
 taildesk-media.workspace = true
 taildesk-transport.workspace = true
 taildesk-overlay.workspace = true
-tokio = { version = "1", features = ["rt-multi-thread", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+taildesk-platform.workspace = true
 
 [lints]
 workspace = true
