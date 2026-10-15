@@ -56,7 +56,7 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | Sessão | `Hello`, `HelloAck`, `ConsentResult`, `Close{reason: CloseReason}` (valores abaixo), `Ping{t}`/`Pong{t,t_echo}` |
 | Vídeo | `StartVideo{display_id, wanted, priority}`, `CodecSelected{display_id, stream_id, ...}`, `RequestKeyframe{display}`, `PictureLoss{display, last_good_seq}`, `Nack{display, frame_seq, missing_frag_bitmap}`, `QualityPrefs{fps_max, mode: Auto|Text|Motion|LowBandwidth, chroma444}`, `StopVideo{display_id}`, `SetPriority{display_id, FOCUSED|VISIBLE}`, `VideoStopped{display_id, reason}`, `DisplaysChanged{displays}` (sem `SwitchDisplay`: trocar = Stop + Start) |
 | Input | Teclado: ver `11-teclado.md` §3 (`KeyboardInfo`, `Key`, `KeyShortcut`, `KeyChar`, `KeyboardMode`, `ReleaseAll`), `MouseMove{display_id, x, y (u16 normalizado no monitor) | rel}`, `MouseButton{btn, down}`, `Scroll{dx, dy, precise}` (convenção abaixo), `Touch{id, phase, x, y, pressure}`, `Gamepad{...}` (futuro) |
-| Cursor | `CursorPos{display_id, x, y, visible}`, `CursorShapeRef{hash}` (shape completo no stream de cursor) |
+| Cursor | `CursorPos{display_id, x, y, visible}`, `CursorShapeRef{hash}` (forma completa no stream de cursor, §3.2) |
 | Clipboard | `ClipboardOffer{formats}`, `ClipboardData{format, bytes}` (texto/HTML/PNG; arquivos → transferência explícita) |
 | Arquivos (80–89) | `FsRootsRequest`, `FsRoots`, `FsList`, `FsListing`, `FileOffer`, `FileRequest`, `FileAccept`, `FileCancel`, `FileDone`, `FileError` (detalhe em §3.1) |
 | QoS | `ReceiverReport{display, recv_kbps, loss_pct, jitter_ms, decode_ms, render_ms, queue_frames, audio_loss_pct, audio_jitter_ms, audio_buffer_ms, concealed_ms}` (a cada 250 ms) |
@@ -95,6 +95,15 @@ Caminhos são relativos a uma raiz (`root`), com `/` como separador, e quem rece
 - **Stream de dados**: um stream QUIC uni por arquivo, começando pelo cabeçalho de **16 bytes** `files::DataHeader` (little-endian): `"TDF"` + versão `0x01` (4 bytes), `xfer_id` u32, `offset` u64 (posição do primeiro byte que segue); depois bytes crus em blocos de 256 KiB. Cabeçalho errado ou bytes a mais = `FileError(PROTOCOL)`.
 - **Limites**: caminho ≤ 4096 bytes, nome ≤ 1024 bytes, até 4 transferências simultâneas por sessão (acima disso, `BUSY`).
 - **Códigos de `FileError`**: `NOT_FOUND`, `DENIED` (sem `Permissions.files`, raiz sem o acesso pedido ou recusa da pessoa), `BAD_PATH`, `NO_SPACE`, `HASH_MISMATCH`, `RESUME_MISMATCH`, `IO`, `BUSY`, `CANCELLED`, `CHANGED` (origem mudou durante o envio), `PROTOCOL`.
+
+### 3.2 Stream de cursor (`taildesk_proto::cursor`, fase 2)
+
+Stream QUIC uni do host para o controlador:
+- Começa com os 4 bytes `"TDC\x01"` (`TDC`, versão 1).
+- Cada forma = cabeçalho de **16 bytes**, little-endian: `hash` u64, `width` u16, `height` u16, `hot_x` u16, `hot_y` u16. `width` e `height` vão de 1 a 256.
+- Em seguida, `width × height × 4` bytes de pixels **RGBA8 sRGB, sem pré-multiplicação**.
+- A forma é sempre enviada **antes** do `CursorShapeRef{hash}` que a referencia.
+- Cache LRU: **64** formas no host e **128** no controlador.
 
 ## 4. Header de datagrama de mídia (binário, little-endian, 16 bytes)
 
