@@ -168,6 +168,11 @@ GNOME/KDE também mostra seu indicador de compartilhamento; não brigar com ele.
   janela encerra a sessão e fecha todas. A última aba não pode ser destacada.
 - **Wayland**: só aparecem os monitores que a pessoa liberou no diálogo do sistema; os outros ficam
   como aba cinza "não liberado" e pedir acesso abre o diálogo de novo no host. O menu explica isso.
+- **Atalhos sugeridos** (entram na decisão de atalhos ainda aberta): `Ctrl+Alt+1…9` vai direto ao
+  monitor, `Ctrl+Alt+←/→` anterior/próximo.
+- **Casos de borda** (`13-multimonitor.md` §7): host com 1 monitor não mostra abas; monitor
+  desplugado no host fecha a aba (ou mostra "Monitor desconectado no host" na janela destacada) e
+  volta para o principal; reconexão restaura os mesmos monitores e o mesmo modo.
 - **Mosaico** (todos numa janela) fica fora do MVP.
 - Esta regra é sobre **monitores dentro de uma sessão**; cada sessão (host) continua em janela própria (§11).
 
