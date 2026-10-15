@@ -17,6 +17,8 @@ struct Contagem {
     quadros: u32,
     tamanho: (u32, u32),
     formato: Option<FormatoPixel>,
+    cursores: u32,
+    forma: Option<(u32, u32)>,
 }
 
 /// Captura `segundos` de cada monitor e imprime quadros por segundo, tamanho e formato.
@@ -29,9 +31,17 @@ fn medir(conexao: Conexao, monitores: &[(u32, u32)], segundos: u64) -> std::io::
     let captura = CapturaPipeWire::iniciar(conexao, monitores, move |q| {
         if let Some(i) = ids_cb.iter().position(|&d| d == q.display_id) {
             let mut c = c.lock().unwrap();
-            c[i].quadros += 1;
-            c[i].tamanho = (q.largura, q.altura);
-            c[i].formato = Some(q.formato);
+            if let Some(img) = &q.imagem {
+                c[i].quadros += 1;
+                c[i].tamanho = (img.largura, img.altura);
+                c[i].formato = Some(img.formato);
+            }
+            if let Some(cur) = &q.cursor {
+                c[i].cursores += 1;
+                if let Some(f) = &cur.forma {
+                    c[i].forma = Some((f.largura, f.altura));
+                }
+            }
         }
     })?;
     std::thread::sleep(Duration::from_secs(segundos));
@@ -39,12 +49,14 @@ fn medir(conexao: Conexao, monitores: &[(u32, u32)], segundos: u64) -> std::io::
     let s = inicio.elapsed().as_secs_f64();
     for (id, c) in ids.iter().zip(contagem.lock().unwrap().iter()) {
         println!(
-            "monitor {id}: {} quadros ({:.1}/s), {}x{} {:?}",
+            "monitor {id}: {} quadros ({:.1}/s), {}x{} {:?}; cursor: {} atualizações, forma {:?}",
             c.quadros,
             f64::from(c.quadros) / s,
             c.tamanho.0,
             c.tamanho.1,
-            c.formato
+            c.formato,
+            c.cursores,
+            c.forma
         );
     }
     Ok(())

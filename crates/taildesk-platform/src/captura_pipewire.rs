@@ -6,6 +6,9 @@
 //! mapeado, sem alocar nem copiar. Quem consome copia para o próprio buffer (o encoder) e devolve
 //! rápido, porque o compositor espera o buffer de volta.
 //!
+//! O cursor vem separado da imagem, no `SPA_META_Cursor` de cada buffer (a sessão pede o modo
+//! metadado): posição sempre que mexe e o bitmap só quando a forma muda.
+//!
 //! Formatos pedidos: BGRx, RGBx, BGRA, RGBA em memória compartilhada (memfd), o que todo portal
 //! entrega. DMA-BUF sem cópia entra com o encode por hardware (fase 4). Monitor que ninguém está
 //! vendo é pausado (`ativar(id, false)`): o compositor para de produzir quadros para ele
@@ -20,6 +23,7 @@ use std::thread::JoinHandle;
 
 use pipewire as pw;
 use pw::spa;
+use pw::spa::buffer::meta::MetaCursor;
 use pw::spa::param::video::{VideoFormat, VideoInfoRaw};
 use pw::spa::pod::Pod;
 
@@ -45,10 +49,20 @@ impl FormatoPixel {
     }
 }
 
-/// Um quadro emprestado do buffer do PipeWire; vale só dentro do callback.
+/// O que chegou de um monitor num buffer do PipeWire; vale só dentro do callback.
 #[derive(Debug)]
 pub struct Quadro<'a> {
     pub display_id: u32,
+    /// Imagem nova; `None` quando só o cursor mudou.
+    pub imagem: Option<Imagem<'a>>,
+    /// Cursor, quando o compositor mandou dado novo. O vídeo sai sem cursor (modo metadado do
+    /// portal): quem consome envia posição e forma separadas para o controlador desenhar.
+    pub cursor: Option<Cursor<'a>>,
+}
+
+/// Imagem do monitor, emprestada do buffer mapeado.
+#[derive(Debug)]
+pub struct Imagem<'a> {
     pub largura: u32,
     pub altura: u32,
     /// Bytes por linha (pode ser maior que `largura * 4`).
@@ -58,7 +72,29 @@ pub struct Quadro<'a> {
     pub dados: &'a [u8],
 }
 
-impl Quadro<'_> {
+/// Posição do cursor no monitor (pixels do stream) e, quando mudou, a forma.
+#[derive(Debug)]
+pub struct Cursor<'a> {
+    /// `false` = cursor escondido (fora deste monitor ou sem imagem).
+    pub visivel: bool,
+    pub x: i32,
+    pub y: i32,
+    pub forma: Option<FormaCursor<'a>>,
+}
+
+/// Bitmap do cursor; o ponto (`hotspot_x`, `hotspot_y`) do bitmap fica em (`x`, `y`).
+#[derive(Debug)]
+pub struct FormaCursor<'a> {
+    pub largura: u32,
+    pub altura: u32,
+    pub stride: usize,
+    pub hotspot_x: i32,
+    pub hotspot_y: i32,
+    pub formato: FormatoPixel,
+    pub dados: &'a [u8],
+}
+
+impl Imagem<'_> {
     /// Uma linha da imagem, só com os pixels visíveis.
     pub fn linha(&self, y: u32) -> &[u8] {
         let ini = y as usize * self.stride;
@@ -184,7 +220,7 @@ where
                 display_id,
                 formato: None,
             })
-            .param_changed(|_, estado, id, param| {
+            .param_changed(|stream, estado, id, param| {
                 if id != spa::param::ParamType::Format.as_raw() {
                     return;
                 }
@@ -197,6 +233,11 @@ where
                     let tam = info.size();
                     FormatoPixel::de(info.format()).map(|f| (f, tam.width, tam.height))
                 });
+                // Com o formato fechado, pede o cursor como metadado de cada buffer.
+                let meta = meta_cursor();
+                if let Some(pod) = Pod::from_bytes(&meta) {
+                    let _ = stream.update_params(&mut [pod]);
+                }
             })
             .process(move |stream, estado| {
                 let Some(mut buffer) = stream.dequeue_buffer() else {
@@ -205,36 +246,45 @@ where
                 let Some((formato, largura, altura)) = estado.formato else {
                     return;
                 };
-                let Some(dado) = buffer.datas_mut().first_mut() else {
-                    return;
-                };
-                let chunk = dado.chunk();
-                let (offset, tamanho, stride) = (
-                    chunk.offset() as usize,
-                    chunk.size() as usize,
-                    chunk.stride(),
-                );
-                // Tamanho 0 = o compositor não mudou nada (só o cursor, por exemplo).
-                if tamanho == 0 || stride <= 0 {
+                // Região da imagem no buffer mapeado: (início, tamanho, stride).
+                let regiao = buffer.datas_mut().first_mut().and_then(|dado| {
+                    let chunk = dado.chunk();
+                    let (offset, tamanho, stride) = (
+                        chunk.offset() as usize,
+                        chunk.size() as usize,
+                        chunk.stride(),
+                    );
+                    // Tamanho 0 = a imagem não mudou (só o cursor, por exemplo).
+                    if tamanho == 0 || stride <= 0 {
+                        return None;
+                    }
+                    let dados = dado.data()?.get(offset..offset + tamanho)?;
+                    Some((dados.as_ptr(), dados.len(), stride as usize))
+                });
+                let cursor = buffer.find_meta::<MetaCursor>().and_then(ler_cursor);
+                let imagem = regiao.and_then(|(ptr, len, stride)| {
+                    // SAFETY: `ptr..ptr+len` é a memória mapeada do dado 0 do buffer, que fica
+                    // nosso (desenfileirado) até `buffer` ser solto no fim deste callback; o
+                    // metadado do cursor fica em outra região, e nada escreve na imagem aqui.
+                    let dados = unsafe { std::slice::from_raw_parts(ptr, len) };
+                    let imagem = Imagem {
+                        largura,
+                        altura,
+                        stride,
+                        formato,
+                        dados,
+                    };
+                    imagem_valida(&imagem).then_some(imagem)
+                });
+                if imagem.is_none() && cursor.is_none() {
                     return;
                 }
-                let Some(mem) = dado.data() else {
-                    return;
-                };
-                let Some(dados) = mem.get(offset..offset + tamanho) else {
-                    return;
-                };
                 let quadro = Quadro {
                     display_id: estado.display_id,
-                    largura,
-                    altura,
-                    stride: stride as usize,
-                    formato,
-                    dados,
+                    imagem,
+                    cursor,
                 };
-                if quadro_valido(&quadro) {
-                    (cb.borrow_mut())(&quadro);
-                }
+                (cb.borrow_mut())(&quadro);
             })
             .register()?;
 
@@ -275,8 +325,97 @@ where
     Ok(())
 }
 
+/// Cursor do `SPA_META_Cursor`; `None` se o id é 0 (nada novo neste buffer).
+fn ler_cursor(m: &MetaCursor) -> Option<Cursor<'_>> {
+    if m.id() == 0 {
+        return None;
+    }
+    let pos = m.position();
+    let mut cursor = Cursor {
+        visivel: true,
+        x: pos.x,
+        y: pos.y,
+        forma: None,
+    };
+    if let Some(bitmap) = m.bitmap() {
+        // Bitmap sem dados = cursor invisível.
+        match (bitmap.bitmap_data(), FormatoPixel::de(bitmap.format())) {
+            (Some(dados), Some(formato)) => {
+                let tam = bitmap.size();
+                let hot = m.hotspot();
+                let forma = FormaCursor {
+                    largura: tam.width,
+                    altura: tam.height,
+                    stride: bitmap.stride().unsigned_abs() as usize,
+                    hotspot_x: hot.x,
+                    hotspot_y: hot.y,
+                    formato,
+                    dados,
+                };
+                if forma_valida(&forma) {
+                    cursor.forma = Some(forma);
+                }
+            }
+            (None, _) if bitmap.offset() == 0 && bitmap.format() != VideoFormat::Unknown => {
+                cursor.visivel = false;
+            }
+            _ => {}
+        }
+    }
+    Some(cursor)
+}
+
+fn forma_valida(f: &FormaCursor<'_>) -> bool {
+    f.largura > 0
+        && f.altura > 0
+        && f.largura <= CURSOR_MAX
+        && f.altura <= CURSOR_MAX
+        && f.stride >= f.largura as usize * 4
+        && f.dados.len() >= f.altura as usize * f.stride
+}
+
+/// Maior cursor aceito (lado, em pixels).
+const CURSOR_MAX: u32 = 256;
+
+/// `ParamMeta`: cursor com bitmap de até `CURSOR_MAX`² em 4 bytes por pixel.
+fn meta_cursor() -> Vec<u8> {
+    use spa::pod::{ChoiceValue, Object, Property, PropertyFlags, Value};
+    use spa::sys;
+    use spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Id};
+    let base = (std::mem::size_of::<sys::spa_meta_cursor>()
+        + std::mem::size_of::<sys::spa_meta_bitmap>()) as i32;
+    let tamanho = |lado: i32| base + lado * lado * 4;
+    let obj = Object {
+        type_: spa::utils::SpaTypes::ObjectParamMeta.as_raw(),
+        id: spa::param::ParamType::Meta.as_raw(),
+        properties: vec![
+            Property {
+                key: sys::SPA_PARAM_META_type,
+                flags: PropertyFlags::empty(),
+                value: Value::Id(Id(sys::SPA_META_Cursor)),
+            },
+            Property {
+                key: sys::SPA_PARAM_META_size,
+                flags: PropertyFlags::empty(),
+                value: Value::Choice(ChoiceValue::Int(Choice(
+                    ChoiceFlags::empty(),
+                    ChoiceEnum::Range {
+                        default: tamanho(64),
+                        min: tamanho(1),
+                        max: tamanho(CURSOR_MAX as i32),
+                    },
+                ))),
+            },
+        ],
+    };
+    spa::pod::serialize::PodSerializer::serialize(io::Cursor::new(Vec::new()), &Value::Object(obj))
+        .expect("serializar o ParamMeta")
+        .0
+        .into_inner()
+}
+
 /// O buffer cobre `altura` linhas de `stride` bytes (a última pode ser curta).
-fn quadro_valido(q: &Quadro<'_>) -> bool {
+fn imagem_valida(q: &Imagem<'_>) -> bool {
     let linha = q.largura as usize * 4;
     q.largura > 0
         && q.altura > 0
@@ -347,32 +486,47 @@ mod tests {
     #[test]
     fn quadro_confere_stride_e_tamanho() {
         let dados = vec![0u8; 16 * 3 + 8];
-        let q = Quadro {
-            display_id: 0,
+        let q = Imagem {
             largura: 2,
             altura: 4,
             stride: 16,
             formato: FormatoPixel::Bgrx,
             dados: &dados,
         };
-        assert!(quadro_valido(&q));
+        assert!(imagem_valida(&q));
         assert_eq!(q.linha(3).len(), 8);
-        let curto = Quadro {
+        let curto = Imagem {
             dados: &dados[..dados.len() - 1],
             ..q
         };
-        assert!(!quadro_valido(&curto));
-        let stride_ruim = Quadro {
+        assert!(!imagem_valida(&curto));
+        let stride_ruim = Imagem {
             stride: 4,
             dados: &dados,
             ..curto
         };
-        assert!(!quadro_valido(&stride_ruim));
+        assert!(!imagem_valida(&stride_ruim));
     }
 
     #[test]
-    fn enum_format_serializa() {
-        let bytes = formatos_aceitos();
-        assert!(Pod::from_bytes(&bytes).is_some());
+    fn params_serializam() {
+        assert!(Pod::from_bytes(&formatos_aceitos()).is_some());
+        assert!(Pod::from_bytes(&meta_cursor()).is_some());
+    }
+
+    #[test]
+    fn forma_do_cursor_confere_limites() {
+        let dados = vec![0u8; 32 * 32 * 4];
+        let f = FormaCursor {
+            largura: 32,
+            altura: 32,
+            stride: 128,
+            hotspot_x: 0,
+            hotspot_y: 0,
+            formato: FormatoPixel::Bgra,
+            dados: &dados,
+        };
+        assert!(forma_valida(&f));
+        assert!(!forma_valida(&FormaCursor { altura: 33, ..f }));
     }
 }

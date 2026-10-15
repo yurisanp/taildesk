@@ -450,16 +450,12 @@ impl SessaoPortal {
     }
 }
 
-/// Cursor desenhado no vídeo. O cursor separado (metadado do PipeWire, desenhado pelo
-/// controlador) entra quando a captura ler o `SPA_META_Cursor`; até lá, pedir metadado deixaria o
-/// vídeo sem cursor nenhum.
+/// Cursor separado do vídeo, como metadado de cada buffer do PipeWire
+/// ([`crate::captura_pipewire::Cursor`]); o controlador desenha por cima. Embutido no vídeo só se
+/// o portal não oferece metadado.
 async fn modo_cursor(screencast: &Screencast) -> CursorMode {
     match screencast.available_cursor_modes().await {
-        Ok(modos)
-            if !modos.contains(CursorMode::Embedded) && modos.contains(CursorMode::Hidden) =>
-        {
-            CursorMode::Hidden
-        }
+        Ok(modos) if modos.contains(CursorMode::Metadata) => CursorMode::Metadata,
         _ => CursorMode::Embedded,
     }
 }
