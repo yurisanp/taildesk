@@ -1,6 +1,6 @@
 [package]
 name = "taildesk-keyboard"
-description = "Tradução automática entre layouts de teclado (lógica pura, sem SO)."
+description = "Tradução automática entre layouts de teclado (lógica pura, sem SO) e conversão para o fio."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+taildesk-proto.workspace = true
 
 
 [lints]

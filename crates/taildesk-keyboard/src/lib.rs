@@ -14,6 +14,7 @@ mod controller;
 pub mod fixtures;
 mod host;
 mod msg;
+mod wire;
 
 pub use controller::Controller;
 pub use host::{Host, Inject};
@@ -35,6 +36,16 @@ impl Mods {
     /// AltGr. No Windows o leitor de input deve converter o par sintético
     /// `LCtrl` + `RAlt` em `ALTGR` antes de chegar aqui.
     pub const ALTGR: Mods = Mods(1 << 4);
+
+    /// Bits no fio (`KeyShortcut.mods`): 0 Shift, 1 Ctrl, 2 Alt, 3 Meta, 4 AltGr.
+    pub const fn bits(self) -> u32 {
+        self.0 as u32
+    }
+
+    /// Ignora bits desconhecidos.
+    pub const fn from_bits(bits: u32) -> Mods {
+        Mods((bits & 0x1F) as u8)
+    }
 
     pub const fn contains(self, other: Mods) -> bool {
         self.0 & other.0 == other.0
