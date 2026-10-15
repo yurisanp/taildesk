@@ -91,6 +91,13 @@ pub trait ScreenCapturer: Send {
     fn stop(&mut self, display: DisplayId);
     fn events(&mut self) -> DisplayEvents;     // DisplayEvent::{Added, Removed, Changed} -> DisplaysChanged/VideoStopped
 }
+pub trait AudioCapturer: Send {   // áudio do sistema do host (fase 4): WASAPI loopback (Win), PipeWire -> Pulse (Linux), via cpal
+    fn start(&mut self, sink: AudioSink) -> Result<AudioFormat>;   // desligado = nada capturado
+    fn stop(&mut self);
+}
+pub trait AudioPlayer: Send {     // controlador
+    fn play(&mut self, fmt: AudioFormat) -> Result<AudioQueue>;
+}
 pub trait InputInjector: Send {
     fn inject(&mut self, ev: InputEvent) -> Result<()>;   // KeyPhysical{hid,down} | Text(String) | Mouse{..} | Touch{..} | Scroll{..}
 }
@@ -149,5 +156,6 @@ Reconexão: QUIC suporta *connection migration*; se o caminho mudar (direto→DE
 
 ## 8. Concurrency model
 - `tokio` multi-thread para rede/sessão.
+- **Áudio** (`taildesk-media`, `15-audio.md` §6): thread própria de captura+Opus no host; no controlador, jitter buffer com correção de deriva de relógio. O pacer envia áudio sem esperar o vídeo e mantém contadores por `kind`.
 - Threads dedicadas (não-tokio) para: callback de captura, encode, decode, áudio realtime. Comunicação por canais *bounded* de capacidade 1 (latest-wins) ou `triple buffer`.
 - Nunca bloquear o runtime tokio com encode/decode; nunca alocar no hot path (pools de buffers/texturas).

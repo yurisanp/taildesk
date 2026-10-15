@@ -14,7 +14,8 @@ Codinome: **`taildesk`** no lugar de `halyard` (crates `taildesk-*`).
 | Entra no MVP | Fica para depois |
 |---|---|
 | Host e controlador em Windows 10/11 x64 e Linux x64 (Ubuntu/Debian, **Fedora**, **Arch**) | macOS, Android, iOS, Windows ARM64 |
-| Ver e controlar (teclado físico + texto, mouse, scroll, cursor separado) | Áudio, chat, gamepad, toque |
+| Ver e controlar (teclado físico + texto, mouse, scroll, cursor separado) | Microfone do controlador → host, chat, gamepad, toque |
+| Áudio do sistema do host (Opus, fase 4) com liga/desliga que corta captura e tráfego (`15-audio.md`) | |
 | Troca de arquivos nos dois sentidos + navegador de arquivos remoto | Clipboard de arquivos (fase 4), sync automático |
 | H.264 (SW primeiro, HW em seguida) | AV1/HEVC/VP9 (fase 4), PyroWave (pós-MVP) |
 | Multi-monitor escolhido pelo controlador: **um por vez** (abas) e **janelas separadas** (`13-multimonitor.md`) | Mosaico (todos numa janela), monitores virtuais |
@@ -50,7 +51,7 @@ Pedido do Yuri (15/10/2026): **Fedora e Arch Linux** são alvos de primeira clas
 | NVIDIA | Driver proprietário via RPM Fusion (NVENC) | `nvidia` / `nvidia-open` (NVENC) |
 | Segurança | SELinux enforcing: uinput e serviço de sistema precisam de política (fase 5) | Sem MAC por padrão |
 | Pacote | `.rpm` + repositório COPR | `PKGBUILD` no AUR (`taildesk-bin` e `taildesk-git`) |
-| Comum | **AppImage** é o pacote universal publicado em toda versão (roda em qualquer distro com glibc ≥ 2.35; build no Ubuntu 22.04). Flatpak (Flathub) fica para depois: só portal, sem uinput |
+| Comum | **AppImage** é o pacote universal publicado em toda versão (roda em qualquer distro com glibc ≥ 2.35; build no Ubuntu 22.04). Flatpak (Flathub) fica para depois: só portal, sem uinput, e precisa de `--socket=pulseaudio` para o áudio |
 
 Dependências de build que entram nas próximas fases (nomes de pacote):
 
@@ -62,6 +63,7 @@ Dependências de build que entram nas próximas fases (nomes de pacote):
 | X11 | `libxcb-devel` | `libxcb` | `libxcb1-dev` |
 | VA-API | `libva-devel` | `libva` | `libva-dev` |
 | Portal/segredos | `dbus-devel` | `dbus` | `libdbus-1-dev` |
+| Áudio (Opus, ou `cmake` para compilar o embutido) | `opus-devel` | `opus` | `libopus-dev` |
 
 CI: além de `ubuntu-latest` e `windows-latest`, jobs em container `fedora:latest` e `archlinux:latest` rodam clippy e testes.
 Testes manuais de cada fase: Fedora Workstation (GNOME), Fedora KDE, Arch + KDE, Arch + Hyprland, Ubuntu LTS.
@@ -134,10 +136,10 @@ CI: GitHub Actions com `windows-latest` e `ubuntu-latest` (fmt, clippy, nextest,
 | Fase | Entrega | Pronto quando |
 |---|---|---|
 | **0 — Fundações** | Workspace, CI, `taildesk-proto`, `EmbeddedOverlay`, spike quinn-sobre-tailscale-rs, `taildesk-cli bench-net` | **Gate G0**: QUIC sobre o overlay embutido entre um Windows e um Linux, conexão direta e via DERP, com números de throughput/RTT/CPU. Meta mínima: 30 Mbit/s estáveis direto. O teste deve **primeiro confirmar se o tailscale-rs 0.6.1 chega a fazer conexão direta** (mesma LAN e NAT diferentes) ou fica sempre no DERP, como aponta `14-selecao-adaptativa.md`; o mesmo teste roda no `tailscaled` do sistema para comparar. |
-| **1 — Ver** | Captura (DXGI no Windows, portal+PipeWire no Wayland, XShm no X11), openh264, datagramas, janela wgpu. **Protocolo por monitor desde já**: um stream de vídeo por monitor, `DisplayInfo` completo, `StartVideo`/`StopVideo` por `display_id`, mouse com `display_id`; Wayland pede `multiple=true` | `taildesk-cli connect <host> --display N` mostra qualquer monitor do host em 1080p30 nos 4 sentidos (Win↔Win, Win↔Linux, Linux↔Linux). |
+| **1 — Ver** | Captura (DXGI no Windows, portal+PipeWire no Wayland, XShm no X11), openh264, datagramas, janela wgpu. **Protocolo por monitor desde já**: um stream de vídeo por monitor, `DisplayInfo` completo, `StartVideo`/`StopVideo` por `display_id`, mouse com `display_id`; Wayland pede `multiple=true`. **Protocolo de áudio reservado** (mensagens de `15-audio.md` §6.5 e `kind=1` com `stream_id` ≥ 0xF0), sem implementação | `taildesk-cli connect <host> --display N` mostra qualquer monitor do host em 1080p30 nos 4 sentidos (Win↔Win, Win↔Linux, Linux↔Linux). |
 | **2 — Controlar** | Input com tradução automática de layouts (`11-teclado.md`: US-Intl ↔ ABNT2 etc.), cursor separado, consentimento, UI Slint com lista de peers da tailnet; multi-monitor **um por vez** (abas e atalhos, input por monitor); **spike de 2 janelas Slint com vídeo wgpu** (2 texturas NV12 a 60 fps) | Usar o host remoto para trabalho normal de escritório; matriz de teclado de `11-teclado.md` §5 passando; troca de monitor < 300 ms em LAN; latência < 60 ms em LAN. |
 | **3 — Arquivos** | §3 completo: enviar/receber, navegador remoto, retomada, hash | 10 GB em ambos os sentidos sem travar o vídeo; retomada após queda de rede. |
-| **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor em **janelas separadas** (destacar/recolocar aba, prioridades, hotplug, "seguir o mouse", "usar todos os meus monitores"), clipboard texto/imagem, `SystemOverlay` + `whois` | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
+| **4 — Qualidade** | Encode/decode HW, QoS (BBR + ReceiverReport), multi-monitor em **janelas separadas** (destacar/recolocar aba, prioridades, hotplug, "seguir o mouse", "usar todos os meus monitores"), clipboard texto/imagem, **áudio do sistema** (Opus via `cpal`: WASAPI loopback no Windows, PipeWire/Pulse no Linux) com liga/desliga que corta o tráfego, `SystemOverlay` + `whois` | 1080p60 em LAN < 40 ms; degrada sem congelar via DERP. |
 | **5 — Produção** | Serviço Windows (UAC/login), não-assistido, `restore_token` Wayland, instalador MSI assinado, repositório COPR e AUR (os pacotes básicos já saem no Releases, §8), auditoria | Instalação limpa em máquina nova e acesso sem ninguém na frente (Windows). |
 
 ## 6. Decisões do Yuri (15/10/2026)
