@@ -134,6 +134,18 @@ async fn hash_prefix(
     Ok(())
 }
 
+/// Lê o [`DataHeader`] do início de um stream de dados.
+pub async fn read_header<R: tokio::io::AsyncRead + Unpin>(
+    input: &mut R,
+) -> Result<DataHeader, XferError> {
+    let mut head = [0u8; DataHeader::LEN];
+    input
+        .read_exact(&mut head)
+        .await
+        .map_err(|_| XferError::BadHeader)?;
+    DataHeader::decode(&head).ok_or(XferError::BadHeader)
+}
+
 /// Arquivo a enviar.
 #[derive(Debug)]
 pub struct Source {
@@ -320,14 +332,23 @@ impl Incoming {
         input: &mut R,
         progress: &mut (dyn FnMut(u64) + Send),
     ) -> Result<(), XferError> {
-        let mut head = [0u8; DataHeader::LEN];
-        input
-            .read_exact(&mut head)
-            .await
-            .map_err(|_| XferError::BadHeader)?;
-        match DataHeader::decode(&head) {
-            Some(h) if h.xfer_id == xfer_id && h.offset == self.written => {}
-            _ => return Err(XferError::BadHeader),
+        let header = read_header(input).await?;
+        if header.xfer_id != xfer_id {
+            return Err(XferError::BadHeader);
+        }
+        self.receive_after_header(header, input, progress).await
+    }
+
+    /// Como [`Incoming::receive`], para quando o cabeçalho já foi lido com [`read_header`]
+    /// (quem recebe vários arquivos descobre por ele de qual transferência é o stream).
+    pub async fn receive_after_header<R: tokio::io::AsyncRead + Unpin>(
+        &mut self,
+        header: DataHeader,
+        input: &mut R,
+        progress: &mut (dyn FnMut(u64) + Send),
+    ) -> Result<(), XferError> {
+        if header.offset != self.written {
+            return Err(XferError::BadHeader);
         }
         self.file.seek(io::SeekFrom::Start(self.written)).await?;
 

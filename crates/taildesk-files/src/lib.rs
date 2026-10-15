@@ -4,7 +4,9 @@
 //! uma raiz permitida**, usa `/` como separador e é validado aqui antes de tocar o disco.
 //!
 //! - [`xfer`]: envio e recepção dos bytes (stream de dados, BLAKE3, `.part`, retomada);
-//! - [`listing`]: listagem para o navegador remoto e envio de pastas.
+//! - [`listing`]: listagem para o navegador remoto e envio de pastas;
+//! - [`service`]: sessão de arquivos (mensagens 80–89, streams, vagas, permissões);
+//! - [`audit`]: registro local de cada transferência.
 //!
 //! As mensagens de controle estão em `taildesk_proto::files`.
 
@@ -12,7 +14,9 @@ use std::fmt;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+pub mod audit;
 pub mod listing;
+pub mod service;
 pub mod xfer;
 
 pub use xfer::{Incoming, Source, XferError};
