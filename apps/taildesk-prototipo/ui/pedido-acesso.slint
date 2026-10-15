@@ -89,7 +89,7 @@ export component JanelaPedido inherits Window {
 
 export component FaixaHost inherits Window {
     title: @tr("TailDesk: sessão ativa");
-    width: 640px;
+    width: 760px;
     height: 48px;
     no-frame: true;
     always-on-top: true;
@@ -98,6 +98,8 @@ export component FaixaHost inherits Window {
 
     in property <string> origem: "notebook-yuri";
     in property <bool> arquivos: true;
+    // Quais monitores o controlador está vendo (levantamento §5.5).
+    in property <string> monitores-vistos: "1 e 2";
     in-out property <bool> pausado: false;
     callback encerrar();
 
@@ -119,8 +121,8 @@ export component FaixaHost inherits Window {
                 overflow: elide;
                 text: root.pausado
                     ? @tr("Controle pausado: {} só vê a tela", root.origem)
-                    : root.arquivos ? @tr("{} controla este PC · arquivos ✓", root.origem)
-                    : @tr("{} controla este PC", root.origem);
+                    : root.arquivos ? @tr("{} controla este PC · vendo monitores {} · arquivos ✓", root.origem, root.monitores-vistos)
+                    : @tr("{} controla este PC · vendo monitores {}", root.origem, root.monitores-vistos);
             }
             VerticalLayout {
                 alignment: center;

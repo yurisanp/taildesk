@@ -78,7 +78,9 @@ por sessão, uma janela própria (ou aba, a decidir no protótipo).
 - Passo 2: "Este computador pode ser acessado?" com duas escolhas: **Sim, pedindo minha
   permissão a cada vez** (padrão) / **Não, só vou acessar outros**.
 - Passo 3 (Linux Wayland): explicar antes que o sistema vai pedir permissão de tela e de
-  controle, e por quê. O diálogo do portal é do SO e assusta se aparecer sem aviso.
+  controle, e por quê. O diálogo do portal é do SO e assusta se aparecer sem aviso. Pedir que a
+  pessoa libere **todos** os monitores que o controlador pode ver: no Wayland quem escolhe os
+  monitores é o host, e o controlador só alterna entre os liberados (`13-multimonitor.md` §4.2).
 
 ### 5.2 Dispositivos (tela inicial)
 ```
@@ -124,13 +126,13 @@ não responder em 60 s, dizer qual dos dois.
   suporte técnico" na primeira vez reduz o risco do golpe clássico.
 
 ### 5.5 Indicador de sessão ativa (no host)
-Faixa pequena e arrastável no topo da tela do host: "notebook-yuri está controlando ·
-arquivos ✓ · [Pausar controle] [Encerrar]", mais ícone colorido na bandeja. Em Wayland, o próprio
+Faixa pequena e arrastável no topo da tela do host: "notebook-yuri controla este PC ·
+vendo monitores 1 e 2 · arquivos ✓ · [Pausar controle] [Encerrar]", mais ícone colorido na bandeja. Em Wayland, o próprio
 GNOME/KDE também mostra seu indicador de compartilhamento; não brigar com ele.
 
 ### 5.6 Janela da sessão (no controlador)
 ```
-            ┌──── desktop-casa ▾ │ 🖥 1/2 │ ⌨ US-Intl→ABNT2 │ 📁 │ ⤢ │ ⋯ │ ✕ ────┐  ← barra (recolhe)
+  ┌─ desktop-casa │ [1 · DELL ★ ⧉] 2 · LG ▾ │ ⌨ ABNT2→US-Intl │ 📁 │ ⤢ │ ⋯ │ ✕ ─┐  ← barra (recolhe)
             │                                                                │
             │                  tela remota                                   │
             │                                                     ┌────────┐ │
@@ -138,7 +140,7 @@ GNOME/KDE também mostra seu indicador de compartilhamento; não brigar com ele.
             │                                                     │ direto │ │
             │                                                     └────────┘ │
 ```
-- **Barra**: nome do host (menu com detalhes), seletor de monitor (só com 2+ monitores),
+- **Barra**: nome do host (menu com detalhes), abas de monitores (§5.6.1, só com 2+ monitores),
   indicador de teclado (clique abre Auto/Físico/Texto), arquivos (abre painel §5.7), tela cheia,
   "⋯" (Ctrl+Alt+Del para o host Windows, ajustar à janela / tamanho real, qualidade,
   mostrar HUD), desconectar.
@@ -150,6 +152,24 @@ GNOME/KDE também mostra seu indicador de compartilhamento; não brigar com ele.
   ou a qualidade cai ("Conexão via relay, qualidade reduzida").
 - **Toast de teclado** (de `11-teclado.md` §2.4): "Não foi possível digitar ‘ß’ neste host"
   com no máximo um aviso a cada poucos segundos para não poluir.
+
+#### 5.6.1 Vários monitores no host (aprovado em 15/10/2026, detalhe em `13-multimonitor.md`)
+- **Um por vez é o padrão**: uma aba por monitor na barra, rótulo "1 · DELL U2720Q ★" (estrela no
+  principal). Clicar troca o monitor; enquanto o novo quadro não chega, mostrar o último quadro
+  daquele monitor desfocado, nunca preto.
+- **▾ ao lado das abas**: miniatura do layout do host (clicar num retângulo troca), "Um por vez",
+  "Abrir monitor N em janela" e **Seguir o mouse** (desligado por padrão: troca de aba quando o
+  cursor muda de monitor no host).
+- **Arrastar a aba para fora vira janela própria** (há também o botão ⧉ na aba ativa). A janela
+  se chama "desktop-casa · Monitor 2", tem barra própria com "Voltar para abas" e o teclado; o
+  painel de arquivos fica só na janela principal da sessão. A aba original fica em itálico com
+  "em janela".
+- **Fechar a janela de um monitor devolve a aba** e não encerra a sessão. "Desconectar" em qualquer
+  janela encerra a sessão e fecha todas. A última aba não pode ser destacada.
+- **Wayland**: só aparecem os monitores que a pessoa liberou no diálogo do sistema; os outros ficam
+  como aba cinza "não liberado" e pedir acesso abre o diálogo de novo no host. O menu explica isso.
+- **Mosaico** (todos numa janela) fica fora do MVP.
+- Esta regra é sobre **monitores dentro de uma sessão**; cada sessão (host) continua em janela própria (§11).
 
 ### 5.7 Painel de arquivos (dentro da sessão)
 - Painel lateral recolhível, dois níveis: **Enviar/receber** (arrastar para a janela; lista de
@@ -168,7 +188,9 @@ abrir pasta. Serve também como registro de auditoria legível (`10-plano` §3).
 - **Este computador**: aceitar conexões (sim/não), pedir permissão sempre ou lembrar
   dispositivos, dispositivos confiáveis (lista com revogar), raízes de arquivos permitidas,
   pasta de entrada.
-- **Sessão**: qualidade (Automática / Nitidez / Fluidez), teclado padrão (Auto), tela cheia ao conectar.
+- **Sessão**: qualidade (Automática / Nitidez / Fluidez), teclado padrão (Auto), tela cheia ao conectar,
+  modo de monitores (Um por vez / Janelas separadas), "Seguir o mouse" e "Usar todos os meus
+  monitores" (distribui as janelas de monitores em tela cheia nos monitores deste PC).
 - **Rede**: modo embutido vs Tailscale do sistema (quando existir), tailnet atual, sair.
 - **Sobre / diagnóstico**: versão, copiar relatório de diagnóstico (inspirado na janela de
   debug do Tailscale).
@@ -255,7 +277,8 @@ quantos acharam o botão de encerrar no host sem ajuda.
 
 ## 11. Decisões do Yuri (15/10/2026)
 
-1. **Sessão em janela própria** (sem abas no MVP).
+1. **Sessão em janela própria**: uma janela por host, sem abas de sessões no MVP. Isso não impede as
+   **abas de monitores** dentro da sessão (§5.6.1), e cada monitor pode virar janela própria.
 2. **Protótipo em Slint estático** (não Figma).
 3. **Primeiro teste com usuário: o próprio Yuri**; os 5 participantes da §10 ficam para depois.
 4. Ainda aberto: atalhos para revelar a barra e para "encerrar tudo" no host (sugestões na §5).

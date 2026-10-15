@@ -310,6 +310,20 @@ component SecaoConfiguracoes inherits ScrollView {
                 Separador { }
                 LinhaInfo { rotulo: @tr("Teclado"); valor: @tr("Automático (traduz entre layouts diferentes)"); acao: @tr("Alterar"); }
                 Separador { }
+                LinhaInfo { rotulo: @tr("Monitores do host"); valor: @tr("Um por vez, em abas (arraste uma aba para abrir em janela)"); acao: @tr("Alterar"); }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Seguir o mouse");
+                    descricao: @tr("Troca de aba quando o cursor muda de monitor no host.");
+                    ligado: false;
+                }
+                Separador { }
+                OpcaoConfig {
+                    titulo: @tr("Usar todos os meus monitores");
+                    descricao: @tr("Ao abrir monitores em janelas, distribui cada um em tela cheia num monitor deste PC.");
+                    ligado: false;
+                }
+                Separador { }
                 OpcaoConfig {
                     titulo: @tr("Abrir em tela cheia");
                     descricao: @tr("A sessão ocupa a tela inteira ao conectar.");

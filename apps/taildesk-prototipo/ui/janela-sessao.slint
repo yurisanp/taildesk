@@ -5,13 +5,72 @@ import { Botao, Separador, BarraProgresso, Toast, Cartao } from "componentes.sli
 export enum Etapa { procurando, esperando, conectada, reconectando, recusada, sem-resposta }
 export enum ModoTeclado { auto, fisico, texto }
 
-// Desenho de um desktop Windows 11 com um editor aberto, só para dar contexto às sobreposições.
+export struct Monitor {
+    nome: string,
+    resolucao: string,
+    principal: bool,
+    liberado: bool,
+    destacado: bool,
+}
+
+// Desenho de um desktop remoto, só para dar contexto às sobreposições. Cada monitor tem um conteúdo.
 component TelaRemotaFalsa inherits Rectangle {
     in property <string> texto-digitado;
-    background: @linear-gradient(135deg, #1d4ed8 0%, #0ea5e9 55%, #a5f3fc 100%);
+    in property <int> variante;
+    background: variante == 2 ? @linear-gradient(135deg, #312e81 0%, #7c3aed 100%)
+        : @linear-gradient(135deg, #1d4ed8 0%, #0ea5e9 55%, #a5f3fc 100%);
     clip: true;
 
-    Rectangle {
+    if root.variante == 1: Rectangle {
+        x: parent.width * 0.10;
+        y: parent.height * 0.10;
+        width: parent.width * 0.78;
+        height: parent.height * 0.70;
+        background: #ffffff;
+        border-radius: 8px;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000055;
+        clip: true;
+        Rectangle {
+            y: 0;
+            height: 34px;
+            background: #107c41;
+            Text { x: 12px; text: "orcamento-2026.xlsx - Excel"; color: #fff; font-size: 12px; vertical-alignment: center; height: parent.height; }
+        }
+        for linha in 14: Rectangle {
+            y: 44px + linha * 26px;
+            height: 1px;
+            background: #e2e2e2;
+        }
+        for coluna in 7: Rectangle {
+            x: 40px + coluna * 110px;
+            y: 34px;
+            width: 1px;
+            background: #e2e2e2;
+        }
+        Text { x: 50px; y: 50px; text: "Mês        Receita      Despesa      Saldo"; color: #222; font-size: 13px; font-family: "DejaVu Sans Mono"; }
+        Text { x: 50px; y: 76px; text: "Jan        12.400       9.820        2.580"; color: #222; font-size: 13px; font-family: "DejaVu Sans Mono"; }
+        Text { x: 50px; y: 102px; text: "Fev        11.950       10.110       1.840"; color: #222; font-size: 13px; font-family: "DejaVu Sans Mono"; }
+    }
+    if root.variante == 2: Rectangle {
+        x: parent.width * 0.12;
+        y: parent.height * 0.14;
+        width: parent.width * 0.62;
+        height: parent.height * 0.56;
+        background: #1e1e2e;
+        border-radius: 8px;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000077;
+        Text {
+            x: 16px;
+            y: 16px;
+            text: "yuri@homelab:~$ systemctl status nginx\n● nginx.service - A high performance web server\n     Active: active (running) since seg 2026-10-13\nyuri@homelab:~$ ▏";
+            color: #cdd6f4;
+            font-family: "DejaVu Sans Mono";
+            font-size: 14px;
+        }
+    }
+    if root.variante == 0: Rectangle {
         x: parent.width * 0.16;
         y: parent.height * 0.12;
         width: parent.width * 0.58;
@@ -99,6 +158,47 @@ component BotaoBarra inherits Rectangle {
         color: root.perigo ? Tema.perigo : root.ativo ? Tema.primaria : Tema.texto;
         font-size: Tema.fonte;
         font-weight: 500;
+    }
+}
+
+component AbaMonitor inherits Rectangle {
+    in property <int> indice;
+    in property <Monitor> m;
+    in property <bool> ativa;
+    in property <bool> pode-destacar;
+    callback selecionar();
+    callback destacar();
+    accessible-role: tab;
+    accessible-label: @tr("Monitor {} {}", indice + 1, m.nome);
+    width: linha.preferred-width;
+    height: 30px;
+    border-radius: 6px;
+    background: ativa ? Tema.primaria.with-alpha(0.18) : toque.has-hover ? Tema.superficie-2 : transparent;
+    toque := TouchArea { clicked => { root.selecionar(); } }
+    linha := HorizontalLayout {
+        padding-left: 10px;
+        padding-right: root.ativa && root.pode-destacar && !root.m.destacado ? 4px : 10px;
+        spacing: 6px;
+        Text {
+            vertical-alignment: center;
+            text: (root.indice + 1) + " · " + root.m.nome + (root.m.principal ? " ★" : "");
+            color: !root.m.liberado || root.m.destacado ? Tema.texto-2 : root.ativa ? Tema.primaria : Tema.texto;
+            font-size: Tema.fonte;
+            font-weight: root.ativa ? 600 : 400;
+            font-italic: root.m.destacado;
+        }
+        if root.m.destacado: Text { vertical-alignment: center; text: @tr("em janela"); color: Tema.texto-2; font-size: 11px; }
+        if !root.m.liberado: Text { vertical-alignment: center; text: @tr("não liberado"); color: Tema.texto-2; font-size: 11px; }
+        // "Abrir em janela": no app real também dá para arrastar a aba para fora.
+        if root.ativa && root.pode-destacar && !root.m.destacado: Rectangle {
+            width: 22px;
+            border-radius: 4px;
+            accessible-role: button;
+            accessible-label: @tr("Abrir em janela");
+            background: toque-destacar.has-hover ? Tema.primaria.with-alpha(0.25) : transparent;
+            toque-destacar := TouchArea { clicked => { root.destacar(); } }
+            Text { text: "⧉"; color: Tema.primaria; font-size: 14px; }
+        }
     }
 }
 
@@ -241,7 +341,7 @@ component PainelArquivos inherits Rectangle {
 }
 
 export component JanelaSessao inherits Window {
-    title: root.host + " · TailDesk";
+    title: root.destacada ? @tr("{} · Monitor {} · TailDesk", root.host, root.monitor-unico + 1) : root.host + " · TailDesk";
     preferred-width: 1280px;
     preferred-height: 760px;
     min-width: 800px;
@@ -253,11 +353,20 @@ export component JanelaSessao inherits Window {
     in property <string> so-host: "Windows 11";
     in property <string> teclado-local: "ABNT2";
     in property <string> teclado-host: "US-Intl";
-    in property <int> monitores: 2;
+    in property <[Monitor]> monitores: [
+        { nome: "DELL U2720Q", resolucao: "2560×1440", principal: true, liberado: true, destacado: false },
+        { nome: "LG 24MK600", resolucao: "1920×1080", principal: false, liberado: true, destacado: false },
+    ];
+    // Quantos monitores liberados ainda estão em abas (não destacados); a última aba não pode sair.
+    in property <int> monitores-em-abas: 2;
+    // >= 0: esta janela mostra só esse monitor, destacado da janela principal da sessão.
+    in property <int> monitor-unico: -1;
+    in property <bool> host-wayland: false;
+    in-out property <bool> seguir-mouse: false;
     in-out property <Etapa> etapa: Etapa.procurando;
     in-out property <bool> via-relay: false;
     in-out property <ModoTeclado> modo-teclado: ModoTeclado.auto;
-    in-out property <int> monitor: 1;
+    in-out property <int> monitor: 0;
     in-out property <bool> barra-fixada: true;
     in-out property <bool> hud: false;
     in-out property <bool> painel-arquivos: false;
@@ -268,6 +377,13 @@ export component JanelaSessao inherits Window {
     in property <bool> simular: true;
 
     callback desconectar();
+    callback destacar(int);
+    callback voltar-para-abas();
+
+    public function abrir-menu-monitores() { menu-monitores.show(); }
+
+    property <int> monitor-exibido: root.monitor-unico >= 0 ? root.monitor-unico : root.monitor;
+    property <bool> destacada: root.monitor-unico >= 0;
 
     property <bool> layouts-iguais: root.teclado-local == root.teclado-host;
     property <string> rotulo-teclado:
@@ -304,6 +420,7 @@ export component JanelaSessao inherits Window {
     }
 
     TelaRemotaFalsa {
+        variante: root.monitor-exibido;
         texto-digitado: "Ação, café e pão. Olá, mundo! ç Ç á é ã õ ü / ?";
         opacity: root.etapa == Etapa.conectada || root.etapa == Etapa.reconectando ? 1 : 0.15;
         width: root.ajustar ? parent.width : 1600px;
@@ -355,18 +472,52 @@ export component JanelaSessao inherits Window {
                 Text { text: root.host; color: Tema.texto; font-size: Tema.fonte; font-weight: 700; }
             }
             VerticalLayout { alignment: center; Divisor { } }
-            if root.monitores > 1: VerticalLayout {
+            if root.destacada: VerticalLayout {
                 alignment: center;
-                BotaoBarra {
-                    texto: @tr("Monitor {}/{}", root.monitor, root.monitores);
-                    clicado => { root.monitor = Math.mod(root.monitor, root.monitores) + 1; }
+                padding-left: 6px;
+                padding-right: 6px;
+                Text {
+                    text: @tr("Monitor {} · {}", root.monitor-unico + 1, root.monitores[root.monitor-unico].nome);
+                    color: Tema.texto;
+                    font-size: Tema.fonte;
                 }
             }
+            if root.destacada: VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: @tr("Voltar para abas"); clicado => { root.voltar-para-abas(); } }
+            }
+            if !root.destacada && root.monitores.length > 1: HorizontalLayout {
+                spacing: 2px;
+                for m[i] in root.monitores: VerticalLayout {
+                    alignment: center;
+                    AbaMonitor {
+                        indice: i;
+                        m: m;
+                        ativa: i == root.monitor;
+                        pode-destacar: root.monitores-em-abas > 1;
+                        selecionar => {
+                            if !m.liberado {
+                                root.toast = @tr("O monitor {} não foi liberado em {}. Pedir acesso abre o diálogo do sistema lá.", i + 1, root.host);
+                            } else if m.destacado {
+                                root.toast = @tr("O monitor {} está aberto em outra janela.", i + 1);
+                            } else {
+                                root.monitor = i;
+                            }
+                        }
+                        destacar => { root.destacar(i); }
+                    }
+                }
+            }
+            if !root.destacada && root.monitores.length > 1: VerticalLayout {
+                alignment: center;
+                BotaoBarra { texto: "▾"; clicado => { menu-monitores.show(); } }
+            }
+            if !root.destacada && root.monitores.length > 1: VerticalLayout { alignment: center; Divisor { } }
             VerticalLayout {
                 alignment: center;
                 BotaoBarra { texto: root.rotulo-teclado + "  ▾"; clicado => { menu-teclado.show(); } }
             }
-            VerticalLayout {
+            if !root.destacada: VerticalLayout {
                 alignment: center;
                 BotaoBarra { texto: @tr("Arquivos"); ativo: root.painel-arquivos; clicado => { root.painel-arquivos = !root.painel-arquivos; } }
             }
@@ -389,8 +540,69 @@ export component JanelaSessao inherits Window {
         }
     }
 
+    menu-monitores := PopupWindow {
+        x: barra.x + 120px;
+        y: barra.y + barra.height + 6px;
+        width: 410px;
+        Rectangle {
+            background: Tema.superficie;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tema.borda;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: Tema.sombra;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                Text { text: @tr("Monitores de {}", root.host); color: Tema.texto; font-size: Tema.fonte; font-weight: 700; }
+                // Miniatura do layout do host: clicar num retângulo troca de monitor.
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: center;
+                    for m[i] in root.monitores: Rectangle {
+                        width: m.principal ? 120px : 96px;
+                        height: m.principal ? 68px : 54px;
+                        border-radius: 4px;
+                        border-width: i == root.monitor ? 2px : 1px;
+                        border-color: i == root.monitor ? Tema.primaria : Tema.borda;
+                        background: !m.liberado ? Tema.superficie-2 : Tema.primaria.with-alpha(0.08);
+                        TouchArea { clicked => { if m.liberado && !m.destacado { root.monitor = i; } } }
+                        VerticalLayout {
+                            alignment: center;
+                            Text { horizontal-alignment: center; text: i + 1; font-size: 16px; font-weight: 700; color: m.liberado ? Tema.texto : Tema.texto-2; }
+                            Text { horizontal-alignment: center; text: m.liberado ? m.resolucao : @tr("não liberado"); font-size: 10px; color: Tema.texto-2; }
+                        }
+                    }
+                }
+                Separador { }
+                ItemMenu {
+                    titulo: @tr("Um por vez (abas)");
+                    descricao: @tr("Clique numa aba para trocar de monitor.");
+                    marcado: true;
+                }
+                ItemMenu {
+                    titulo: @tr("Abrir monitor {} em janela", root.monitor + 1);
+                    descricao: @tr("Ou arraste a aba para fora da barra.");
+                    clicado => { if root.monitores-em-abas > 1 { root.destacar(root.monitor); } }
+                }
+                ItemMenu {
+                    titulo: @tr("Seguir o mouse");
+                    descricao: @tr("Troca de aba quando o cursor muda de monitor no host.");
+                    marcado: root.seguir-mouse;
+                    clicado => { root.seguir-mouse = !root.seguir-mouse; }
+                }
+                if root.host-wayland: Text {
+                    wrap: word-wrap;
+                    text: @tr("{} usa Wayland: só aparecem os monitores que a pessoa liberou no diálogo do sistema. Pedir outro monitor abre esse diálogo de novo lá.", root.host);
+                    color: Tema.texto-2;
+                    font-size: Tema.fonte-pequena;
+                }
+            }
+        }
+    }
+
     menu-teclado := PopupWindow {
-        x: barra.x + 180px;
+        x: barra.x + (root.monitores.length > 1 && !root.destacada ? 430px : 180px);
         y: barra.y + barra.height + 6px;
         width: 340px;
         Rectangle {

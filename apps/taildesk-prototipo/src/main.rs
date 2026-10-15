@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 mod ui {
     #![allow(missing_debug_implementations, clippy::all)]
@@ -16,10 +16,11 @@ mod ui {
 }
 
 use ui::{
-    Dispositivo, Estado, Etapa, FaixaHost, JanelaPedido, JanelaPrincipal, JanelaSessao, Tema,
+    Dispositivo, Estado, Etapa, FaixaHost, JanelaPedido, JanelaPrincipal, JanelaSessao, Monitor,
+    Tema,
 };
 
-const TELAS: &str = "principal, transferencias, configuracoes, pedido, faixa, sessao, sessao-arquivos, sessao-navegar, sessao-relay, sessao-esperando, sessao-reconectando";
+const TELAS: &str = "principal, transferencias, configuracoes, pedido, faixa, sessao, sessao-monitores, sessao-wayland, sessao-com-janela, sessao-destacada, sessao-arquivos, sessao-navegar, sessao-relay, sessao-esperando, sessao-reconectando";
 
 fn dispositivo(
     nome: &str,
@@ -92,6 +93,127 @@ fn dispositivos_exemplo() -> Vec<Dispositivo> {
     ]
 }
 
+fn monitor(nome: &str, resolucao: &str, principal: bool, liberado: bool) -> Monitor {
+    Monitor {
+        nome: nome.into(),
+        resolucao: resolucao.into(),
+        principal,
+        liberado,
+        destacado: false,
+    }
+}
+
+/// Monitores de exemplo por dispositivo: o host Wayland tem um monitor que a pessoa não liberou no portal.
+fn monitores_do(nome: &str) -> Vec<Monitor> {
+    match nome {
+        "desktop-casa" => vec![
+            monitor("DELL U2720Q", "2560×1440", true, true),
+            monitor("LG 24MK600", "1920×1080", false, true),
+        ],
+        "servidor-homelab" => vec![
+            monitor("eDP-1", "1920×1200", true, true),
+            monitor("DP-2", "2560×1440", false, true),
+            monitor("HDMI-1", "1920×1080", false, false),
+        ],
+        _ => vec![monitor("Monitor", "1920×1080", true, true)],
+    }
+}
+
+fn em_abas(monitores: &VecModel<Monitor>) -> i32 {
+    monitores
+        .iter()
+        .filter(|m| m.liberado && !m.destacado)
+        .count() as i32
+}
+
+/// Marca o monitor como destacado (ou não) e atualiza a janela principal da sessão.
+fn marcar_destacado(
+    sessao: &JanelaSessao,
+    monitores: &VecModel<Monitor>,
+    indice: usize,
+    destacado: bool,
+) {
+    let Some(mut m) = monitores.row_data(indice) else {
+        return;
+    };
+    m.destacado = destacado;
+    monitores.set_row_data(indice, m);
+    sessao.set_monitores_em_abas(em_abas(monitores));
+    if destacado && sessao.get_monitor() as usize == indice {
+        if let Some(livre) = monitores.iter().position(|m| m.liberado && !m.destacado) {
+            sessao.set_monitor(livre as i32);
+        }
+    }
+}
+
+/// Abre um monitor da sessão em janela própria; fechar a janela devolve a aba.
+fn destacar_monitor(
+    sessao: &JanelaSessao,
+    monitores: &Rc<VecModel<Monitor>>,
+    indice: i32,
+    tema: TemaEscolhido,
+    abertas: &Rc<RefCell<Abertas>>,
+) {
+    marcar_destacado(sessao, monitores, indice as usize, true);
+    let janela = JanelaSessao::new().expect("janela do monitor");
+    aplicar_tema(&janela, tema);
+    janela.set_host(sessao.get_host());
+    janela.set_teclado_host(sessao.get_teclado_host());
+    janela.set_via_relay(sessao.get_via_relay());
+    janela.set_monitores(ModelRc::from(monitores.clone()));
+    janela.set_monitor_unico(indice);
+    janela.set_simular(false);
+    janela.set_etapa(Etapa::Conectada);
+
+    let devolver = {
+        let sessao = sessao.as_weak();
+        let janela = janela.as_weak();
+        let monitores = monitores.clone();
+        move || {
+            if let Some(s) = sessao.upgrade() {
+                marcar_destacado(&s, &monitores, indice as usize, false);
+            }
+            if let Some(j) = janela.upgrade() {
+                let _ = j.hide();
+            }
+        }
+    };
+    let devolver_ao_fechar = devolver.clone();
+    janela.on_voltar_para_abas(devolver);
+    janela.window().on_close_requested(move || {
+        devolver_ao_fechar();
+        slint::CloseRequestResponse::HideWindow
+    });
+    // Desconectar numa janela destacada encerra a sessão inteira.
+    let sessao_fraca = sessao.as_weak();
+    janela.on_desconectar(move || {
+        if let Some(s) = sessao_fraca.upgrade() {
+            s.invoke_desconectar();
+        }
+    });
+    janela.show().expect("mostrar janela do monitor");
+    abertas.borrow_mut().sessoes.push(janela);
+}
+
+/// Liga os monitores de exemplo à janela da sessão e o "abrir em janela".
+fn ligar_monitores(
+    sessao: &JanelaSessao,
+    nome: &str,
+    tema: TemaEscolhido,
+    abertas: &Rc<RefCell<Abertas>>,
+) {
+    let monitores = Rc::new(VecModel::from(monitores_do(nome)));
+    sessao.set_monitores(ModelRc::from(monitores.clone()));
+    sessao.set_monitores_em_abas(em_abas(&monitores));
+    let fraca = sessao.as_weak();
+    let abertas = abertas.clone();
+    sessao.on_destacar(move |i| {
+        if let Some(s) = fraca.upgrade() {
+            destacar_monitor(&s, &monitores, i, tema, &abertas);
+        }
+    });
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum TemaEscolhido {
     Sistema,
@@ -129,10 +251,19 @@ fn abrir_sessao(
     sessao.set_so_host(d.so.clone());
     sessao.set_teclado_host(d.teclado.clone());
     sessao.set_via_relay(d.estado == Estado::Relay);
+    sessao.set_host_wayland(d.so.contains("Wayland"));
+    ligar_monitores(&sessao, &d.nome, tema, abertas);
     let fraca = sessao.as_weak();
+    let abertas_desconectar = abertas.clone();
     sessao.on_desconectar(move || {
         if let Some(s) = fraca.upgrade() {
             let _ = s.hide();
+            // Encerrar a sessão fecha também as janelas de monitores destacados.
+            for j in abertas_desconectar.borrow().sessoes.iter() {
+                if j.get_monitor_unico() >= 0 && j.get_host() == s.get_host() {
+                    let _ = j.hide();
+                }
+            }
         }
     });
     sessao.show().expect("mostrar sessão");
@@ -260,6 +391,43 @@ fn main() -> Result<(), slint::PlatformError> {
         "sessao" => {
             let s = sessao_estatica(tema, Etapa::Conectada)?;
             s.set_toast("Teclado: ABNT2 → US-Intl (tradução automática)".into());
+            s.run()
+        }
+        "sessao-monitores" => {
+            let s = sessao_estatica(tema, Etapa::Conectada)?;
+            let abrir = s.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
+                if let Some(s) = abrir.upgrade() {
+                    s.invoke_abrir_menu_monitores();
+                }
+            });
+            s.run()
+        }
+        "sessao-wayland" => {
+            let s = sessao_estatica(tema, Etapa::Conectada)?;
+            s.set_host("servidor-homelab".into());
+            s.set_teclado_host("ABNT2".into());
+            s.set_host_wayland(true);
+            let monitores = monitores_do("servidor-homelab");
+            s.set_monitores_em_abas(2);
+            s.set_monitores(ModelRc::new(VecModel::from(monitores)));
+            let abrir = s.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
+                if let Some(s) = abrir.upgrade() {
+                    s.invoke_abrir_menu_monitores();
+                }
+            });
+            s.run()
+        }
+        "sessao-com-janela" | "sessao-destacada" => {
+            let s = sessao_estatica(tema, Etapa::Conectada)?;
+            let mut monitores = monitores_do("desktop-casa");
+            monitores[1].destacado = true;
+            s.set_monitores(ModelRc::new(VecModel::from(monitores)));
+            s.set_monitores_em_abas(1);
+            if tela == "sessao-destacada" {
+                s.set_monitor_unico(1);
+            }
             s.run()
         }
         "sessao-arquivos" => {

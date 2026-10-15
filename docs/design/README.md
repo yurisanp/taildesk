@@ -12,12 +12,13 @@ cargo run -p taildesk-prototipo -- --tema escuro      # força o tema (padrão: 
 ```
 
 Telas isoladas (`--tela`): `principal`, `transferencias`, `configuracoes`, `pedido`, `faixa`,
-`sessao`, `sessao-arquivos`, `sessao-navegar`, `sessao-relay`, `sessao-esperando`, `sessao-reconectando`.
+`sessao`, `sessao-monitores`, `sessao-wayland`, `sessao-com-janela`, `sessao-destacada`, `sessao-arquivos`, `sessao-navegar`, `sessao-relay`, `sessao-esperando`, `sessao-reconectando`.
 
 O que dá para clicar: busca e seleção de dispositivos, Conectar (abre a janela da sessão, que passa
 por "Encontrando…" e "Esperando permitir…"), Enviar arquivo, Copiar, abas da janela principal,
 "Simular pedido recebido" (pedido de acesso → Permitir → faixa de sessão ativa no host). Na sessão:
-menu do teclado (Auto/Físico/Texto), Arquivos, Recolher/Fixar barra, `⋯` com simulações de relay,
+abas de monitores (⧉ abre o monitor em janela própria; fechar a janela devolve a aba;
+`▾` mostra o layout do host e "Seguir o mouse"), menu do teclado (Auto/Físico/Texto), Arquivos, Recolher/Fixar barra, `⋯` com simulações de relay,
 queda de conexão e caractere impossível.
 
 ## Capturas
@@ -29,5 +30,7 @@ queda de conexão e caractere impossível.
 | ![Sessão](capturas/sessao.png) | ![Sessão esperando permissão](capturas/sessao-esperando.png) |
 | ![Arquivos: transferências](capturas/sessao-arquivos.png) | ![Arquivos: navegar no host, tema escuro](capturas/sessao-navegar-escuro.png) |
 | ![Sessão via relay, barra recolhida](capturas/sessao-relay.png) | ![Configurações](capturas/configuracoes.png) |
+| ![Menu de monitores](capturas/sessao-monitores.png) | ![Host Wayland com monitor não liberado, tema escuro](capturas/sessao-wayland-escuro.png) |
+| ![Aba do monitor 2 aberta em janela](capturas/sessao-com-janela.png) | ![Janela própria do monitor 2](capturas/sessao-destacada.png) |
 
 Geradas no Linux com `Xvfb` + `SLINT_BACKEND=winit-software` + `import -window root`.
