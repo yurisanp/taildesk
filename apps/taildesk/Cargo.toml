@@ -18,6 +18,7 @@ taildesk-overlay.workspace = true
 taildesk-proto.workspace = true
 taildesk-keyboard.workspace = true
 taildesk-files.workspace = true
+taildesk-update.workspace = true
 taildesk-codec.workspace = true
 taildesk-media.workspace = true
 taildesk-render.workspace = true

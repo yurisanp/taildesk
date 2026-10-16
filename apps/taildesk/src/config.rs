@@ -3,7 +3,8 @@
 //! identidade fica no cofre do sistema.
 //!
 //! Arquivo de texto, uma linha por item, campos separados por tabulação:
-//! `pedir_sempre\t1`, `confiavel\t<node_stable_id>\t<nome>`, `host\t<node_stable_id>\t<sha256>`.
+//! `pedir_sempre\t1`, `confiavel\t<node_stable_id>\t<nome>`, `host\t<node_stable_id>\t<sha256>`,
+//! `atualizar_auto\t1`, `canal\testavel|pre`.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -17,6 +18,25 @@ pub struct Config {
     pub host: HostSettings,
     /// Hosts conhecidos: `node_stable_id` → fingerprint do certificado.
     pub hosts: BTreeMap<String, Fingerprint>,
+    pub atualizacao: PrefsAtualizacao,
+}
+
+/// Configurações → Atualizações (`docs/context/16-atualizacao-automatica.md` §5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrefsAtualizacao {
+    /// Procurar ao abrir e a cada 24 h (ligado por padrão).
+    pub automatica: bool,
+    /// Canal pré-lançamento (inclui as betas).
+    pub pre: bool,
+}
+
+impl Default for PrefsAtualizacao {
+    fn default() -> Self {
+        PrefsAtualizacao {
+            automatica: true,
+            pre: false,
+        }
+    }
 }
 
 fn caminho() -> Option<PathBuf> {
@@ -41,6 +61,8 @@ fn analisar(texto: &str) -> Config {
         let campos: Vec<&str> = linha.split('\t').collect();
         match campos.as_slice() {
             ["pedir_sempre", v] => c.host.ask_always = *v != "0",
+            ["atualizar_auto", v] => c.atualizacao.automatica = *v != "0",
+            ["canal", v] => c.atualizacao.pre = *v == "pre",
             ["confiavel", id, nome] if !id.is_empty() => c.host.trusted.push(TrustedDevice {
                 node_stable_id: (*id).to_owned(),
                 name: (*nome).to_owned(),
@@ -59,6 +81,11 @@ fn analisar(texto: &str) -> Config {
 
 fn escrever(c: &Config) -> String {
     let mut s = format!("pedir_sempre\t{}\n", u8::from(c.host.ask_always));
+    s += &format!(
+        "atualizar_auto\t{}\ncanal\t{}\n",
+        u8::from(c.atualizacao.automatica),
+        if c.atualizacao.pre { "pre" } else { "estavel" }
+    );
     for t in &c.host.trusted {
         s += &format!(
             "confiavel\t{}\t{}\n",
@@ -104,9 +131,14 @@ mod tests {
             name: "notebook\tyuri\n".into(),
         });
         c.hosts.insert("nXYZ".into(), [7; 32]);
+        c.atualizacao = PrefsAtualizacao {
+            automatica: false,
+            pre: true,
+        };
         let texto = escrever(&c);
         let volta = analisar(&texto);
         assert!(!volta.host.ask_always);
+        assert_eq!(volta.atualizacao, c.atualizacao);
         assert_eq!(volta.host.trusted[0].name, "notebookyuri");
         assert_eq!(volta.hosts, c.hosts);
         // Linhas desconhecidas ou estragadas não derrubam a leitura.
@@ -119,5 +151,6 @@ mod tests {
     #[test]
     fn padrao_pede_sempre() {
         assert!(analisar("").host.ask_always);
+        assert_eq!(analisar("").atualizacao, PrefsAtualizacao::default());
     }
 }

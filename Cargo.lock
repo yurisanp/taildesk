@@ -5243,6 +5243,7 @@ dependencies = [
  "taildesk-transport",
  "taildesk-tsapi",
  "taildesk-ui",
+ "taildesk-update",
  "tokio",
  "windows-sys 0.61.2",
 ]

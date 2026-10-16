@@ -147,16 +147,45 @@ fn rede(e: ureq::Error) -> Erro {
 }
 
 fn agente() -> ureq::Agent {
+    agente_com(10)
+}
+
+fn agente_com(redirecionamentos: u32) -> ureq::Agent {
     let tls = ureq::tls::TlsConfig::builder()
         .root_certs(ureq::tls::RootCerts::PlatformVerifier)
         .build();
     ureq::Agent::config_builder()
         .tls_config(tls)
+        .max_redirects(redirecionamentos)
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_recv_body(Some(Duration::from_secs(600)))
         .user_agent(concat!("TailDesk/", env!("CARGO_PKG_VERSION")))
         .build()
         .into()
+}
+
+/// GET de um asset de release, seguindo os redirecionamentos (github.com → CDN) um a um: cada
+/// resposta 3xx é lida até o fim antes do próximo pedido. O redirecionamento automático do ureq
+/// falhou ("chunk length cannot be read") com o 302 chunked do github.com atrás de um proxy.
+fn baixar_url(agente: &ureq::Agent, url: &str) -> Result<ureq::http::Response<ureq::Body>, Erro> {
+    let mut url = url.to_owned();
+    for _ in 0..5 {
+        let mut resp = agente.get(&url).call().map_err(rede)?;
+        if !resp.status().is_redirection() {
+            return Ok(resp);
+        }
+        let destino = resp
+            .headers()
+            .get("location")
+            .and_then(|l| l.to_str().ok())
+            .ok_or_else(|| Erro::Formato("redirecionamento sem Location".into()))?;
+        if !destino.starts_with("https://") {
+            return Err(Erro::Formato(format!("redirecionamento para {destino}")));
+        }
+        url = destino.to_owned();
+        let _ = resp.body_mut().with_config().limit(1 << 16).read_to_vec();
+    }
+    Err(Erro::Rede("redirecionamentos demais".into()))
 }
 
 /// A versão em execução.
@@ -236,11 +265,8 @@ pub fn instalar_appimage(
     let (Some(arquivo), Some(sums)) = (&atualizacao.appimage, &atualizacao.sha256sums) else {
         return Err(Erro::SemArquivo);
     };
-    let agente = agente();
-    let texto = agente
-        .get(&sums.browser_download_url)
-        .call()
-        .map_err(rede)?
+    let agente = agente_com(0);
+    let texto = baixar_url(&agente, &sums.browser_download_url)?
         .body_mut()
         .with_config()
         .limit(1 << 20)
@@ -252,10 +278,7 @@ pub fn instalar_appimage(
     nome_part.push(".part");
     let part = PathBuf::from(nome_part);
     let r = (|| {
-        let mut resp = agente
-            .get(&arquivo.browser_download_url)
-            .call()
-            .map_err(rede)?;
+        let mut resp = baixar_url(&agente, &arquivo.browser_download_url)?;
         let mut leitor = resp.body_mut().with_config().limit(1 << 30).reader();
         baixar(&mut leitor, &part, &esperado, arquivo.size, &mut progresso)?;
         trocar(&part, appimage)

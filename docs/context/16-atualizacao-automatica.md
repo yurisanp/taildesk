@@ -115,5 +115,6 @@ O app sabe o formato pelo `APPIMAGE` (AppImage) e por um marcador de build
 
 - [x] `.upd_info` + `.zsync` em todo AppImage (`build-packages.sh`, `release.yml`) e teste no CI.
 - [x] Crate `taildesk-update` e `taildesk-cli atualizar` (procura, baixa, confere o SHA-256 e troca o AppImage).
-- [ ] UI do atualizador no app (§5).
+- [x] UI do atualizador no app (§5): faixa na tela inicial, item na bandeja e Configurações → Atualizações
+  (`apps/taildesk/src/atualizacao.rs`, `crates/taildesk-ui/ui/atualizacao.slint`).
 - [ ] Assinatura (fase 5).
