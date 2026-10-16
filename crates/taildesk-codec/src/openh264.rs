@@ -1,4 +1,4 @@
-//! Backend openh264: Constrained Baseline, conteúdo de tela em tempo real, controle por bitrate.
+//! Backend openh264: Constrained Baseline, vídeo em tempo real, controle por bitrate.
 //!
 //! O crate não expõe trocar o bitrate de um encoder aberto; [`EncoderOpenH264::ajustar_bitrate`]
 //! recria o encoder no próximo quadro, que sai como IDR. A seleção adaptativa muda o alvo a cada
@@ -49,10 +49,11 @@ impl EncoderOpenH264 {
     }
 
     fn abrir(&self) -> Result<Encoder, ErroCodec> {
-        // Diagnóstico de desempenho: `TAILDESK_OPENH264_USO=camera` e `TAILDESK_OPENH264_THREADS=n`.
+        // O modo "câmera" codifica tela ~30% mais rápido e com PSNR maior (53 vs 44 dB) que o
+        // "tela", ao custo de uns 3x de bitrate. `TAILDESK_OPENH264_USO=tela` volta ao antigo.
         let uso = match std::env::var("TAILDESK_OPENH264_USO").as_deref() {
-            Ok("camera") => UsageType::CameraVideoRealTime,
-            _ => UsageType::ScreenContentRealTime,
+            Ok("tela") => UsageType::ScreenContentRealTime,
+            _ => UsageType::CameraVideoRealTime,
         };
         let threads = std::env::var("TAILDESK_OPENH264_THREADS")
             .ok()
