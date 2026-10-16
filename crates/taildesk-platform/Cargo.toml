@@ -18,7 +18,7 @@ keyring-core = "1"
 zbus = "5"
 # Portais RemoteDesktop e ScreenCast (MIT). Sem tokio: o zbus do Slint usa async-io e os dois
 # têm de concordar no runtime do zbus.
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "remote_desktop", "screencast"] }
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser", "open_uri", "remote_desktop", "screencast"] }
 futures-util = { version = "0.3", default-features = false }
 # Recebe os quadros de cada monitor do portal (MIT). Liga na libpipewire-0.3 do sistema; o build
 # precisa do pacote -dev e do libclang (bindgen).
@@ -31,6 +31,8 @@ zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-cr
 windows-native-keyring-store = { version = "1", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 # Desktop Duplication (D3D11 + DXGI) é COM; o crate `windows` (MIT/Apache) cuida das interfaces.
+# Diálogo de abrir arquivos (IFileOpenDialog) para o painel de arquivos (MIT).
+rfd = { version = "0.15", default-features = false }
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi"] }
 
 [lints]

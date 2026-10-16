@@ -188,10 +188,17 @@ component ItemNavegador inherits Rectangle {
         padding-left: 10px;
         padding-right: 10px;
         spacing: 8px;
-        Text {
-            vertical-alignment: center;
-            text: root.pasta ? "📁" : "📄";
-            font-size: Tema.fonte;
+        // Pasta: retângulo cor de pasta; arquivo: folha com borda.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 14px;
+                height: root.pasta ? 11px : 14px;
+                border-radius: 2px;
+                background: root.pasta ? (root.habilitado ? Tema.relay : Tema.offline) : transparent;
+                border-width: root.pasta ? 0px : 1px;
+                border-color: Tema.texto-2;
+            }
         }
         VerticalLayout {
             horizontal-stretch: 1;
@@ -213,6 +220,12 @@ component ItemNavegador inherits Rectangle {
         if !root.pasta: VerticalLayout {
             alignment: center;
             Botao { texto: @tr("Baixar"); discreto: true; altura: 26px; clicado => { root.baixar(); } }
+        }
+        if root.pasta && root.habilitado: Text {
+            vertical-alignment: center;
+            text: "›";
+            font-size: 18px;
+            color: Tema.texto-2;
         }
     }
 }
@@ -239,6 +252,8 @@ export component PainelArquivos inherits Rectangle {
     callback abrir-pasta(int);
     callback limpar();
     callback enviar-arquivos();
+    callback enviar-pasta();
+    callback fechar();
     callback listar-raizes();
     callback abrir-raiz(int);
     callback entrar(string);
@@ -248,7 +263,7 @@ export component PainelArquivos inherits Rectangle {
     callback baixar(string);
     callback enviar-aqui();
 
-    width: 340px;
+    width: 360px;
     background: Tema.superficie;
     border-width: 1px;
     border-color: Tema.borda;
@@ -266,6 +281,7 @@ export component PainelArquivos inherits Rectangle {
                     if root.raiz-aberta == "" { root.listar-raizes(); }
                 }
             }
+            Botao { texto: "✕"; discreto: true; altura: 28px; y: 3px; clicado => { root.fechar(); } }
         }
         Separador { }
 
@@ -275,9 +291,10 @@ export component PainelArquivos inherits Rectangle {
                 padding: 8px;
                 spacing: 8px;
                 Botao { texto: @tr("Enviar arquivos…"); primario: true; altura: 28px; clicado => { root.enviar-arquivos(); } }
+                Botao { texto: @tr("Enviar pasta…"); altura: 28px; clicado => { root.enviar-pasta(); } }
                 Rectangle { horizontal-stretch: 1; }
                 if root.transferencias.length > 0: Botao {
-                    texto: @tr("Limpar concluídas");
+                    texto: @tr("Limpar");
                     discreto: true;
                     altura: 28px;
                     clicado => { root.limpar(); }
@@ -375,6 +392,90 @@ export component PainelArquivos inherits Rectangle {
                 padding: 8px;
                 Botao { texto: @tr("Enviar para cá…"); altura: 28px; clicado => { root.enviar-aqui(); } }
             }
+        }
+    }
+}
+
+// Estado do painel numa janela de sessão; o app preenche pelo `global::<ArquivosSessao>()`.
+export global ArquivosSessao {
+    // A sessão está ao vivo e o host liberou arquivos.
+    in property <bool> disponivel;
+    in-out property <bool> aberto;
+    // Aba do painel: 0 = Transferências, 1 = Navegar no host.
+    in-out property <int> aba;
+    in property <int> ativas;
+    in property <[LinhaTransferencia]> transferencias;
+    in property <[RaizRemota]> raizes;
+    in property <string> raiz-aberta;
+    in property <[string]> caminho;
+    in property <[ItemRemoto]> itens;
+    in property <bool> carregando;
+    in property <bool> tem-erro;
+    in property <ErroArquivo> erro;
+    in property <bool> pode-enviar-aqui;
+
+    callback cancelar(int);
+    callback abrir-pasta(int);
+    callback limpar();
+    callback enviar-arquivos();
+    callback enviar-pasta();
+    callback listar-raizes();
+    callback abrir-raiz(int);
+    callback entrar(string);
+    callback ir-para(int);
+    callback atualizar();
+    callback baixar(string);
+    callback enviar-aqui();
+}
+
+// Botão e painel por cima do vídeo, no canto direito da janela da sessão.
+export component ArquivosNaSessao inherits Rectangle {
+    // Altura da barra da sessão, onde o painel começa.
+    in property <length> topo: 40px;
+
+    if ArquivosSessao.disponivel && !ArquivosSessao.aberto: Botao {
+        x: parent.width - self.width - 12px;
+        y: root.topo + 8px;
+        width: self.min-width;
+        altura: 30px;
+        texto: ArquivosSessao.ativas > 0 ? @tr("Arquivos ({0})", ArquivosSessao.ativas) : @tr("Arquivos");
+        clicado => { ArquivosSessao.aberto = true; }
+    }
+    if ArquivosSessao.disponivel && ArquivosSessao.aberto: Rectangle {
+        x: parent.width - self.width;
+        y: root.topo;
+        width: 360px;
+        height: parent.height - root.topo;
+        // O vídeo embaixo não recebe clique, movimento nem rolagem do painel.
+        TouchArea {
+            scroll-event(e) => { accept }
+        }
+        PainelArquivos {
+            aba <=> ArquivosSessao.aba;
+            width: parent.width;
+            height: parent.height;
+            transferencias: ArquivosSessao.transferencias;
+            raizes: ArquivosSessao.raizes;
+            raiz-aberta: ArquivosSessao.raiz-aberta;
+            caminho: ArquivosSessao.caminho;
+            itens: ArquivosSessao.itens;
+            carregando: ArquivosSessao.carregando;
+            tem-erro: ArquivosSessao.tem-erro;
+            erro: ArquivosSessao.erro;
+            pode-enviar-aqui: ArquivosSessao.pode-enviar-aqui;
+            fechar => { ArquivosSessao.aberto = false; }
+            cancelar(id) => { ArquivosSessao.cancelar(id); }
+            abrir-pasta(id) => { ArquivosSessao.abrir-pasta(id); }
+            limpar => { ArquivosSessao.limpar(); }
+            enviar-arquivos => { ArquivosSessao.enviar-arquivos(); }
+            enviar-pasta => { ArquivosSessao.enviar-pasta(); }
+            listar-raizes => { ArquivosSessao.listar-raizes(); }
+            abrir-raiz(id) => { ArquivosSessao.abrir-raiz(id); }
+            entrar(n) => { ArquivosSessao.entrar(n); }
+            ir-para(i) => { ArquivosSessao.ir-para(i); }
+            atualizar => { ArquivosSessao.atualizar(); }
+            baixar(n) => { ArquivosSessao.baixar(n); }
+            enviar-aqui => { ArquivosSessao.enviar-aqui(); }
         }
     }
 }

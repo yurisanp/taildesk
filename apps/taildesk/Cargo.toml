@@ -25,7 +25,7 @@ taildesk-render.workspace = true
 quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 slint = { version = "=1.18.1", features = ["unstable-winit-030", "unstable-wgpu-30", "renderer-femtovg-wgpu"] }
 pollster = "0.4"
-tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }

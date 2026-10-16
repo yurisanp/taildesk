@@ -31,6 +31,8 @@ use tokio::sync::{mpsc, oneshot};
 use crate::video::{Recepcoes, Tela, ler_datagramas, travar};
 use crate::{config, no_app};
 
+mod arquivos;
+
 type IdLocal = u64;
 
 /// Layout deste computador (o controlador traduz a partir dele).
@@ -107,6 +109,7 @@ struct SessaoUi {
     /// Último ponto do mouse sobre o vídeo, para desenhar o cursor sem esperar o host.
     local: Option<(u32, u16, u16)>,
     botoes: u8,
+    painel: arquivos::Painel,
     /// Recepção e decode do monitor ativo (a task dos datagramas entrega aqui).
     recepcoes: Recepcoes,
     tela: Tela,
@@ -354,7 +357,7 @@ impl SessaoUi {
             EventoControlador::Forma(f) => {
                 self.cursor.forma_recebida(f);
             }
-            EventoControlador::Arquivos(_) => {}
+            EventoControlador::Arquivos(e) => self.painel.evento(&self.janela, e),
             EventoControlador::Mensagem(m) => match *m {
                 Msg::DisplaysChanged(d) => {
                     self.displays.clone_from(&d.displays);
@@ -376,6 +379,7 @@ impl SessaoUi {
         self.enviar_todas(out);
         self.abas();
         self.desenhar_cursor();
+        self.painel.estado(&self.janela, &self.estado);
     }
 
     fn tecla(&mut self, hid: Hid, down: bool) -> bool {
@@ -578,6 +582,7 @@ impl Controlador {
         janela.on_mouse_rolou(move |dx, dy| {
             na_sessao_ja(id, |s| s.mouse_rolou(dx, dy));
         });
+        arquivos::ligar_callbacks(&janela, id);
         // Teclado pelo código físico, antes do Slint (Tab, Alt e atalhos vão para o host).
         janela
             .window()
@@ -641,6 +646,7 @@ impl Controlador {
                 mods_presos: Vec::new(),
                 local: None,
                 botoes: 0,
+                painel: arquivos::Painel::new(id, rt.clone()),
                 recepcoes: recepcoes.clone(),
                 tela: Tela::default(),
                 video_display: None,
@@ -733,7 +739,11 @@ async fn rodar(
         }
     }
     let saida = sessao.saida();
-    na_sessao(id, move |s| s.saida = Some(saida));
+    let servico = sessao.arquivos().clone();
+    na_sessao(id, move |s| {
+        s.saida = Some(saida);
+        s.painel.ligar(servico);
+    });
     let datagramas = tokio::spawn(ler_datagramas(sessao.conexao().clone(), recepcoes));
     loop {
         tokio::select! {
