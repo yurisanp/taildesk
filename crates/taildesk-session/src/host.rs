@@ -83,7 +83,8 @@ pub fn need(msg: &Msg) -> Need {
         | Msg::SetVideoQuality(_)
         | Msg::RequestKeyframe(_)
         | Msg::PictureLoss(_)
-        | Msg::Nack(_) => Need::View,
+        | Msg::Nack(_)
+        | Msg::ReceiverReport(_) => Need::View,
         Msg::MouseMove(_)
         | Msg::MouseButton(_)
         | Msg::Scroll(_)

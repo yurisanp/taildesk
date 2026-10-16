@@ -6,10 +6,12 @@
 
 pub mod envio;
 pub mod fragmentos;
+pub mod medidor;
 pub mod recepcao;
 
 pub use envio::{ConfigEnvio, EnvioVideo, EstatisticasEnvio, SaidaDatagramas};
 pub use fragmentos::{Fragmentador, Remontador, Remontagem};
+pub use medidor::Medidor;
 pub use recepcao::{AoQuadro, PedirChave, RecepcaoVideo};
 
 #[cfg(test)]

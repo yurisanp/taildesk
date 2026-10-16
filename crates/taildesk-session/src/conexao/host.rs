@@ -583,7 +583,8 @@ async fn ao_vivo<M: Maquina>(
                     | Msg::SetPriority(_)
                     | Msg::SetVideoQuality(_)
                     | Msg::RequestKeyframe(_)
-                    | Msg::PictureLoss(_) => midia.mensagem(&msg).await,
+                    | Msg::PictureLoss(_)
+                    | Msg::ReceiverReport(_) => midia.mensagem(&msg).await,
                     // O layout e o modo escolhidos valem no controlador, que traduz.
                     Msg::KeyboardLayoutChanged(_) | Msg::KeyboardMode(_) => {}
                     _ => {

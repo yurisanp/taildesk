@@ -47,6 +47,8 @@ use qualidade::Nivel;
 const INTERVALO_DIAGNOSTICO: Duration = Duration::from_secs(1);
 /// Rota do Tailscale (pede um `ping` disco ao `tailscaled`, então menos vezes).
 const INTERVALO_ROTA: Duration = Duration::from_secs(10);
+/// `ReceiverReport` de cada monitor recebido, para o controle de taxa do host.
+const INTERVALO_RELATORIO: Duration = Duration::from_millis(250);
 
 type IdLocal = u64;
 
@@ -1195,7 +1197,8 @@ async fn rodar(
         s.painel.ligar(servico);
     });
     let conn = sessao.conexao().clone();
-    let datagramas = tokio::spawn(ler_datagramas(conn.clone(), recepcoes, contadores));
+    let datagramas = tokio::spawn(ler_datagramas(conn.clone(), recepcoes.clone(), contadores));
+    let saida_relatorio = sessao.saida();
     // Rota pelo Tailscale (direta ou DERP), em segundo plano: o `ping` disco pode demorar.
     let rota = Arc::new(Mutex::new(None));
     let tarefa_rota = tokio::spawn({
@@ -1212,6 +1215,8 @@ async fn rodar(
         }
     });
     let mut diag = tokio::time::interval(INTERVALO_DIAGNOSTICO);
+    let mut relatorio = tokio::time::interval(INTERVALO_RELATORIO);
+    relatorio.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             ev = eventos.recv() => match ev {
@@ -1243,6 +1248,19 @@ async fn rodar(
                 }
                 None => break,
             },
+            _ = relatorio.tick() => {
+                let agora = std::time::Instant::now();
+                let relatos: Vec<_> = travar(&recepcoes)
+                    .values_mut()
+                    .map(|(display, r)| r.relatorio(*display, agora))
+                    .collect();
+                for r in relatos {
+                    // Fila cheia perde este; o próximo vem em 250 ms.
+                    let _ = saida_relatorio.try_send(Control {
+                        msg: Some(Msg::ReceiverReport(r)),
+                    });
+                }
+            }
             _ = diag.tick() => {
                 let rede = Rede {
                     rtt: conn.rtt(),
