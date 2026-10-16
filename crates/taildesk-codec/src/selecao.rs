@@ -21,8 +21,8 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Onde {
     Cpu,
-    #[cfg(target_os = "linux")]
-    Nvidia(crate::linux::cuda::CuDevice),
+    #[cfg(any(target_os = "linux", windows))]
+    Nvidia(crate::nvidia::cuda::CuDevice),
     #[cfg(target_os = "linux")]
     Va(std::path::PathBuf),
     /// Media Foundation (o decoder do sistema, na GPU quando há D3D11).
@@ -50,8 +50,8 @@ impl Opcao {
     pub fn abrir_encoder(&self, config: ConfigEncoder) -> Result<Box<dyn VideoEncoder>, ErroCodec> {
         match &self.onde {
             Onde::Cpu => Ok(Box::new(EncoderOpenH264::novo(config)?)),
-            #[cfg(target_os = "linux")]
-            Onde::Nvidia(dev) => Ok(Box::new(crate::linux::nvenc::EncoderNvenc::novo(
+            #[cfg(any(target_os = "linux", windows))]
+            Onde::Nvidia(dev) => Ok(Box::new(crate::nvidia::nvenc::EncoderNvenc::novo(
                 *dev,
                 self.gpu.clone().unwrap_or_default(),
                 self.codec,
@@ -72,8 +72,8 @@ impl Opcao {
     pub fn abrir_decoder(&self) -> Result<Box<dyn VideoDecoder>, ErroCodec> {
         match &self.onde {
             Onde::Cpu => Ok(Box::new(DecoderOpenH264::novo()?)),
-            #[cfg(target_os = "linux")]
-            Onde::Nvidia(dev) => Ok(Box::new(crate::linux::nvdec::DecoderNvdec::novo(
+            #[cfg(any(target_os = "linux", windows))]
+            Onde::Nvidia(dev) => Ok(Box::new(crate::nvidia::nvdec::DecoderNvdec::novo(
                 *dev,
                 self.gpu.clone().unwrap_or_default(),
                 self.codec,
@@ -153,27 +153,40 @@ pub fn candidatos_encoder(aceitos: &[CodecVideo]) -> Vec<Opcao> {
         .collect()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", windows)))]
 fn encoders_de_hardware() -> Vec<Opcao> {
     Vec::new()
 }
 
+/// NVENC de uma GPU CUDA: uma opção por codec que ela codifica.
+#[cfg(any(target_os = "linux", windows))]
+fn nvenc_de(dev: crate::nvidia::cuda::CuDevice, nome: &str) -> Vec<Opcao> {
+    crate::nvidia::nvenc::codecs(dev)
+        .into_iter()
+        .map(|codec| Opcao {
+            backend: "nvenc",
+            gpu: Some(nome.to_owned()),
+            codec,
+            onde: Onde::Nvidia(dev),
+        })
+        .collect()
+}
+
+/// Windows: NVENC em cada GPU NVIDIA. Intel e AMD (Media Foundation) ainda não.
+#[cfg(windows)]
+fn encoders_de_hardware() -> Vec<Opcao> {
+    crate::nvidia::nvenc::gpus()
+        .iter()
+        .flat_map(|(dev, nome, _)| nvenc_de(*dev, nome))
+        .collect()
+}
+
 #[cfg(target_os = "linux")]
 fn encoders_de_hardware() -> Vec<Opcao> {
-    use crate::linux::{gpu, nvenc, vaapi};
+    use crate::linux::{gpu, vaapi};
+    use crate::nvidia::nvenc;
     let mut opcoes = Vec::new();
     let nvidia = nvenc::gpus();
-    let nvenc_de = |dev, nome: &str| {
-        nvenc::codecs(dev)
-            .into_iter()
-            .map(move |codec| Opcao {
-                backend: "nvenc",
-                gpu: Some(nome.to_owned()),
-                codec,
-                onde: Onde::Nvidia(dev),
-            })
-            .collect::<Vec<_>>()
-    };
     for g in gpu::gpus() {
         if g.fabricante == gpu::NVIDIA {
             // O VA-API da NVIDIA (nvidia-vaapi-driver) não codifica: só o NVENC.
@@ -238,10 +251,11 @@ fn decoders_de_hardware() -> Vec<Opcao> {
     Vec::new()
 }
 
+/// Windows: Media Foundation com D3D11 primeiro, NVDEC depois.
 #[cfg(windows)]
 fn decoders_de_hardware() -> Vec<Opcao> {
     use crate::windows::mf;
-    [CodecVideo::H264, CodecVideo::Hevc, CodecVideo::Av1]
+    let mut opcoes: Vec<Opcao> = [CodecVideo::H264, CodecVideo::Hevc, CodecVideo::Av1]
         .into_iter()
         .filter_map(|codec| {
             mf::gpu_do_decoder(codec).map(|gpu| Opcao {
@@ -251,12 +265,26 @@ fn decoders_de_hardware() -> Vec<Opcao> {
                 onde: Onde::Mf,
             })
         })
-        .collect()
+        .collect();
+    for (dev, nome, _) in crate::nvidia::nvdec::gpus() {
+        opcoes.extend(
+            crate::nvidia::nvdec::codecs(dev)
+                .into_iter()
+                .map(|codec| Opcao {
+                    backend: "nvdec",
+                    gpu: Some(nome.clone()),
+                    codec,
+                    onde: Onde::Nvidia(dev),
+                }),
+        );
+    }
+    opcoes
 }
 
 #[cfg(target_os = "linux")]
 fn decoders_de_hardware() -> Vec<Opcao> {
-    use crate::linux::{gpu, nvdec};
+    use crate::linux::gpu;
+    use crate::nvidia::nvdec;
     let mut nvidia = nvdec::gpus();
     let mut ordem = Vec::new();
     // GPUs na ordem de preferência (a ligada às telas primeiro), depois as sem nó de render.
@@ -296,6 +324,69 @@ pub fn abrir_decoder(
         }
     }
     Err(ultimo)
+}
+
+/// Relatório do que esta máquina codifica e decodifica, com o erro de cada backend que não abriu
+/// (`taildesk-cli codecs`). Abre cada encoder e decoder de verdade.
+pub fn relatorio() -> String {
+    use std::fmt::Write;
+    let gpu = |o: &Opcao| o.gpu.clone().unwrap_or_else(|| "CPU".into());
+    let mut r = String::new();
+    let codecs = [CodecVideo::H264, CodecVideo::Hevc, CodecVideo::Av1];
+    let _ = writeln!(r, "Encoders:");
+    for c in codecs {
+        let opcoes = opcoes_encoder(c);
+        if opcoes.is_empty() {
+            let _ = writeln!(r, "  {}: nenhum", nome_codec(c));
+        }
+        for o in opcoes {
+            let config = ConfigEncoder {
+                bitrate_bps: 4_000_000,
+                fps_max: 60.0,
+            };
+            let estado = match o.abrir_encoder(config) {
+                Ok(_) => "ok".to_string(),
+                Err(e) => format!("falhou: {e}"),
+            };
+            let _ = writeln!(
+                r,
+                "  {} {} ({}): {estado}",
+                nome_codec(c),
+                o.backend,
+                gpu(&o)
+            );
+        }
+    }
+    let _ = writeln!(r, "Decoders:");
+    for c in codecs {
+        let opcoes = opcoes_decoder(c);
+        if opcoes.is_empty() {
+            let _ = writeln!(r, "  {}: nenhum de hardware", nome_codec(c));
+        }
+        for o in opcoes {
+            let estado = match o.abrir_decoder() {
+                Ok(d) => format!("ok ({} {})", d.nome(), d.gpu().unwrap_or("CPU")),
+                Err(e) => format!("falhou: {e}"),
+            };
+            let _ = writeln!(
+                r,
+                "  {} {} ({}): {estado}",
+                nome_codec(c),
+                o.backend,
+                gpu(&o)
+            );
+        }
+        #[cfg(windows)]
+        if let Err(e) = crate::windows::mf::sondar(c) {
+            let _ = writeln!(r, "  {} mf: {e}", nome_codec(c));
+        }
+    }
+    let anunciados: Vec<&str> = codecs_para_decodificar()
+        .into_iter()
+        .map(nome_codec)
+        .collect();
+    let _ = writeln!(r, "Anunciados no Hello: {}", anunciados.join(", "));
+    r
 }
 
 #[cfg(test)]

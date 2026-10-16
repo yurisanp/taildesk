@@ -58,7 +58,7 @@ fn lib() -> Option<&'static LibNvcuvid> {
     static LIB: OnceLock<Option<LibNvcuvid>> = OnceLock::new();
     LIB.get_or_init(|| {
         // SAFETY: biblioteca do driver da NVIDIA; o bindgen confere cada símbolo.
-        unsafe { LibNvcuvid::new("libnvcuvid.so.1").ok() }
+        unsafe { LibNvcuvid::new(super::biblioteca("libnvcuvid.so.1", "nvcuvid.dll")).ok() }
     })
     .as_ref()
 }
@@ -111,6 +111,8 @@ impl Estado {
 }
 
 /// SPS novo: (re)cria o decoder. Devolve quantas superfícies o parser pode usar.
+// `c_ulong` tem 64 bits no Linux e 32 no Windows: o `.into()` é conversão de verdade só no Linux.
+#[allow(clippy::useless_conversion)]
 unsafe extern "C" fn sequencia(dados: *mut c_void, formato: *mut CUVIDEOFORMAT) -> c_int {
     // SAFETY: o parser chama com o `Estado` que registramos e um formato válido.
     let (e, f) = unsafe { (&mut *dados.cast::<Estado>(), &*formato) };

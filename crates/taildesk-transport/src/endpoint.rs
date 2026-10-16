@@ -14,9 +14,16 @@ const DATAGRAM_BUFFER: usize = 8 * 1024 * 1024;
 
 fn transport_config() -> Arc<quinn::TransportConfig> {
     let mut t = quinn::TransportConfig::default();
-    t.keep_alive_interval(Some(Duration::from_secs(5)))
-        .datagram_receive_buffer_size(Some(DATAGRAM_BUFFER))
-        .datagram_send_buffer_size(DATAGRAM_BUFFER);
+    // Um peer que some sem fechar (processo morto, rede caiu) é dado como perdido em 10 s, não
+    // nos 30 s padrão do quinn; o keep-alive a cada 3 s mantém viva a conexão ociosa.
+    t.max_idle_timeout(Some(
+        Duration::from_secs(10)
+            .try_into()
+            .expect("10 s cabe no IdleTimeout"),
+    ))
+    .keep_alive_interval(Some(Duration::from_secs(3)))
+    .datagram_receive_buffer_size(Some(DATAGRAM_BUFFER))
+    .datagram_send_buffer_size(DATAGRAM_BUFFER);
     Arc::new(t)
 }
 

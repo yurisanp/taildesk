@@ -50,8 +50,9 @@ fn subtipo(codec: CodecVideo) -> GUID {
     }
 }
 
-/// Primeiro decoder do sistema para o codec, ativado.
-fn ativar_decoder(codec: CodecVideo) -> Result<IMFTransform, ErroCodec> {
+/// Decoders do sistema para o codec, ativados, na ordem do MF. Inclui os da Microsoft Store
+/// (as extensões de HEVC e AV1 vêm de lá).
+fn ativar_decoders(codec: CodecVideo) -> Result<Vec<IMFTransform>, ErroCodec> {
     let entrada = MFT_REGISTER_TYPE_INFO {
         guidMajorType: MFMediaType_Video,
         guidSubtype: subtipo(codec),
@@ -63,7 +64,7 @@ fn ativar_decoder(codec: CodecVideo) -> Result<IMFTransform, ErroCodec> {
     unsafe {
         MFTEnumEx(
             MFT_CATEGORY_VIDEO_DECODER,
-            MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER,
+            MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER | MFT_ENUM_FLAG_UNTRUSTED_STOREMFT,
             Some(&entrada),
             None,
             &mut lista,
@@ -76,18 +77,17 @@ fn ativar_decoder(codec: CodecVideo) -> Result<IMFTransform, ErroCodec> {
             return Err(erro("MFTEnumEx", format!("sem decoder para {codec:?}")));
         }
         let ativadores = std::slice::from_raw_parts_mut(lista, n as usize);
-        let mut r = Err(erro("MFTEnumEx", format!("sem decoder para {codec:?}")));
+        let mut mfts = Vec::new();
         for a in ativadores.iter_mut() {
-            if r.is_err()
-                && let Some(a) = a.as_ref()
+            if let Some(a) = a.as_ref()
                 && let Ok(t) = a.ActivateObject::<IMFTransform>()
             {
-                r = Ok(t);
+                mfts.push(t);
             }
             drop(a.take());
         }
         windows::Win32::System::Com::CoTaskMemFree(Some(lista.cast()));
-        r
+        Ok(mfts)
     }
 }
 
@@ -166,7 +166,17 @@ impl DecoderMf {
     /// Abre o decoder do sistema para `codec`, na GPU se der.
     pub fn novo(codec: CodecVideo) -> Result<Self, ErroCodec> {
         iniciar()?;
-        let mft = ativar_decoder(codec)?;
+        let mut erros = Vec::new();
+        for (i, mft) in ativar_decoders(codec)?.into_iter().enumerate() {
+            match Self::configurar(mft, codec) {
+                Ok(d) => return Ok(d),
+                Err(e) => erros.push(format!("decoder {i}: {e}")),
+            }
+        }
+        Err(erro("decoder", erros.join("; ")))
+    }
+
+    fn configurar(mft: IMFTransform, codec: CodecVideo) -> Result<Self, ErroCodec> {
         // SAFETY: chamadas COM no MFT recém-ativado; os tipos de mídia são criados aqui e o
         // gerente D3D fica guardado enquanto o decoder existir.
         unsafe {
@@ -179,11 +189,16 @@ impl DecoderMf {
                 None
             };
 
+            // Tamanho e taxa de partida: alguns decoders (HEVC, AV1) recusam o tipo sem eles; o
+            // tamanho real vem do stream (MF_E_TRANSFORM_STREAM_CHANGE).
             let tipo = MFCreateMediaType().map_err(|e| erro("MFCreateMediaType", e))?;
             tipo.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
                 .map_err(|e| erro("tipo", e))?;
             tipo.SetGUID(&MF_MT_SUBTYPE, &subtipo(codec))
                 .map_err(|e| erro("tipo", e))?;
+            let _ = tipo.SetUINT64(&MF_MT_FRAME_SIZE, (1920u64 << 32) | 1080);
+            let _ = tipo.SetUINT64(&MF_MT_FRAME_RATE, (60u64 << 32) | 1);
+            let _ = tipo.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32);
             mft.SetInputType(0, &tipo, 0)
                 .map_err(|e| erro("SetInputType", e))?;
             let mut d = DecoderMf {
@@ -513,20 +528,30 @@ impl VideoDecoder for DecoderMf {
     }
 }
 
-/// GPU em que o Media Foundation decodifica `codec`, ou `None` se ele não tem decoder do
-/// sistema ou só decodifica em software. Testado uma vez por codec (abre um decoder).
-pub fn gpu_do_decoder(codec: CodecVideo) -> Option<String> {
-    static CACHE: std::sync::Mutex<Vec<(CodecVideo, Option<String>)>> =
+/// GPU em que o Media Foundation decodifica `codec` (`Ok`), ou por que não decodifica em
+/// hardware (`Err`: sem decoder, falhou ao configurar ou só em software). Testado uma vez por
+/// codec (abre um decoder).
+pub fn sondar(codec: CodecVideo) -> Result<String, String> {
+    static CACHE: std::sync::Mutex<Vec<(CodecVideo, Result<String, String>)>> =
         std::sync::Mutex::new(Vec::new());
     let mut cache = CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((_, g)) = cache.iter().find(|(c, _)| *c == codec) {
-        return g.clone();
+    if let Some((_, r)) = cache.iter().find(|(c, _)| *c == codec) {
+        return r.clone();
     }
-    let g = DecoderMf::novo(codec)
-        .ok()
-        .and_then(|d| d.gpu().map(str::to_owned));
-    cache.push((codec, g.clone()));
-    g
+    let r = match DecoderMf::novo(codec) {
+        Ok(d) => d
+            .gpu()
+            .map(str::to_owned)
+            .ok_or_else(|| "decoder só em software (sem D3D11)".to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    cache.push((codec, r.clone()));
+    r
+}
+
+/// GPU em que o Media Foundation decodifica `codec` em hardware (ver [`sondar`]).
+pub fn gpu_do_decoder(codec: CodecVideo) -> Option<String> {
+    sondar(codec).ok()
 }

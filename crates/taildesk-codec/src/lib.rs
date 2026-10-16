@@ -13,6 +13,8 @@ pub mod cor;
 mod h264;
 #[cfg(target_os = "linux")]
 pub mod linux;
+#[cfg(any(target_os = "linux", windows))]
+pub mod nvidia;
 mod openh264;
 mod selecao;
 #[cfg(windows)]
@@ -21,7 +23,7 @@ pub mod windows;
 pub use crate::openh264::{DecoderOpenH264, EncoderOpenH264};
 pub use crate::selecao::{
     Opcao, abrir_decoder, candidatos_encoder, codecs_para_decodificar, nome_codec, opcoes_decoder,
-    opcoes_encoder,
+    opcoes_encoder, relatorio,
 };
 
 /// Codec de vídeo.
