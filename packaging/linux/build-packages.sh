@@ -29,6 +29,14 @@ install -Dm644 "$here/taildesk.desktop" "$tree/usr/share/applications/taildesk.d
 install -Dm644 "$here/taildesk.svg"     "$tree/usr/share/icons/hicolor/scalable/apps/taildesk.svg"
 install -Dm644 "$root/LICENSE-MIT"      "$tree/usr/share/licenses/taildesk/LICENSE-MIT"
 install -Dm644 "$root/LICENSE-APACHE"   "$tree/usr/share/licenses/taildesk/LICENSE-APACHE"
+# PyroWave (opcional): packaging/pyrowave/build.sh target/release deixa a biblioteca ao lado
+# dos binários; o app a procura em ../lib a partir do executável.
+if [[ -f "$rel/libpyrowave-shared.so.1" ]]; then
+  install -Dm755 "$rel/libpyrowave-shared.so.1" "$tree/usr/lib/libpyrowave-shared.so.1"
+  for l in "$rel"/licencas-pyrowave/*; do
+    install -Dm644 "$l" "$tree/usr/share/licenses/taildesk/$(basename "$l")"
+  done
+fi
 
 # 1. tar.gz (também é a fonte do pacote taildesk-bin do AUR)
 tar -C "$work" -czf "$out/taildesk-$version-linux-$arch.tar.gz" "$(basename "$tree")"

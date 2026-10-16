@@ -16,6 +16,8 @@ fn tipo_cuvid(c: CodecVideo) -> cudaVideoCodec {
         CodecVideo::H264 => cudaVideoCodec_H264,
         CodecVideo::Hevc => cudaVideoCodec_HEVC,
         CodecVideo::Av1 => cudaVideoCodec_AV1,
+        // Fora do NVDEC: o parser recusa e as capacidades dizem que não.
+        CodecVideo::PyroWave => cudaVideoCodec_NumCodecs,
     }
 }
 

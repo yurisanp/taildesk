@@ -171,6 +171,7 @@ impl SessaoUi {
         let codec = match Codec::try_from(c.codec) {
             Ok(Codec::Hevc) => CodecVideo::Hevc,
             Ok(Codec::Av1) => CodecVideo::Av1,
+            Ok(Codec::PyroWave) => CodecVideo::PyroWave,
             _ => CodecVideo::H264,
         };
         let decoder = taildesk_codec::abrir_decoder(codec, &mut falhas);

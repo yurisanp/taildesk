@@ -74,6 +74,8 @@ fn guid_do_codec(c: CodecVideo) -> GUID {
         CodecVideo::H264 => CODEC_H264,
         CodecVideo::Hevc => CODEC_HEVC,
         CodecVideo::Av1 => CODEC_AV1,
+        // Não existe no NVENC: um GUID que nunca bate com os do driver.
+        CodecVideo::PyroWave => GUID::default(),
     }
 }
 
@@ -348,6 +350,9 @@ impl EncoderNvenc {
             CodecVideo::H264 => (CODEC_H264, PERFIL_HIGH, PRESET_P4),
             CodecVideo::Hevc => (CODEC_HEVC, PERFIL_HEVC_MAIN, PRESET_P1),
             CodecVideo::Av1 => (CODEC_AV1, PERFIL_AV1_MAIN, PRESET_P1),
+            CodecVideo::PyroWave => {
+                return Err(ErroCodec::Backend("nvenc: PyroWave não é do NVENC".into()));
+            }
         };
         let qual = self.codec;
         let mut sessao = None;
@@ -430,6 +435,7 @@ impl EncoderNvenc {
                             a.matrixCoefficients = NV_ENC_VUI_MATRIX_COEFFS_BT709;
                             a.colorRange = 0;
                         }
+                        CodecVideo::PyroWave => {}
                     }
 
                     let i = &mut s.init;

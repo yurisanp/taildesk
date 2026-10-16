@@ -37,7 +37,12 @@ const INTERVALO_STATS: Duration = Duration::from_secs(1);
 const BITRATE_BPS: u32 = 8_000_000;
 
 /// Codecs que o host pode oferecer, do melhor para o pior (o `HelloAck.encode_caps`).
-const CODECS: [CodecVideo; 3] = [CodecVideo::Av1, CodecVideo::Hevc, CodecVideo::H264];
+const CODECS: [CodecVideo; 4] = [
+    CodecVideo::Av1,
+    CodecVideo::Hevc,
+    CodecVideo::H264,
+    CodecVideo::PyroWave,
+];
 
 /// Codec do protocolo que o TailDesk sabe codificar.
 fn codec_video(c: i32) -> Option<CodecVideo> {
@@ -45,6 +50,7 @@ fn codec_video(c: i32) -> Option<CodecVideo> {
         Codec::H264 => Some(CodecVideo::H264),
         Codec::Hevc => Some(CodecVideo::Hevc),
         Codec::Av1 => Some(CodecVideo::Av1),
+        Codec::PyroWave => Some(CodecVideo::PyroWave),
         _ => None,
     }
 }
@@ -108,6 +114,7 @@ fn codec_proto(c: CodecVideo) -> Codec {
         CodecVideo::H264 => Codec::H264,
         CodecVideo::Hevc => Codec::Hevc,
         CodecVideo::Av1 => Codec::Av1,
+        CodecVideo::PyroWave => Codec::PyroWave,
     }
 }
 

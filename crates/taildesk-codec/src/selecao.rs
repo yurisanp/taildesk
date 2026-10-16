@@ -28,6 +28,9 @@ enum Onde {
     /// Media Foundation (o decoder do sistema, na GPU quando há D3D11).
     #[cfg(windows)]
     Mf,
+    /// PyroWave em compute Vulkan.
+    #[cfg(any(target_os = "linux", windows))]
+    PyroWave,
 }
 
 /// Um backend que dá para abrir nesta máquina, para um codec.
@@ -65,6 +68,8 @@ impl Opcao {
             )?)),
             #[cfg(windows)]
             Onde::Mf => Err(ErroCodec::Backend("mf: encoder indisponível".into())),
+            #[cfg(any(target_os = "linux", windows))]
+            Onde::PyroWave => Ok(Box::new(crate::pyrowave::EncoderPyroWave::novo(config)?)),
         }
     }
 
@@ -82,7 +87,19 @@ impl Opcao {
             Onde::Va(_) => Err(ErroCodec::Backend("vaapi: decoder indisponível".into())),
             #[cfg(windows)]
             Onde::Mf => Ok(Box::new(crate::windows::mf::DecoderMf::novo(self.codec)?)),
+            #[cfg(any(target_os = "linux", windows))]
+            Onde::PyroWave => Ok(Box::new(crate::pyrowave::DecoderPyroWave::novo()?)),
         }
+    }
+}
+
+#[cfg(any(target_os = "linux", windows))]
+fn pyrowave() -> Opcao {
+    Opcao {
+        backend: "pyrowave",
+        gpu: Some("Vulkan".into()),
+        codec: CodecVideo::PyroWave,
+        onde: Onde::PyroWave,
     }
 }
 
@@ -101,6 +118,7 @@ pub fn nome_codec(c: CodecVideo) -> &'static str {
         CodecVideo::H264 => "h264",
         CodecVideo::Hevc => "hevc",
         CodecVideo::Av1 => "av1",
+        CodecVideo::PyroWave => "pyrowave",
     }
 }
 
@@ -131,6 +149,10 @@ pub fn opcoes_encoder(codec: CodecVideo) -> Vec<Opcao> {
         .into_iter()
         .filter(|o| o.codec == codec)
         .collect();
+    #[cfg(any(target_os = "linux", windows))]
+    if codec == CodecVideo::PyroWave && crate::pyrowave::disponivel() {
+        opcoes.push(pyrowave());
+    }
     if codec == CodecVideo::H264 {
         opcoes.push(openh264());
     }
@@ -138,11 +160,14 @@ pub fn opcoes_encoder(codec: CodecVideo) -> Vec<Opcao> {
 }
 
 /// Encoders para os codecs que o controlador decodifica (`aceitos`; vazio = só H.264), o
-/// melhor codec primeiro. HEVC e AV1 só entram com encoder de hardware.
+/// melhor codec primeiro. HEVC e AV1 só entram com encoder de hardware. O PyroWave nunca entra
+/// sozinho (pede centenas de Mbit/s): só se for pedido em `TAILDESK_CODEC` ou pela escolha
+/// manual do controlador, que usa [`opcoes_encoder`] direto.
 pub fn candidatos_encoder(aceitos: &[CodecVideo]) -> Vec<Opcao> {
     let mut ordem = vec![CodecVideo::Av1, CodecVideo::Hevc, CodecVideo::H264];
     let forcados = nomes("TAILDESK_CODEC");
     if !forcados.is_empty() {
+        ordem.push(CodecVideo::PyroWave);
         ordem.retain(|c| forcados.iter().any(|n| n == nome_codec(*c)));
         ordem.sort_by_key(|c| forcados.iter().position(|n| n == nome_codec(*c)));
     }
@@ -231,6 +256,10 @@ pub fn opcoes_decoder(codec: CodecVideo) -> Vec<Opcao> {
     if codec == CodecVideo::H264 && cfg!(windows) {
         opcoes.push(openh264());
     }
+    #[cfg(any(target_os = "linux", windows))]
+    if codec == CodecVideo::PyroWave && crate::pyrowave::disponivel() {
+        opcoes.push(pyrowave());
+    }
     filtrar(opcoes, "TAILDESK_DECODER")
 }
 
@@ -238,7 +267,7 @@ pub fn opcoes_decoder(codec: CodecVideo) -> Vec<Opcao> {
 /// há decoder de hardware para eles.
 pub fn codecs_para_decodificar() -> Vec<CodecVideo> {
     let mut codecs = vec![CodecVideo::H264];
-    for c in [CodecVideo::Hevc, CodecVideo::Av1] {
+    for c in [CodecVideo::Hevc, CodecVideo::Av1, CodecVideo::PyroWave] {
         if opcoes_decoder(c).iter().any(Opcao::hardware) {
             codecs.push(c);
         }
@@ -332,7 +361,12 @@ pub fn relatorio() -> String {
     use std::fmt::Write;
     let gpu = |o: &Opcao| o.gpu.clone().unwrap_or_else(|| "CPU".into());
     let mut r = String::new();
-    let codecs = [CodecVideo::H264, CodecVideo::Hevc, CodecVideo::Av1];
+    let codecs = [
+        CodecVideo::H264,
+        CodecVideo::Hevc,
+        CodecVideo::Av1,
+        CodecVideo::PyroWave,
+    ];
     let _ = writeln!(r, "Encoders:");
     for c in codecs {
         let opcoes = opcoes_encoder(c);

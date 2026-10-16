@@ -78,6 +78,7 @@ pub fn codec_proto(c: CodecVideo) -> Codec {
         CodecVideo::H264 => Codec::H264,
         CodecVideo::Hevc => Codec::Hevc,
         CodecVideo::Av1 => Codec::Av1,
+        CodecVideo::PyroWave => Codec::PyroWave,
     }
 }
 
