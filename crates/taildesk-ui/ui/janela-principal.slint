@@ -353,10 +353,70 @@ component LinhaConfiavel inherits HorizontalLayout {
     Botao { texto: @tr("Revogar"); discreto: true; perigo: true; altura: 26px; clicado => { root.revogar(); } }
 }
 
+// "Acesso com senha": definir, trocar ou remover a senha deste computador.
+component OpcaoSenha inherits VerticalLayout {
+    in property <bool> tem-senha;
+    in-out property <bool> editando;
+    in property <string> erro;
+    callback definir(string, string);
+    callback remover();
+    padding-top: 10px;
+    padding-bottom: 10px;
+    spacing: 8px;
+    HorizontalLayout {
+        spacing: 16px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 3px;
+            Text { text: @tr("Acesso com senha"); color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+            Text {
+                text: root.tem-senha
+                    ? @tr("Ligado. Quem souber a senha entra sem você aceitar, mesmo sem ninguém na frente da tela. O aviso de sessão ativa aparece do mesmo jeito.")
+                    : @tr("Desligado. Com uma senha, você entra neste computador de longe sem ninguém precisar aceitar.");
+                color: Tema.texto-2;
+                font-size: Tema.fonte-pequena;
+                wrap: word-wrap;
+            }
+        }
+        if !root.editando: VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                spacing: 6px;
+                if root.tem-senha: Botao { texto: @tr("Remover"); discreto: true; perigo: true; clicado => { root.remover(); } }
+                Botao { texto: root.tem-senha ? @tr("Trocar senha") : @tr("Definir senha"); clicado => { root.editando = true; } }
+            }
+        }
+    }
+    if root.editando: VerticalLayout {
+        spacing: 6px;
+        nova := LineEdit { input-type: password; placeholder-text: @tr("Nova senha (pelo menos 8 caracteres)"); }
+        confirma := LineEdit {
+            input-type: password;
+            placeholder-text: @tr("Repita a senha");
+            accepted => { root.definir(nova.text, confirma.text); }
+        }
+        if root.erro != "": Text { text: root.erro; color: Tema.perigo; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 6px;
+            Botao { texto: @tr("Cancelar"); discreto: true; clicado => { root.editando = false; } }
+            Botao {
+                texto: @tr("Salvar senha");
+                primario: true;
+                habilitado: nova.text != "";
+                clicado => { root.definir(nova.text, confirma.text); }
+            }
+        }
+    }
+}
+
 component SecaoConfiguracoes inherits ScrollView {
     in-out property <bool> aceitando;
     in-out property <bool> pedir-sempre;
     in property <[string]> confiaveis;
+    in property <bool> tem-senha;
+    in-out property <bool> editando-senha;
+    in property <string> erro-senha;
     in property <string> pasta-entrada;
     in property <string> tailscale;
     in property <string> versao-app;
@@ -373,6 +433,8 @@ component SecaoConfiguracoes inherits ScrollView {
     callback aceitando-mudou(bool);
     callback pedir-sempre-mudou(bool);
     callback revogar(int);
+    callback definir-senha(string, string);
+    callback remover-senha();
     callback abrir-pasta-entrada();
     callback codec-mudou(int);
     callback taxa-mudou(int);
@@ -409,6 +471,14 @@ component SecaoConfiguracoes inherits ScrollView {
                         descricao: @tr("Desligado, os dispositivos confiáveis abaixo entram sem perguntar. O aviso de sessão ativa aparece sempre.");
                         ligado <=> root.pedir-sempre;
                         mudou(v) => { root.pedir-sempre-mudou(v); }
+                    }
+                    Separador { }
+                    OpcaoSenha {
+                        tem-senha: root.tem-senha;
+                        editando <=> root.editando-senha;
+                        erro: root.erro-senha;
+                        definir(a, b) => { root.definir-senha(a, b); }
+                        remover => { root.remover-senha(); }
                     }
                     Separador { }
                     VerticalLayout {
@@ -546,6 +616,9 @@ export component JanelaPrincipal inherits Window {
     in-out property <bool> aceitando: true;
     in-out property <bool> pedir-sempre: true;
     in property <[string]> confiaveis;
+    in property <bool> tem-senha;
+    in-out property <bool> editando-senha;
+    in property <string> erro-senha;
     in property <string> pasta-entrada;
     in property <[string]> codecs-config: [@tr("Automático"), "H.264", "HEVC", "AV1", "PyroWave"];
     in-out property <int> codec-config: 0;
@@ -573,6 +646,8 @@ export component JanelaPrincipal inherits Window {
     callback aceitando-mudou(bool);
     callback pedir-sempre-mudou(bool);
     callback revogar(int);
+    callback definir-senha(string, string);
+    callback remover-senha();
     callback abrir-pasta-entrada();
     callback codec-config-mudou(int);
     callback taxa-config-mudou(int);
@@ -669,6 +744,11 @@ export component JanelaPrincipal inherits Window {
                 aceitando <=> root.aceitando;
                 pedir-sempre <=> root.pedir-sempre;
                 confiaveis: root.confiaveis;
+                tem-senha: root.tem-senha;
+                editando-senha <=> root.editando-senha;
+                erro-senha: root.erro-senha;
+                definir-senha(a, b) => { root.definir-senha(a, b); }
+                remover-senha => { root.remover-senha(); }
                 pasta-entrada: root.pasta-entrada;
                 codecs: root.codecs-config;
                 codec <=> root.codec-config;

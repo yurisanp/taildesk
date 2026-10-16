@@ -99,7 +99,41 @@ fn texto_fim(r: EndReason, host: &str) -> String {
         EndReason::ByUser => "Você encerrou a sessão.".into(),
         EndReason::ProtocolError => format!("{host} mandou algo inesperado; sessão encerrada."),
         EndReason::Lost => format!("A conexão com {host} caiu."),
+        EndReason::BadPassword => format!("A senha de acesso de {host} não confere."),
+        EndReason::TooManyAttempts => format!(
+            "Senhas erradas demais: {host} não aceita senha deste computador por alguns minutos."
+        ),
     }
+}
+
+/// Senha de acesso digitada na janela da sessão, para a próxima conexão ao mesmo host.
+#[derive(Clone)]
+pub struct SenhaDigitada {
+    pub senha: String,
+    /// Guardar no cofre do sistema quando o host aceitar.
+    pub salvar: bool,
+}
+
+impl std::fmt::Debug for SenhaDigitada {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SenhaDigitada")
+            .field("salvar", &self.salvar)
+            .finish_non_exhaustive()
+    }
+}
+
+/// De onde veio a senha mandada no `Hello`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum OrigemSenha {
+    #[default]
+    Nenhuma,
+    Salva,
+    Digitada,
+}
+
+/// Nome da senha de acesso de um host no cofre do sistema.
+fn segredo_senha(node: &str) -> String {
+    format!("senha-acesso:{node}")
 }
 
 /// Uma sessão aberta numa janela.
@@ -143,9 +177,35 @@ struct SessaoUi {
     /// Área de transferência compartilhada (ligada ao vivo com a permissão).
     area: area::Area,
     rt: tokio::runtime::Handle,
+    /// Para conectar de novo com a senha digitada: o nome e o IP da lista de dispositivos.
+    conexao: (String, IpAddr),
+    /// O host aceita senha de acesso (do `HelloAck`).
+    host_tem_senha: bool,
+    senha_usada: OrigemSenha,
 }
 
 impl SessaoUi {
+    /// Campo de senha enquanto espera alguém aceitar num host que aceita senha.
+    fn mostrar_senha(&self) {
+        let esperando = matches!(self.estado, ControllerState::AwaitingConsent { .. });
+        self.janela
+            .set_pede_senha(self.host_tem_senha && (esperando || self.janela.get_pede_senha()));
+    }
+
+    /// Fim da sessão: o que dizer no campo de senha.
+    fn fim_senha(&self, r: EndReason) {
+        let (mostra, erro) = match (r, self.senha_usada) {
+            (EndReason::BadPassword, OrigemSenha::Salva) => {
+                (true, "A senha salva não vale mais. Digite a nova.")
+            }
+            (EndReason::BadPassword, _) => (true, "Senha errada. Tente de novo."),
+            (EndReason::NoAnswer | EndReason::Refused, _) => (self.host_tem_senha, ""),
+            _ => (false, ""),
+        };
+        self.janela.set_pede_senha(mostra);
+        self.janela.set_erro_senha(erro.into());
+    }
+
     fn enviar(&self, mut msg: Msg) {
         if let Msg::StopVideo(v) = &msg {
             self.parar_video(v.display_id);
@@ -525,11 +585,14 @@ impl SessaoUi {
                     ControllerState::Connecting => self
                         .janela
                         .set_etapa(format!("Encontrando {}…", self.host).into()),
-                    ControllerState::AwaitingConsent { .. } => self
-                        .janela
-                        .set_etapa(format!("Esperando {} aceitar…", self.host).into()),
+                    ControllerState::AwaitingConsent { .. } => {
+                        self.janela
+                            .set_etapa(format!("Esperando {} aceitar…", self.host).into());
+                        self.mostrar_senha();
+                    }
                     ControllerState::Live { permissions } => {
                         self.janela.set_ao_vivo(true);
+                        self.janela.set_pede_senha(false);
                         if permissions.clipboard
                             && let Some(saida) = self.saida.clone()
                         {
@@ -545,6 +608,7 @@ impl SessaoUi {
                         self.janela.set_ao_vivo(false);
                         self.janela.set_terminou(true);
                         self.janela.set_etapa(texto_fim(r, &self.host).into());
+                        self.fim_senha(r);
                         self.saida = None;
                         self.area.desligar();
                         travar(&self.recepcoes).clear();
@@ -552,6 +616,8 @@ impl SessaoUi {
                 }
             }
             EventoControlador::Ack(a) => {
+                self.host_tem_senha = a.password_enabled;
+                self.mostrar_senha();
                 if !a.host_name.is_empty() {
                     self.host = a.host_name.clone();
                     self.janela.set_host(self.host.as_str().into());
@@ -782,7 +848,13 @@ impl Controlador {
     }
 
     /// "Conectar" num dispositivo da lista.
-    pub fn conectar(&self, rt: &tokio::runtime::Handle, nome: String, ip: String) {
+    pub fn conectar(
+        &self,
+        rt: &tokio::runtime::Handle,
+        nome: String,
+        ip: String,
+        senha: Option<SenhaDigitada>,
+    ) {
         let Ok(ip) = ip.parse::<IpAddr>() else {
             crate::avisar(format!("{nome} não tem IP na tailnet."));
             return;
@@ -800,6 +872,26 @@ impl Controlador {
         janela.set_etapa(format!("Encontrando {nome}…").into());
 
         janela.on_desconectar(move || fechar(id));
+        janela.on_entrar_com_senha(move |senha, salvar| {
+            let senha = SenhaDigitada {
+                senha: senha.to_string(),
+                salvar,
+            };
+            no_app(move |app| {
+                let Some((nome, ip)) = app
+                    .controlador
+                    .sessoes
+                    .borrow()
+                    .get(&id)
+                    .map(|s| s.conexao.clone())
+                else {
+                    return;
+                };
+                fechar(id);
+                app.controlador
+                    .conectar(&app.rt, nome, ip.to_string(), Some(senha));
+            });
+        });
         janela.window().on_close_requested(move || {
             fechar(id);
             CloseRequestResponse::HideWindow
@@ -929,6 +1021,9 @@ impl Controlador {
                 relay: false,
                 area: area::Area::new(entrada_area.clone()),
                 rt: rt.clone(),
+                conexao: (nome.clone(), ip),
+                host_tem_senha: false,
+                senha_usada: OrigemSenha::Nenhuma,
             },
         );
         arquivos::ligar_soltar(id, 50);
@@ -942,6 +1037,7 @@ impl Controlador {
                 contadores,
                 area: entrada_area,
             },
+            senha,
             fechar_rx,
         ));
     }
@@ -974,6 +1070,7 @@ async fn rodar(
     ip: IpAddr,
     teclado: KeyboardInfo,
     midia: Midia,
+    digitada: Option<SenhaDigitada>,
     mut fechar_rx: oneshot::Receiver<()>,
 ) {
     let Midia {
@@ -1010,6 +1107,32 @@ async fn rodar(
         .collect();
     // Antes do `HelloAck`, que monta o seletor com os dois lados.
     na_sessao(id, move |s| s.decodifica = decodifica);
+    // Senha de acesso: a digitada agora ou a salva para este host.
+    let salvar = digitada.as_ref().is_some_and(|d| d.salvar);
+    let (senha, origem) = match (digitada, &node) {
+        (Some(d), _) => (d.senha, OrigemSenha::Digitada),
+        (None, Some(n)) => {
+            let nome_segredo = segredo_senha(n);
+            let salva = tokio::task::spawn_blocking(move || {
+                taildesk_platform::segredos::ler(&nome_segredo)
+            })
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten()
+            .and_then(|b| String::from_utf8(b).ok());
+            match salva {
+                Some(s) => (s, OrigemSenha::Salva),
+                None => (String::new(), OrigemSenha::Nenhuma),
+            }
+        }
+        (None, None) => (String::new(), OrigemSenha::Nenhuma),
+    };
+    na_sessao(id, move |s| s.senha_usada = origem);
+    // Guardada só depois que o host aceitar.
+    let mut guardar = (salvar && origem == OrigemSenha::Digitada)
+        .then(|| node.clone().map(|n| (segredo_senha(&n), senha.clone())))
+        .flatten();
     let hello = Hello {
         app_version: env!("CARGO_PKG_VERSION").into(),
         platform: Some(Platform {
@@ -1024,6 +1147,7 @@ async fn rodar(
         ],
         decode_caps,
         keyboard: Some(teclado),
+        password: senha,
         ..Hello::default()
     };
     let falhou = |texto: String| {
@@ -1103,7 +1227,20 @@ async fn rodar(
                         }
                     }
                 }
-                Some(ev) => na_sessao(id, move |s| s.evento(ev)),
+                Some(ev) => {
+                    if let EventoControlador::Estado(ControllerState::Live { .. }) = &ev
+                        && let Some((nome_segredo, senha)) = guardar.take()
+                    {
+                        tokio::task::spawn_blocking(move || {
+                            if let Err(e) =
+                                taildesk_platform::segredos::gravar(&nome_segredo, senha.as_bytes())
+                            {
+                                eprintln!("taildesk: não foi possível salvar a senha: {e}");
+                            }
+                        });
+                    }
+                    na_sessao(id, move |s| s.evento(ev));
+                }
                 None => break,
             },
             _ = diag.tick() => {

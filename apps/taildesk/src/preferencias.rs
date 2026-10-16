@@ -149,6 +149,7 @@ pub fn mostrar(j: &JanelaPrincipal) {
     })
     .unwrap_or(c.host.clone());
     j.set_pedir_sempre(settings.ask_always);
+    j.set_tem_senha(settings.password_hash.is_some());
     let nomes: Vec<SharedString> = settings
         .trusted
         .iter()
@@ -190,9 +191,49 @@ fn gravar_video(f: impl FnOnce(&mut PrefsVideo)) {
     }
 }
 
+/// Grava o hash da senha de acesso (ou tira, com `None`) e mostra.
+fn gravar_senha(hash: Option<String>) {
+    no_app(move |app| {
+        let tinha = {
+            let mut s = app.settings.lock().unwrap_or_else(|e| e.into_inner());
+            std::mem::replace(&mut s.password_hash, hash.clone()).is_some()
+        };
+        crate::host::gravar_settings(&app.settings);
+        app.atualizar_configuracoes();
+        avisar(match (hash.is_some(), tinha) {
+            (true, false) => "Acesso com senha ligado.".into(),
+            (true, true) => "Senha de acesso trocada.".into(),
+            (false, _) => "Acesso com senha desligado.".into(),
+        });
+    });
+}
+
 /// Liga os callbacks das Configurações.
 pub fn ligar(j: &JanelaPrincipal) {
     mostrar(j);
+    let fraca = j.as_weak();
+    j.on_definir_senha(move |nova, confirma| {
+        let Some(j) = fraca.upgrade() else { return };
+        if nova != confirma {
+            j.set_erro_senha("As duas senhas não são iguais.".into());
+            return;
+        }
+        j.set_erro_senha("".into());
+        let fraca = fraca.clone();
+        let nova = nova.to_string();
+        // argon2 leva um tempo: fora da thread da interface.
+        std::thread::spawn(move || {
+            let r = taildesk_session::senha::gerar_hash(&nova);
+            let _ = fraca.upgrade_in_event_loop(move |j| match r {
+                Ok(h) => {
+                    j.set_editando_senha(false);
+                    gravar_senha(Some(h));
+                }
+                Err(e) => j.set_erro_senha(format!("{e}.").into()),
+            });
+        });
+    });
+    j.on_remover_senha(|| gravar_senha(None));
     j.on_pedir_sempre_mudou(|v| {
         no_app(move |app| {
             app.settings

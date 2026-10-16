@@ -8,6 +8,9 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+argon2 = "0.5"
+# Só para ligar o gerador de sal do sistema (`OsRng`) do argon2.
+password-hash = { version = "0.5", features = ["getrandom"] }
 taildesk-keyboard.workspace = true
 taildesk-overlay.workspace = true
 taildesk-proto.workspace = true

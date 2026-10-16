@@ -5,7 +5,8 @@
 //! Arquivo de texto, uma linha por item, campos separados por tabulação:
 //! `pedir_sempre\t1`, `confiavel\t<node_stable_id>\t<nome>`, `host\t<node_stable_id>\t<sha256>`,
 //! `atualizar_auto\t1`, `canal\testavel|pre`, `codec\tauto|h264|hevc|av1|pyrowave`,
-//! `taxa_kbps\t<n>` (0 = automática).
+//! `taxa_kbps\t<n>` (0 = automática), `senha_hash\t<argon2 PHC>` ("Acesso com senha": só o
+//! hash, nunca a senha).
 
 use std::collections::BTreeMap;
 use std::io;
@@ -110,6 +111,9 @@ fn analisar(texto: &str) -> Config {
                     .unwrap_or(0)
                     .min(taildesk_proto::control::limits::VIDEO_KBPS);
             }
+            ["senha_hash", h] if h.starts_with("$argon2") => {
+                c.host.password_hash = Some((*h).to_owned());
+            }
             ["confiavel", id, nome] if !id.is_empty() => c.host.trusted.push(TrustedDevice {
                 node_stable_id: (*id).to_owned(),
                 name: (*nome).to_owned(),
@@ -138,6 +142,9 @@ fn escrever(c: &Config) -> String {
         nome_codec(c.video.codec),
         c.video.taxa_kbps
     );
+    if let Some(h) = &c.host.password_hash {
+        s += &format!("senha_hash\t{}\n", limpo(h));
+    }
     for t in &c.host.trusted {
         s += &format!(
             "confiavel\t{}\t{}\n",
@@ -167,6 +174,12 @@ pub fn gravar(c: &Config) -> io::Result<()> {
     }
     let tmp = p.with_extension("tmp");
     std::fs::write(&tmp, escrever(c))?;
+    // O hash da senha de acesso fica aqui: só o dono lê.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    }
     std::fs::rename(tmp, p)
 }
 
@@ -183,6 +196,7 @@ mod tests {
             name: "notebook\tyuri\n".into(),
         });
         c.hosts.insert("nXYZ".into(), [7; 32]);
+        c.host.password_hash = Some("$argon2id$v=19$m=19456,t=2,p=1$c2Fs$aGFzaA".into());
         c.atualizacao = PrefsAtualizacao {
             automatica: false,
             pre: true,
@@ -198,6 +212,8 @@ mod tests {
         assert_eq!(volta.video, c.video);
         assert_eq!(volta.host.trusted[0].name, "notebookyuri");
         assert_eq!(volta.hosts, c.hosts);
+        assert_eq!(volta.host.password_hash, c.host.password_hash);
+        assert_eq!(analisar("senha_hash\tqualquer\n").host.password_hash, None);
         // Linhas desconhecidas ou estragadas não derrubam a leitura.
         let estragado = format!("{texto}futuro\tx\nhost\tnQ\tzz\nconfiavel\t\tsem id\n");
         let v = analisar(&estragado);

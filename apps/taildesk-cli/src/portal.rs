@@ -68,7 +68,7 @@ pub fn main(args: &[String]) -> ExitCode {
 
 async fn rodar(com_input: bool, video: bool) -> Result<(), ErroPortal> {
     println!("Escolha os monitores no diálogo do sistema…");
-    let sessao = SessaoPortal::abrir(com_input).await?;
+    let sessao = SessaoPortal::abrir(com_input, None).await?;
     for m in sessao.monitores() {
         println!(
             "monitor {}: node PipeWire {}, posição {:?}, tamanho lógico {}x{}{}",

@@ -19,6 +19,7 @@ pub mod cursor;
 pub mod host;
 pub mod monitores;
 pub mod policy;
+pub mod senha;
 
 pub use controller::{ControllerSession, ControllerState, EndReason};
 pub use cursor::{AcaoForma, CursorControlador, CursorHost, Desenho, Forma};

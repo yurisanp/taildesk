@@ -2,6 +2,7 @@
 // barra com abas dos monitores e teclado, vídeo do monitor ativo e o cursor do host desenhado
 // por cima (cursor separado, `07-protocolo.md`), o indicador de qualidade da conexão com o seletor
 // de codec e taxa (`14-selecao-adaptativa.md` §7.3) e o painel de diagnóstico do vídeo e da rede.
+import { LineEdit, CheckBox } from "std-widgets.slint";
 import { Tema } from "tema.slint";
 import { Botao, Toast } from "componentes.slint";
 import { ArquivosNaSessao } from "arquivos.slint";
@@ -311,12 +312,60 @@ component PainelDiagnostico inherits Rectangle {
     }
 }
 
+// "Acesso com senha" enquanto espera alguém aceitar (ou depois de uma senha errada).
+component CaixaSenha inherits Rectangle {
+    in property <string> host;
+    in property <string> erro;
+    callback entrar(string, bool);
+    width: 420px;
+    height: coluna.preferred-height;
+    background: Tema.superficie;
+    border-radius: Tema.raio;
+    coluna := VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        Text {
+            text: @tr("Tem a senha de {}? Entre sem esperar alguém aceitar lá.", root.host);
+            color: Tema.texto;
+            font-size: Tema.fonte;
+            wrap: word-wrap;
+        }
+        if root.erro != "": Text {
+            text: root.erro;
+            color: Tema.perigo;
+            font-size: Tema.fonte-pequena;
+            wrap: word-wrap;
+        }
+        campo := LineEdit {
+            input-type: password;
+            placeholder-text: @tr("Senha de acesso");
+            accepted => { root.entrar(campo.text, salvar.checked); }
+        }
+        salvar := CheckBox {
+            text: @tr("Salvar a senha neste computador");
+            checked: true;
+        }
+        HorizontalLayout {
+            alignment: end;
+            Botao {
+                texto: @tr("Entrar com senha");
+                primario: true;
+                habilitado: campo.text != "";
+                clicado => { root.entrar(campo.text, salvar.checked); }
+            }
+        }
+    }
+}
+
 export component JanelaSessao inherits Window {
     in property <string> host;
     // "Encontrando desktop-casa…", "Esperando desktop-casa aceitar…" ou o motivo do fim.
     in property <string> etapa;
     in property <bool> ao-vivo;
     in property <bool> terminou;
+    // Mostra o campo de senha (o host aceita senha e ainda não está ao vivo).
+    in property <bool> pede-senha;
+    in property <string> erro-senha;
     in property <image> quadro;
     in property <bool> tem-video;
     in property <[AbaMonitor]> abas;
@@ -347,6 +396,7 @@ export component JanelaSessao inherits Window {
     out property <length> area-altura: video.height;
 
     callback desconectar();
+    callback entrar-com-senha(string, bool);
     callback trocar-aba(int);
     callback mouse-moveu(length, length);
     callback mouse-botao(PointerEventButton, bool, length, length);
@@ -483,6 +533,14 @@ export component JanelaSessao inherits Window {
                     font-size: 18px;
                     horizontal-alignment: center;
                     wrap: word-wrap;
+                }
+                if root.pede-senha && !root.ao-vivo: HorizontalLayout {
+                    alignment: center;
+                    CaixaSenha {
+                        host: root.host;
+                        erro: root.erro-senha;
+                        entrar(senha, salvar) => { root.entrar-com-senha(senha, salvar); }
+                    }
                 }
             }
             if root.diagnostico-aberto && root.ao-vivo: PainelDiagnostico {

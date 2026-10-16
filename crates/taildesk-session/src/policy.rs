@@ -25,6 +25,9 @@ pub struct HostSettings {
     pub allow_audio: bool,
     /// Troca de arquivos (fase 3). Pode ficar desligada por política.
     pub allow_files: bool,
+    /// "Acesso com senha": hash argon2 (PHC) de [`crate::senha::gerar_hash`]. Com a senha
+    /// certa no `Hello`, entra sem o diálogo.
+    pub password_hash: Option<String>,
 }
 
 impl Default for HostSettings {
@@ -35,6 +38,7 @@ impl Default for HostSettings {
             trusted: Vec::new(),
             allow_audio: true,
             allow_files: true,
+            password_hash: None,
         }
     }
 }
