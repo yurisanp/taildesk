@@ -20,23 +20,27 @@ use taildesk_media::video::RecepcaoVideo;
 use taildesk_overlay::{Overlay, SystemOverlay};
 use taildesk_proto::control::{
     AbsPos, Button, Codec, CodecCap, CodecSelected, Control, Feature, Hello, KeyboardInfo,
-    MouseButton, MouseMove, Msg, Platform, RequestKeyframe, Scroll, mouse_move,
+    MouseButton, MouseMove, Msg, Platform, QualityPrefs, RequestKeyframe, Scroll, SetVideoQuality,
+    mouse_move,
 };
 use taildesk_session::conexao::PORTA;
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
 use taildesk_session::{ControllerState, CursorControlador, EndReason, UmPorVez, atalho};
 use taildesk_transport::{Pin, client_endpoint};
 use taildesk_tsapi::LocalApi;
-use taildesk_ui::{AbaMonitor, JanelaSessao};
+use taildesk_ui::{AbaMonitor, JanelaSessao, LinhaDiag, NivelQualidade, OpcaoCodec};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::preferencias::{self, CODECS, TAXAS_KBPS};
 use crate::video::{Contadores, DecoderMedido, Recepcoes, Tela, ler_datagramas, travar};
 use crate::{config, no_app};
 
 mod arquivos;
 mod diagnostico;
+mod qualidade;
 
 use diagnostico::{Diagnostico, Rede};
+use qualidade::Nivel;
 
 /// Atualização do painel de diagnóstico.
 const INTERVALO_DIAGNOSTICO: Duration = Duration::from_secs(1);
@@ -127,12 +131,24 @@ struct SessaoUi {
     video_display: Option<u32>,
     contadores: Arc<Contadores>,
     diagnostico: Diagnostico,
+    /// Codecs que este computador decodifica e que o host codifica (do `HelloAck`).
+    decodifica: Vec<Codec>,
+    codifica: Vec<Codec>,
+    /// Codec e taxa pedidos ao host (Configurações → Sessão, depois o seletor da janela).
+    qualidade: QualityPrefs,
+    /// Último nível do indicador e se a rota era relay (para avisar quando piora).
+    nivel: Nivel,
+    relay: bool,
 }
 
 impl SessaoUi {
-    fn enviar(&self, msg: Msg) {
+    fn enviar(&self, mut msg: Msg) {
         if let Msg::StopVideo(v) = &msg {
             self.parar_video(v.display_id);
+        }
+        // Todo vídeo novo já sai com o codec e a taxa escolhidos.
+        if let Msg::StartVideo(v) = &mut msg {
+            v.wanted = Some(self.qualidade);
         }
         if let Some(s) = &self.saida {
             let _ = s.try_send(Control { msg: Some(msg) });
@@ -228,6 +244,167 @@ impl SessaoUi {
             self.janela
                 .set_diagnostico(ModelRc::new(VecModel::from(linhas)));
         }
+        self.atualizar_qualidade();
+    }
+
+    /// Codecs do seletor: disponível quando este computador decodifica e o host codifica.
+    fn opcoes_codec(&self) -> Vec<OpcaoCodec> {
+        CODECS
+            .iter()
+            .map(|&(c, nome)| {
+                let (aqui, la) = (
+                    c == Codec::Unspecified || self.decodifica.contains(&c),
+                    c == Codec::Unspecified || self.codifica.contains(&c),
+                );
+                let motivo = match (aqui, la) {
+                    (true, true) => String::new(),
+                    (false, false) => "nenhum dos dois computadores tem".into(),
+                    (false, true) => "este computador não decodifica".into(),
+                    (true, false) => format!("{} não codifica", self.host),
+                };
+                OpcaoCodec {
+                    nome: nome.into(),
+                    disponivel: aqui && la,
+                    motivo: motivo.into(),
+                }
+            })
+            .collect()
+    }
+
+    /// Seletor da janela com o que as duas máquinas têm; o codec das Configurações que faltar
+    /// de um lado vira automático.
+    fn preparar_seletor(&mut self) {
+        let opcoes = self.opcoes_codec();
+        let pedido = preferencias::indice_codec(self.qualidade.codec());
+        let indice = if opcoes.get(pedido).is_some_and(|o| o.disponivel) {
+            pedido
+        } else {
+            self.qualidade.codec = Codec::Unspecified.into();
+            0
+        };
+        let aviso: Vec<String> = opcoes
+            .iter()
+            .filter(|o| !o.disponivel)
+            .map(|o| format!("{}: {}", o.nome, o.motivo))
+            .collect();
+        self.janela.set_aviso_codecs(aviso.join(" · ").into());
+        self.janela.set_codecs(ModelRc::new(VecModel::from(opcoes)));
+        self.janela.set_codec_escolhido(indice as i32);
+        self.janela.set_taxas(ModelRc::new(VecModel::from(
+            preferencias::rotulos_taxa_curtos(),
+        )));
+        self.janela
+            .set_taxa_escolhida(preferencias::indice_taxa(self.qualidade.bitrate_kbps) as i32);
+    }
+
+    /// Seletor da janela: vale para o monitor que está saindo e para os próximos.
+    fn mudar_qualidade(&mut self, codec: Option<usize>, taxa: Option<usize>) {
+        if let Some(c) = codec.and_then(|i| CODECS.get(i)) {
+            self.qualidade.codec = c.0.into();
+        }
+        if let Some(&t) = taxa.and_then(|i| TAXAS_KBPS.get(i)) {
+            self.qualidade.bitrate_kbps = t;
+        }
+        if let Some(display_id) = self.video_display {
+            self.enviar(Msg::SetVideoQuality(SetVideoQuality {
+                display_id,
+                wanted: Some(self.qualidade),
+            }));
+        }
+    }
+
+    /// Indicador da barra e painel de qualidade (uma vez por [`INTERVALO_DIAGNOSTICO`]).
+    fn atualizar_qualidade(&mut self) {
+        let m = self.diagnostico.medida().clone();
+        let a = qualidade::avaliar(&m);
+        self.janela.set_qualidade(match a.nivel {
+            Nivel::Medindo => NivelQualidade::Medindo,
+            Nivel::Ruim => NivelQualidade::Ruim,
+            Nivel::Regular => NivelQualidade::Regular,
+            Nivel::Boa => NivelQualidade::Boa,
+            Nivel::Excelente => NivelQualidade::Excelente,
+        });
+        self.janela.set_qualidade_resumo(a.resumo.as_str().into());
+        self.janela.set_qualidade_frase(a.frase.as_str().into());
+        let relay = m
+            .rota
+            .as_ref()
+            .is_some_and(|r| r.kind == taildesk_overlay::PathKind::Relayed);
+        // Avisa uma vez quando a conexão vira relay ou cai para ruim (§5.6: "o HUD aparece
+        // sozinho quando a conexão vira relay ou a qualidade cai").
+        if relay && !self.relay {
+            self.janela
+                .set_toast("Conexão via relay do Tailscale: a qualidade pode cair.".into());
+        } else if a.nivel == Nivel::Ruim && self.nivel > Nivel::Ruim {
+            self.janela
+                .set_toast(format!("A conexão piorou: {}", a.frase).into());
+        }
+        self.relay = relay;
+        self.nivel = a.nivel;
+        if !self.janela.get_qualidade_aberta() {
+            return;
+        }
+        let linha = |rotulo: &str, valor: String| LinhaDiag {
+            rotulo: rotulo.into(),
+            valor: valor.into(),
+            titulo: false,
+        };
+        let num = |v: f64| format!("{v:.1}").replace('.', ",");
+        let mut l = vec![linha("Rota", qualidade::texto_rota(m.rota.as_ref()))];
+        l.push(linha(
+            "Latência",
+            format!(
+                "{} ms (variação ±{} ms)",
+                m.rtt.as_millis(),
+                m.variacao.as_millis()
+            ),
+        ));
+        if m.com_host {
+            l.push(linha(
+                "Perda",
+                format!("{} %", num(f64::from(m.perda_ppm) / 10_000.0)),
+            ));
+            l.push(linha(
+                "Banda estimada",
+                if m.banda_kbps > 0 {
+                    format!("{} Mbit/s", num(f64::from(m.banda_kbps) / 1000.0))
+                } else {
+                    "—".into()
+                },
+            ));
+        }
+        if let Some(c) = a.classe {
+            l.push(linha(
+                "Classe de rede",
+                format!(
+                    "{} ({})",
+                    qualidade::nome_classe(c),
+                    qualidade::descricao_classe(c)
+                ),
+            ));
+        }
+        if let (Some(v), Some(h)) = (
+            self.diagnostico.codec_selecionado(),
+            self.diagnostico.stats_host(),
+        ) {
+            let codec = CODECS[preferencias::indice_codec(v.codec())].1;
+            l.push(linha(
+                "Vídeo",
+                format!(
+                    "{codec} · {} · {} Mbit/s · {} fps{}",
+                    h.encoder,
+                    num(f64::from(m.video_kbps) / 1000.0),
+                    num(m.fps_exibidos),
+                    if self.qualidade.bitrate_kbps > 0 {
+                        " (taxa fixa)"
+                    } else {
+                        ""
+                    }
+                ),
+            ));
+        }
+        self.janela
+            .set_qualidade_linhas(ModelRc::new(VecModel::from(l)));
     }
 
     fn ao_vivo(&self) -> bool {
@@ -386,6 +563,13 @@ impl SessaoUi {
                     )
                     .into(),
                 );
+                // Host antigo sem `encode_caps`: só H.264.
+                self.codifica = if a.encode_caps.is_empty() {
+                    vec![Codec::H264]
+                } else {
+                    a.encode_caps.iter().map(CodecCap::codec).collect()
+                };
+                self.preparar_seletor();
                 // Antes de ao vivo só guarda a lista; o `StartVideo` sai quando liberar.
                 self.displays.clone_from(&a.displays);
                 let mut descartar = Vec::new();
@@ -623,6 +807,12 @@ impl Controlador {
         janela.on_mouse_rolou(move |dx, dy| {
             na_sessao_ja(id, |s| s.mouse_rolou(dx, dy));
         });
+        janela.on_codec_mudou(move |i| {
+            na_sessao_ja(id, |s| s.mudar_qualidade(Some(i as usize), None));
+        });
+        janela.on_taxa_mudou(move |i| {
+            na_sessao_ja(id, |s| s.mudar_qualidade(None, Some(i as usize)));
+        });
         arquivos::ligar_callbacks(&janela, id);
         // Teclado pelo código físico, antes do Slint (Tab, Alt e atalhos vão para o host).
         janela
@@ -681,6 +871,7 @@ impl Controlador {
             extra_hid: Vec::new(),
         };
         let (fechar_tx, fechar_rx) = oneshot::channel();
+        let video = config::ler().video;
         let recepcoes = Recepcoes::default();
         let contadores = Arc::new(Contadores::default());
         self.sessoes.borrow_mut().insert(
@@ -708,6 +899,15 @@ impl Controlador {
                 video_display: None,
                 contadores: contadores.clone(),
                 diagnostico: Diagnostico::default(),
+                decodifica: Vec::new(),
+                codifica: Vec::new(),
+                qualidade: QualityPrefs {
+                    codec: video.codec.into(),
+                    bitrate_kbps: video.taxa_kbps,
+                    ..QualityPrefs::default()
+                },
+                nivel: Nivel::Medindo,
+                relay: false,
             },
         );
         arquivos::ligar_soltar(id, 50);
@@ -751,20 +951,22 @@ async fn rodar(
         .and_then(|n| config::ler().hosts.get(n).copied());
     let pin = conhecido.map_or(Pin::FirstContact, Pin::Sha256);
     // H.264 sempre; HEVC e AV1 quando há decoder de hardware (abre decoders para testar).
-    let decode_caps = tokio::task::spawn_blocking(taildesk_codec::codecs_para_decodificar)
-        .await
-        .unwrap_or_else(|_| vec![CodecVideo::H264])
-        .into_iter()
-        .map(|c| CodecCap {
-            codec: match c {
-                CodecVideo::H264 => Codec::H264,
-                CodecVideo::Hevc => Codec::Hevc,
-                CodecVideo::Av1 => Codec::Av1,
-            }
-            .into(),
+    let decodifica: Vec<Codec> =
+        tokio::task::spawn_blocking(taildesk_codec::codecs_para_decodificar)
+            .await
+            .unwrap_or_else(|_| vec![CodecVideo::H264])
+            .into_iter()
+            .map(preferencias::codec_proto)
+            .collect();
+    let decode_caps = decodifica
+        .iter()
+        .map(|&c| CodecCap {
+            codec: c.into(),
             ..CodecCap::default()
         })
         .collect();
+    // Antes do `HelloAck`, que monta o seletor com os dois lados.
+    na_sessao(id, move |s| s.decodifica = decodifica);
     let hello = Hello {
         app_version: env!("CARGO_PKG_VERSION").into(),
         platform: Some(Platform {

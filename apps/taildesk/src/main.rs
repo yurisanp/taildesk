@@ -18,6 +18,7 @@ mod controlador;
 mod host;
 mod midia_host;
 mod modelo;
+mod preferencias;
 mod video;
 
 use std::cell::{Cell, RefCell};
@@ -118,6 +119,7 @@ impl App {
         j.set_dispositivos(ModelRc::from(self.lista.clone()));
         aplicar_na_janela(&j, &self.visao.borrow());
         atualizacao::ligar(&j);
+        preferencias::ligar(&j);
 
         j.on_busca_mudou(|_| no_app(App::filtrar));
         j.on_aceitando_mudou(|v| no_app(move |app| app.definir_aceitando(v)));
@@ -180,6 +182,13 @@ impl App {
     /// Há sessão aberta, como host ou como controlador (o atualizador não troca o app no meio).
     fn sessao_ativa(&self) -> bool {
         self.host.ativa() || self.controlador.ativa()
+    }
+
+    /// Redesenha as Configurações (lista de confiáveis mudou pelo pedido de acesso, por exemplo).
+    fn atualizar_configuracoes(&self) {
+        if let Some(j) = self.janela.borrow().as_ref() {
+            preferencias::mostrar(j);
+        }
     }
 
     /// Mantém a janela e a bandeja com o mesmo valor de "Aceitar conexões".

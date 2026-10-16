@@ -1,6 +1,7 @@
 // Janela da sessão no controlador (`12-levantamento-ux.md` §5.3 e §5.6): etapas de conexão,
 // barra com abas dos monitores e teclado, vídeo do monitor ativo e o cursor do host desenhado
-// por cima (cursor separado, `07-protocolo.md`) e o painel de diagnóstico do vídeo e da rede.
+// por cima (cursor separado, `07-protocolo.md`), o indicador de qualidade da conexão com o seletor
+// de codec e taxa (`14-selecao-adaptativa.md` §7.3) e o painel de diagnóstico do vídeo e da rede.
 import { Tema } from "tema.slint";
 import { Botao, Toast } from "componentes.slint";
 import { ArquivosNaSessao } from "arquivos.slint";
@@ -17,6 +18,265 @@ export struct LinhaDiag {
     rotulo: string,
     valor: string,
     titulo: bool,
+}
+
+// Nível das barras do indicador de qualidade.
+export enum NivelQualidade { medindo, ruim, regular, boa, excelente }
+
+// Um codec no seletor da sessão. `disponivel = false`: algum dos lados não tem (o `motivo` diz
+// qual).
+export struct OpcaoCodec {
+    nome: string,
+    disponivel: bool,
+    motivo: string,
+}
+
+export global CoresQualidade {
+    pure public function cor(n: NivelQualidade) -> color {
+        if n == NivelQualidade.excelente || n == NivelQualidade.boa { return Tema.online; }
+        if n == NivelQualidade.regular { return Tema.relay; }
+        if n == NivelQualidade.ruim { return #e5534b; }
+        return Tema.offline;
+    }
+    pure public function barras(n: NivelQualidade) -> int {
+        if n == NivelQualidade.excelente { return 4; }
+        if n == NivelQualidade.boa { return 3; }
+        if n == NivelQualidade.regular { return 2; }
+        if n == NivelQualidade.ruim { return 1; }
+        return 0;
+    }
+    pure public function texto(n: NivelQualidade) -> string {
+        if n == NivelQualidade.excelente { return @tr("Conexão excelente"); }
+        if n == NivelQualidade.boa { return @tr("Conexão boa"); }
+        if n == NivelQualidade.regular { return @tr("Conexão regular"); }
+        if n == NivelQualidade.ruim { return @tr("Conexão ruim"); }
+        return @tr("Medindo a conexão");
+    }
+}
+
+// Quatro barras de sinal, coloridas pelo nível.
+component Barras inherits HorizontalLayout {
+    in property <NivelQualidade> nivel;
+    in property <length> escala: 1px;
+    in property <color> vazia: Tema.offline.with-alpha(0.45);
+    property <int> cheias: CoresQualidade.barras(nivel);
+    property <color> cor: CoresQualidade.cor(nivel);
+    spacing: 2 * escala;
+    alignment: center;
+    for i in 4: VerticalLayout {
+        alignment: end;
+        Rectangle {
+            width: 3 * root.escala;
+            height: (4 + 3 * i) * root.escala;
+            border-radius: 1 * root.escala;
+            background: i < root.cheias ? root.cor : root.vazia;
+        }
+    }
+}
+
+// Indicador da barra da sessão: barras + "12 ms · direto · LAN". Clicar abre o painel.
+component IndicadorQualidade inherits Rectangle {
+    in property <NivelQualidade> nivel;
+    in property <string> resumo;
+    in property <bool> aberto;
+    callback clicado();
+    accessible-role: button;
+    accessible-label: CoresQualidade.texto(nivel) + ", " + resumo;
+    accessible-action-default => { clicado(); }
+    horizontal-stretch: 0;
+    height: 32px;
+    border-radius: Tema.raio;
+    background: aberto ? Tema.superficie-2 : toque.has-hover ? Tema.superficie-2.with-alpha(0.6) : transparent;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Barras { nivel: root.nivel; }
+        }
+        Text {
+            text: root.resumo;
+            font-size: Tema.fonte-pequena;
+            color: Tema.texto-2;
+            vertical-alignment: center;
+        }
+    }
+    toque := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicado(); }
+    }
+}
+
+// Botão pequeno de escolha (codec, taxa), no painel escuro.
+component Chip inherits Rectangle {
+    in property <string> texto;
+    in property <bool> ativo;
+    in property <bool> habilitado: true;
+    callback clicado();
+    accessible-role: button;
+    accessible-label: texto;
+    accessible-checked: ativo;
+    accessible-enabled: habilitado;
+    accessible-action-default => { if habilitado { clicado(); } }
+    min-width: rotulo.preferred-width + 20px;
+    height: 28px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: ativo ? Tema.primaria : #ffffff30;
+    background: ativo ? Tema.primaria : toque.has-hover && habilitado ? #ffffff1a : transparent;
+    rotulo := Text {
+        width: parent.width;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: root.texto;
+        font-size: Tema.fonte-pequena;
+        font-weight: root.ativo ? 600 : 400;
+        color: !root.habilitado ? #ffffff4d : root.ativo ? #ffffff : #e9ebef;
+        font-italic: !root.habilitado;
+    }
+    toque := TouchArea {
+        mouse-cursor: root.habilitado ? pointer : default;
+        clicked => { if root.habilitado { root.clicado(); } }
+    }
+}
+
+// Linha rótulo/valor do painel escuro.
+component LinhaEscura inherits HorizontalLayout {
+    in property <string> rotulo;
+    in property <string> valor;
+    spacing: 8px;
+    Text {
+        text: root.rotulo;
+        width: 120px;
+        font-size: Tema.fonte-pequena;
+        color: #9aa4b2;
+    }
+    Text {
+        horizontal-stretch: 1;
+        text: root.valor;
+        font-size: Tema.fonte-pequena;
+        color: #e9ebef;
+        wrap: word-wrap;
+    }
+}
+
+// Painel que abre ao clicar no indicador: o porquê do nível, os números e o seletor de codec e
+// de taxa desta sessão.
+component PainelQualidade inherits Rectangle {
+    in property <NivelQualidade> nivel;
+    in property <string> frase;
+    in property <[LinhaDiag]> linhas;
+    in property <[OpcaoCodec]> codecs;
+    // Os codecs que não dá para usar, e por quê ("PyroWave: yurisp não codifica").
+    in property <string> aviso-codecs;
+    in property <int> codec;
+    in property <[string]> taxas;
+    in property <int> taxa;
+    callback codec-mudou(int);
+    callback taxa-mudou(int);
+    callback diagnostico();
+    callback fechar();
+
+    width: 420px;
+    border-radius: Tema.raio-grande;
+    background: #0d1117f0;
+    drop-shadow-blur: 16px;
+    drop-shadow-color: #00000080;
+    // Clique no painel não chega ao vídeo.
+    TouchArea { }
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 12px;
+            Barras { nivel: root.nivel; escala: 1.6px; vazia: #ffffff38; }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 2px;
+                Text {
+                    text: CoresQualidade.texto(root.nivel);
+                    font-size: 15px;
+                    font-weight: 700;
+                    color: #ffffff;
+                }
+                Text {
+                    text: root.frase;
+                    font-size: Tema.fonte-pequena;
+                    color: #c5ccd6;
+                    wrap: word-wrap;
+                }
+            }
+            VerticalLayout {
+                alignment: start;
+                Rectangle {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 12px;
+                    background: fechar-toque.has-hover ? #ffffff1a : transparent;
+                    accessible-role: button;
+                    accessible-label: @tr("Fechar");
+                    accessible-action-default => { root.fechar(); }
+                    Text { text: "✕"; color: #9aa4b2; font-size: 12px; }
+                    fechar-toque := TouchArea { mouse-cursor: pointer; clicked => { root.fechar(); } }
+                }
+            }
+        }
+        VerticalLayout {
+            spacing: 4px;
+            for l in root.linhas: LinhaEscura { rotulo: l.rotulo; valor: l.valor; }
+        }
+        Rectangle { height: 1px; background: #ffffff1f; }
+        Text { text: @tr("Vídeo desta sessão"); font-size: Tema.fonte-pequena; font-weight: 700; color: #ffffff; }
+        Text { text: @tr("Codec"); font-size: Tema.fonte-pequena; color: #9aa4b2; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            for c[i] in root.codecs: Chip {
+                texto: c.nome;
+                ativo: i == root.codec;
+                habilitado: c.disponivel;
+                clicado => { root.codec-mudou(i); }
+            }
+        }
+        if root.aviso-codecs != "": Text {
+            text: root.aviso-codecs;
+            font-size: 11px;
+            color: #8b95a3;
+            wrap: word-wrap;
+        }
+        Text { text: @tr("Taxa de bits (Mbit/s)"); font-size: Tema.fonte-pequena; color: #9aa4b2; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            for t[i] in root.taxas: Chip {
+                texto: t;
+                ativo: i == root.taxa;
+                clicado => { root.taxa-mudou(i); }
+            }
+        }
+        Text {
+            text: @tr("Automático escolhe pelo que as duas máquinas têm e pela rede. A escolha vale só para esta sessão; o padrão fica em Configurações → Sessão.");
+            font-size: 11px;
+            color: #8b95a3;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: end;
+            Rectangle {
+                width: rotulo-diag.preferred-width + 20px;
+                height: 28px;
+                border-radius: Tema.raio;
+                background: diag-toque.has-hover ? #ffffff1a : transparent;
+                accessible-role: button;
+                accessible-label: rotulo-diag.text;
+                accessible-action-default => { root.diagnostico(); }
+                rotulo-diag := Text { text: @tr("Diagnóstico completo"); color: #7aa2ff; font-size: Tema.fonte-pequena; font-weight: 600; }
+                diag-toque := TouchArea { mouse-cursor: pointer; clicked => { root.diagnostico(); } }
+            }
+        }
+    }
 }
 
 component PainelDiagnostico inherits Rectangle {
@@ -62,7 +322,7 @@ export component JanelaSessao inherits Window {
     in property <[AbaMonitor]> abas;
     // "ABNT2 → US-Intl"
     in property <string> teclado;
-    in property <string> toast;
+    in-out property <string> toast;
     // Cursor do host, em pixels da área de vídeo.
     in property <image> cursor;
     in property <bool> cursor-visivel;
@@ -71,6 +331,17 @@ export component JanelaSessao inherits Window {
     // Painel de diagnóstico (botão "Diagnóstico" na barra).
     in-out property <bool> diagnostico-aberto: false;
     in property <[LinhaDiag]> diagnostico;
+    // Indicador de qualidade e painel com o seletor de codec e de taxa.
+    in property <NivelQualidade> qualidade: NivelQualidade.medindo;
+    in property <string> qualidade-resumo: @tr("Medindo…");
+    in property <string> qualidade-frase;
+    in property <[LinhaDiag]> qualidade-linhas;
+    in-out property <bool> qualidade-aberta: false;
+    in property <[OpcaoCodec]> codecs;
+    in property <string> aviso-codecs;
+    in-out property <int> codec-escolhido: 0;
+    in property <[string]> taxas;
+    in-out property <int> taxa-escolhida: 0;
     // Tamanho da área de vídeo (para o app converter o mouse).
     out property <length> area-largura: video.width;
     out property <length> area-altura: video.height;
@@ -80,6 +351,8 @@ export component JanelaSessao inherits Window {
     callback mouse-moveu(length, length);
     callback mouse-botao(PointerEventButton, bool, length, length);
     callback mouse-rolou(length, length);
+    callback codec-mudou(int);
+    callback taxa-mudou(int);
 
     title: root.host + " · TailDesk";
     icon: @image-url("icones/taildesk-64.png");
@@ -126,12 +399,25 @@ export component JanelaSessao inherits Window {
                     color: Tema.texto-2;
                     vertical-alignment: center;
                 }
+                if root.ao-vivo: IndicadorQualidade {
+                    y: 4px;
+                    nivel: root.qualidade;
+                    resumo: root.qualidade-resumo;
+                    aberto: root.qualidade-aberta;
+                    clicado => {
+                        root.qualidade-aberta = !root.qualidade-aberta;
+                        root.diagnostico-aberto = false;
+                    }
+                }
                 if root.ao-vivo: Botao {
                     y: 4px;
                     altura: 32px;
                     texto: @tr("Diagnóstico");
                     discreto: !root.diagnostico-aberto;
-                    clicado => { root.diagnostico-aberto = !root.diagnostico-aberto; }
+                    clicado => {
+                        root.diagnostico-aberto = !root.diagnostico-aberto;
+                        root.qualidade-aberta = false;
+                    }
                 }
                 Botao {
                     y: 4px;
@@ -204,12 +490,43 @@ export component JanelaSessao inherits Window {
                 x: parent.width - self.width - 12px;
                 y: 12px;
             }
+            if root.qualidade-aberta && root.ao-vivo: PainelQualidade {
+                x: parent.width - self.width - 12px;
+                y: 12px;
+                height: self.preferred-height;
+                aviso-codecs: root.aviso-codecs;
+                nivel: root.qualidade;
+                frase: root.qualidade-frase;
+                linhas: root.qualidade-linhas;
+                codecs: root.codecs;
+                codec: root.codec-escolhido;
+                taxas: root.taxas;
+                taxa: root.taxa-escolhida;
+                codec-mudou(i) => {
+                    root.codec-escolhido = i;
+                    root.codec-mudou(i);
+                }
+                taxa-mudou(i) => {
+                    root.taxa-escolhida = i;
+                    root.taxa-mudou(i);
+                }
+                diagnostico => {
+                    root.qualidade-aberta = false;
+                    root.diagnostico-aberto = true;
+                }
+                fechar => { root.qualidade-aberta = false; }
+            }
             if root.toast != "": Toast {
                 texto: root.toast;
                 x: (parent.width - self.width) / 2;
                 y: parent.height - self.height - 24px;
             }
         }
+    }
+    Timer {
+        interval: 5s;
+        running: root.toast != "";
+        triggered => { root.toast = ""; }
     }
     // Painel de arquivos (fase 3), por cima do vídeo.
     ArquivosNaSessao { width: parent.width; height: parent.height; }

@@ -80,6 +80,7 @@ pub fn need(msg: &Msg) -> Need {
         Msg::StartVideo(_)
         | Msg::StopVideo(_)
         | Msg::SetPriority(_)
+        | Msg::SetVideoQuality(_)
         | Msg::RequestKeyframe(_)
         | Msg::PictureLoss(_)
         | Msg::Nack(_) => Need::View,
