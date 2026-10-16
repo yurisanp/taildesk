@@ -23,6 +23,7 @@ pub mod segredos;
 #[cfg(windows)]
 pub mod servico_windows;
 pub mod soltar;
+pub mod som;
 pub mod teclado;
 #[cfg(target_os = "linux")]
 pub mod wayland;

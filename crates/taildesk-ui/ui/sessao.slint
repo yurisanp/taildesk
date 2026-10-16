@@ -397,6 +397,11 @@ export component JanelaSessao inherits Window {
     out property <length> area-largura: video.width;
     out property <length> area-altura: video.height;
 
+    // Som do computador remoto (`15-audio.md` §8): o botão só aparece se o host permite.
+    in property <bool> som-permitido;
+    in-out property <bool> som-ligado: true;
+    callback som-mudou(bool);
+
     callback desconectar();
     callback entrar-com-senha(string, bool);
     callback trocar-aba(int);
@@ -468,6 +473,16 @@ export component JanelaSessao inherits Window {
                     font-size: Tema.fonte-pequena;
                     color: Tema.texto-2;
                     vertical-alignment: center;
+                }
+                if root.ao-vivo && root.som-permitido: Botao {
+                    y: 4px;
+                    altura: 32px;
+                    texto: root.som-ligado ? @tr("🔊 Som") : @tr("🔇 Som");
+                    discreto: !root.som-ligado;
+                    clicado => {
+                        root.som-ligado = !root.som-ligado;
+                        root.som-mudou(root.som-ligado);
+                    }
                 }
                 if root.ao-vivo: IndicadorQualidade {
                     y: 4px;

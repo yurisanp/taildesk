@@ -16,14 +16,17 @@ use taildesk_media::taxa::{ControleTaxa, Relato, Sinais};
 use taildesk_media::video::{ConfigEnvio, EnvioVideo};
 use taildesk_platform::captura::{FormaCursor, FormatoPixel, Quadro};
 use taildesk_proto::control::{
-    Codec, CodecCap, CodecSelected, ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg,
-    QualityPrefs, SetVideoQuality, StartVideo, VideoStats, VideoStopReason, VideoStopped,
+    AudioCodec, AudioSelected, AudioStopReason, AudioStopped, Codec, CodecCap, CodecSelected,
+    ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg, QualityPrefs, SetVideoQuality,
+    StartAudio, StartVideo, VideoStats, VideoStopReason, VideoStopped,
 };
 use taildesk_proto::cursor::{STREAM_MAGIC, ShapeHeader};
 use taildesk_proto::media::AUDIO_STREAM_MIN;
 use taildesk_session::conexao::host::{CanalMidia, Midia};
 use taildesk_session::{AcaoForma, CursorHost};
 use taildesk_transport::SaidaQuic;
+
+use crate::som::SomHost;
 use tokio::sync::mpsc;
 
 /// Streams de vídeo ao mesmo tempo (`ErrorCode::TooManyStreams`): até 4 com encoder de hardware,
@@ -568,6 +571,8 @@ pub struct MidiaApp {
     tarefa_cursor: tokio::task::JoinHandle<()>,
     tarefa_stats: tokio::task::JoinHandle<()>,
     tarefa_taxa: tokio::task::JoinHandle<()>,
+    /// Som do sistema saindo (`stream_id`, captura), só com `Permissions.audio` e `StartAudio`.
+    som: Option<(u32, SomHost)>,
 }
 
 impl MidiaApp {
@@ -593,6 +598,7 @@ impl MidiaApp {
             tarefa_cursor,
             tarefa_stats,
             tarefa_taxa,
+            som: None,
         }
     }
 
@@ -922,6 +928,66 @@ impl MidiaApp {
     }
 }
 
+impl MidiaApp {
+    /// `StartAudio`: abre a captura e responde `AudioSelected` (ou `AudioStopped` se o
+    /// dispositivo não abrir).
+    async fn iniciar_som(&mut self, a: &StartAudio) {
+        let Ok(stream) = u8::try_from(a.stream_id) else {
+            return;
+        };
+        if self.som.as_ref().is_some_and(|(id, _)| *id != a.stream_id) {
+            self.parar_som(AudioStopReason::ByController).await;
+        }
+        if self.som.is_none() {
+            let conn = self.canal.conn.clone();
+            let aberto = tokio::task::spawn_blocking(move || SomHost::iniciar(conn, stream))
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r);
+            match aberto {
+                Ok(s) => self.som = Some((a.stream_id, s)),
+                Err(e) => {
+                    eprintln!("taildesk: som do sistema indisponível: {e}");
+                    self.canal
+                        .enviar(Msg::AudioStopped(AudioStopped {
+                            stream_id: a.stream_id,
+                            reason: AudioStopReason::DeviceError.into(),
+                        }))
+                        .await;
+                    return;
+                }
+            }
+        }
+        self.canal
+            .enviar(Msg::AudioSelected(AudioSelected {
+                stream_id: a.stream_id,
+                codec: AudioCodec::Opus.into(),
+                sample_rate: taildesk_media::audio::TAXA,
+                channels: taildesk_media::audio::CANAIS as u32,
+                frame_ms_x10: taildesk_media::audio::QUADRO_MS_X10,
+                bitrate_kbps: taildesk_media::audio::BITRATE_KBPS,
+                redundancy: false,
+                inband_fec: false,
+            }))
+            .await;
+    }
+
+    /// Fecha a captura (e espera o encoder parar) antes de avisar: depois do `AudioStopped`
+    /// nenhum `kind=1` sai (`15-audio.md` §4.3).
+    async fn parar_som(&mut self, motivo: AudioStopReason) {
+        let Some((stream_id, s)) = self.som.take() else {
+            return;
+        };
+        let _ = tokio::task::spawn_blocking(move || drop(s)).await;
+        self.canal
+            .enviar(Msg::AudioStopped(AudioStopped {
+                stream_id,
+                reason: motivo.into(),
+            }))
+            .await;
+    }
+}
+
 impl Midia for MidiaApp {
     async fn mensagem(&mut self, msg: &Msg) {
         match msg {
@@ -930,6 +996,8 @@ impl Midia for MidiaApp {
             Msg::SetVideoQuality(q) => self.qualidade(q).await,
             Msg::RequestKeyframe(r) => self.pedir_chave(r.display_id),
             Msg::PictureLoss(p) => self.pedir_chave(p.display_id),
+            Msg::StartAudio(a) => self.iniciar_som(a).await,
+            Msg::StopAudio(_) => self.parar_som(AudioStopReason::ByController).await,
             Msg::ReceiverReport(r) => {
                 *self
                     .compartilhado
@@ -953,6 +1021,7 @@ impl Drop for MidiaApp {
     fn drop(&mut self) {
         // A captura primeiro (para de entregar), depois os envios (juntam as threads).
         self.captura = None;
+        self.som = None;
         self.compartilhado.fluxos().clear();
         self.tarefa_cursor.abort();
         self.tarefa_stats.abort();
@@ -1118,6 +1187,7 @@ mod tests {
             controlador.clone(),
             recepcoes.clone(),
             contadores.clone(),
+            crate::som::Destino::default(),
         ));
         for _ in 0..400 {
             if decodificados.load(Ordering::Relaxed) >= 5 {
