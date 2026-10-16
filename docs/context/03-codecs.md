@@ -98,6 +98,13 @@ Cabeçalho comum de frame (nosso protocolo, ver `07-protocolo.md`): `codec`, `di
    CodecSelected + keyframe. O receptor recria decoder ao ver mudança de codec/resolução.
 ```
 
+**Implementado hoje** (`taildesk-codec::selecao`): o controlador anuncia H.264 sempre e HEVC/AV1
+só com decoder de hardware (NVDEC no Linux; Media Foundation com D3D11 no Windows). O host
+escolhe AV1 > HEVC > H.264 entre os encoders de hardware que tem (NVENC: H.264/HEVC, AV1 a
+partir da Ada; VA-API: H.264), com openh264 por último no H.264. Sem probe em disco: cada
+backend testa um quadro ao abrir. `TAILDESK_CODEC`, `TAILDESK_ENCODER` e `TAILDESK_DECODER`
+forçam a escolha para diagnóstico.
+
 ## 7. Recuperação de erros
 
 | Evento | Ação |

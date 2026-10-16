@@ -23,8 +23,8 @@ fn main() {
         .ok()
         .and_then(|b| b.parse().ok())
         .unwrap_or(20_000_000);
-    let decoders = taildesk_codec::opcoes_decoder();
-    for opcao in taildesk_codec::opcoes_encoder() {
+    let codecs = taildesk_codec::codecs_para_decodificar();
+    for opcao in taildesk_codec::candidatos_encoder(&codecs) {
         let config = ConfigEncoder {
             bitrate_bps: bps,
             fps_max: 60.0,
@@ -79,8 +79,10 @@ fn main() {
             }
         }
         let bytes: usize = aus.iter().map(Vec::len).sum();
+        let decoders = taildesk_codec::opcoes_decoder(enc.codec());
         println!(
-            "{:<8} {:<36} {l}x{a}: encode {:.1} ms (pior {:.1}), {:.1} Mbit/s a 60 fps",
+            "{:<5} {:<8} {:<36} {l}x{a}: encode {:.1} ms (pior {:.1}), {:.1} Mbit/s a 60 fps",
+            taildesk_codec::nome_codec(enc.codec()),
             enc.nome(),
             enc.gpu().unwrap_or("CPU"),
             t_enc * 1000.0 / f64::from(n),

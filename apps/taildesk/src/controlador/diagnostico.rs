@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use taildesk_overlay::{PathInfo, PathKind};
-use taildesk_proto::control::{CodecSelected, VideoStats};
+use taildesk_proto::control::{Codec, CodecSelected, VideoStats};
 use taildesk_ui::LinhaDiag;
 
 use crate::video::Contadores;
@@ -165,7 +165,15 @@ impl Diagnostico {
             };
             l.push(linha(
                 "Imagem",
-                format!("{w}×{h} · H.264 · até {} fps", v.fps_target),
+                format!(
+                    "{w}×{h} · {} · até {} fps",
+                    match v.codec() {
+                        Codec::Hevc => "HEVC",
+                        Codec::Av1 => "AV1",
+                        _ => "H.264",
+                    },
+                    v.fps_target
+                ),
             ));
         }
         let exibidos = (a.exibidos - b.exibidos) as f64 / s;

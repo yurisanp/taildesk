@@ -61,6 +61,8 @@ pub trait Entrada: Send + 'static {
 pub struct CanalMidia {
     pub conn: quinn::Connection,
     pub saida: mpsc::Sender<taildesk_proto::control::Control>,
+    /// Codecs que o controlador decodifica (`Hello.decode_caps`; vazio = só H.264).
+    pub decode_caps: Vec<taildesk_proto::control::CodecCap>,
 }
 
 impl CanalMidia {
@@ -290,6 +292,7 @@ async fn atender<I: Identificador, M: Maquina>(
 
     let motivo = ao_vivo(
         &conn,
+        hello.decode_caps.clone(),
         &mut sessao,
         id,
         maquina,
@@ -403,6 +406,7 @@ impl<E: Entrada> Teclado<E> {
 #[allow(clippy::too_many_arguments)]
 async fn ao_vivo<M: Maquina>(
     conn: &quinn::Connection,
+    decode_caps: Vec<taildesk_proto::control::CodecCap>,
     sessao: &mut HostSession,
     id: IdSessao,
     maquina: &M,
@@ -428,6 +432,7 @@ async fn ao_vivo<M: Maquina>(
         .midia(CanalMidia {
             conn: conn.clone(),
             saida: saida.clone(),
+            decode_caps,
         })
         .await;
 

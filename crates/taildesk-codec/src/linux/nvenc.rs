@@ -1,7 +1,7 @@
-//! Encoder H.264 no NVENC (GPUs NVIDIA), pela API do Video Codec SDK 12.1 carregada do
+//! Encoder H.264, HEVC ou AV1 no NVENC (GPUs NVIDIA), pela API do Video Codec SDK 12.1 carregada do
 //! `libnvidia-encode.so.1` do driver.
 //!
-//! Preset P4 com tuning de latência ultrabaixa, CBR com VBV de [`QUADROS_VBV`] quadros e GOP
+//! Preset P4 (H.264) ou P1 (HEVC, AV1) com tuning de latência ultrabaixa, CBR com VBV de [`QUADROS_VBV`] quadros e GOP
 //! infinito (IDR só no começo e quando pedido). A imagem BGRx/RGBx vai direto para o buffer de entrada do NVENC, que
 //! converte para YUV na GPU; nada passa pelo conversor da CPU.
 
@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 use super::cuda::{Contexto, CuDevice, Cuda};
 use super::sys::nvenc::*;
-use crate::{ConfigEncoder, ErroCodec, OrdemRgb, QuadroRgb, TipoQuadro, VideoEncoder};
+use crate::{CodecVideo, ConfigEncoder, ErroCodec, OrdemRgb, QuadroRgb, TipoQuadro, VideoEncoder};
 
 const fn versao(v: u32) -> u32 {
     NVENCAPI_VERSION | (v << 16) | (0x7 << 28)
@@ -44,6 +44,52 @@ const PRESET_P4: GUID = GUID {
     Data3: 0x4862,
     Data4: [0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81],
 };
+const CODEC_HEVC: GUID = GUID {
+    Data1: 0x790c_dc88,
+    Data2: 0x4522,
+    Data3: 0x4d7b,
+    Data4: [0x94, 0x25, 0xbd, 0xa9, 0x97, 0x5f, 0x76, 0x03],
+};
+const CODEC_AV1: GUID = GUID {
+    Data1: 0x0a35_2289,
+    Data2: 0x0aa7,
+    Data3: 0x4759,
+    Data4: [0x86, 0x2d, 0x5d, 0x15, 0xcd, 0x16, 0xd2, 0x54],
+};
+const PERFIL_HEVC_MAIN: GUID = GUID {
+    Data1: 0xb514_c39a,
+    Data2: 0xb55b,
+    Data3: 0x40fa,
+    Data4: [0x87, 0x8f, 0xf1, 0x25, 0x3b, 0x4d, 0xfd, 0xec],
+};
+const PERFIL_AV1_MAIN: GUID = GUID {
+    Data1: 0x5f2a_39f5,
+    Data2: 0xf14e,
+    Data3: 0x4f95,
+    Data4: [0x9a, 0x9e, 0xb7, 0x6d, 0x56, 0x8f, 0xcf, 0x97],
+};
+
+fn guid_do_codec(c: CodecVideo) -> GUID {
+    match c {
+        CodecVideo::H264 => CODEC_H264,
+        CodecVideo::Hevc => CODEC_HEVC,
+        CodecVideo::Av1 => CODEC_AV1,
+    }
+}
+
+fn mesmo_guid(a: &GUID, b: &GUID) -> bool {
+    (a.Data1, a.Data2, a.Data3, a.Data4) == (b.Data1, b.Data2, b.Data3, b.Data4)
+}
+
+/// P1 para HEVC e AV1: na RTX 3060 (bateria) o HEVC leva 14,6 ms por quadro 1080p no P1 e 19,3
+/// ms no P4, com o mesmo PSNR (37 dB a 8 Mbit/s).
+const PRESET_P1: GUID = GUID {
+    Data1: 0xfc0a_8d3e,
+    Data2: 0x45f8,
+    Data3: 0x4cf8,
+    Data4: [0x80, 0xc7, 0x29, 0x88, 0x71, 0x59, 0x0e, 0xbf],
+};
+
 const PERFIL_HIGH: GUID = GUID {
     Data1: 0xe7cb_c309,
     Data2: 0x4f7a,
@@ -130,11 +176,70 @@ struct Sessao {
     config: Box<NV_ENC_CONFIG>,
 }
 
-/// Encoder H.264 no NVENC de uma GPU.
+/// Codecs que o NVENC da GPU CUDA `dev` codifica (H.264 em toda GPU com NVENC; HEVC desde a
+/// Maxwell 2; AV1 desde a Ada). Perguntado ao driver uma vez por GPU.
+pub fn codecs(dev: CuDevice) -> Vec<CodecVideo> {
+    static CACHE: std::sync::Mutex<Vec<(CuDevice, Vec<CodecVideo>)>> =
+        std::sync::Mutex::new(Vec::new());
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, c)) = cache.iter().find(|(d, _)| *d == dev) {
+        return c.clone();
+    }
+    let c = consultar_codecs(dev).unwrap_or_default();
+    cache.push((dev, c.clone()));
+    c
+}
+
+fn consultar_codecs(dev: CuDevice) -> Option<Vec<CodecVideo>> {
+    let api = api()?;
+    let ctx = Contexto::novo(Cuda::carregar()?, dev).ok()?;
+    ctx.com(|| {
+        // SAFETY: sessão aberta só para a consulta e destruída em seguida; o array de GUIDs
+        // tem o tamanho que o driver disse.
+        unsafe {
+            let mut abrir: NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS = std::mem::zeroed();
+            abrir.version = OPEN_SESSION_EX_VER;
+            abrir.deviceType = NV_ENC_DEVICE_TYPE_CUDA;
+            abrir.device = ctx.ctx;
+            abrir.apiVersion = NVENCAPI_VERSION;
+            let mut enc = std::ptr::null_mut();
+            if api.f.nvEncOpenEncodeSessionEx?(&mut abrir, &mut enc) != NV_ENC_SUCCESS {
+                return None;
+            }
+            let mut n = 0u32;
+            let mut guids = Vec::new();
+            if api.f.nvEncGetEncodeGUIDCount?(enc, &mut n) == NV_ENC_SUCCESS {
+                guids = vec![GUID::default(); n as usize];
+                let mut lidos = 0u32;
+                if api.f.nvEncGetEncodeGUIDs?(enc, guids.as_mut_ptr(), n, &mut lidos)
+                    == NV_ENC_SUCCESS
+                {
+                    guids.truncate(lidos as usize);
+                } else {
+                    guids.clear();
+                }
+            }
+            api.f.nvEncDestroyEncoder?(enc);
+            Some(
+                [CodecVideo::H264, CodecVideo::Hevc, CodecVideo::Av1]
+                    .into_iter()
+                    .filter(|c| guids.iter().any(|g| mesmo_guid(g, &guid_do_codec(*c))))
+                    .collect(),
+            )
+        }
+    })
+    .ok()
+    .flatten()
+}
+
+/// Encoder no NVENC de uma GPU.
 pub struct EncoderNvenc {
     api: &'static Api,
     ctx: Contexto,
     gpu: String,
+    codec: CodecVideo,
     config: ConfigEncoder,
     sessao: Option<Sessao>,
     quadro: u64,
@@ -154,8 +259,14 @@ impl std::fmt::Debug for EncoderNvenc {
 }
 
 impl EncoderNvenc {
-    /// Abre o NVENC na GPU CUDA `dev` (de [`gpus`]) e confere que ele codifica um quadro.
-    pub fn novo(dev: CuDevice, gpu: String, config: ConfigEncoder) -> Result<Self, ErroCodec> {
+    /// Abre o NVENC na GPU CUDA `dev` (de [`gpus`]) para `codec` e confere que ele codifica um
+    /// quadro.
+    pub fn novo(
+        dev: CuDevice,
+        gpu: String,
+        codec: CodecVideo,
+        config: ConfigEncoder,
+    ) -> Result<Self, ErroCodec> {
         let erro = |e: String| ErroCodec::Backend(format!("nvenc: {e}"));
         let cuda = Cuda::carregar().ok_or_else(|| erro("sem libcuda".into()))?;
         let api = api().ok_or_else(|| erro("sem libnvidia-encode".into()))?;
@@ -164,6 +275,7 @@ impl EncoderNvenc {
             api,
             ctx,
             gpu,
+            codec,
             config,
             sessao: None,
             quadro: 0,
@@ -228,6 +340,12 @@ impl EncoderNvenc {
         let api = self.api;
         let ctx = self.ctx.ctx;
         let fps = self.config.fps_max.max(1.0).round() as u32;
+        let (codec, perfil, guid_preset) = match self.codec {
+            CodecVideo::H264 => (CODEC_H264, PERFIL_HIGH, PRESET_P4),
+            CodecVideo::Hevc => (CODEC_HEVC, PERFIL_HEVC_MAIN, PRESET_P1),
+            CodecVideo::Av1 => (CODEC_AV1, PERFIL_AV1_MAIN, PRESET_P1),
+        };
+        let qual = self.codec;
         let mut sessao = None;
         let r = self.ctx.com(|| -> Result<(), ErroCodec> {
             // SAFETY: todas as estruturas são POD do header, zeradas como a API pede e com a
@@ -259,8 +377,8 @@ impl EncoderNvenc {
                         api,
                         nvEncGetEncodePresetConfigEx(
                             enc,
-                            CODEC_H264,
-                            PRESET_P4,
+                            codec,
+                            guid_preset,
                             NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY,
                             &mut preset,
                         )
@@ -268,29 +386,52 @@ impl EncoderNvenc {
                     let c = &mut *s.config;
                     *c = preset.presetCfg;
                     c.version = CONFIG_VER;
-                    c.profileGUID = PERFIL_HIGH;
+                    c.profileGUID = perfil;
                     c.gopLength = INFINITE_GOPLENGTH;
                     c.frameIntervalP = 1;
                     self.rc(&mut c.rcParams);
-                    let h = &mut c.encodeCodecConfig.h264Config;
-                    h.idrPeriod = INFINITE_GOPLENGTH;
-                    h.set_repeatSPSPPS(1);
-                    h.entropyCodingMode = NV_ENC_H264_ENTROPY_CODING_MODE_CABAC;
-                    h.chromaFormatIDC = 1;
-                    h.maxNumRefFrames = 1;
-                    let vui = &mut h.h264VUIParameters;
-                    vui.videoSignalTypePresentFlag = 1;
-                    vui.videoFormat = NV_ENC_VUI_VIDEO_FORMAT_UNSPECIFIED;
-                    vui.videoFullRangeFlag = 0;
-                    vui.colourDescriptionPresentFlag = 1;
-                    vui.colourPrimaries = NV_ENC_VUI_COLOR_PRIMARIES_BT709;
-                    vui.transferCharacteristics = NV_ENC_VUI_TRANSFER_CHARACTERISTIC_BT709;
-                    vui.colourMatrix = NV_ENC_VUI_MATRIX_COEFFS_BT709;
+                    let bt709 = |vui: &mut NV_ENC_CONFIG_H264_VUI_PARAMETERS| {
+                        vui.videoSignalTypePresentFlag = 1;
+                        vui.videoFormat = NV_ENC_VUI_VIDEO_FORMAT_UNSPECIFIED;
+                        vui.videoFullRangeFlag = 0;
+                        vui.colourDescriptionPresentFlag = 1;
+                        vui.colourPrimaries = NV_ENC_VUI_COLOR_PRIMARIES_BT709;
+                        vui.transferCharacteristics = NV_ENC_VUI_TRANSFER_CHARACTERISTIC_BT709;
+                        vui.colourMatrix = NV_ENC_VUI_MATRIX_COEFFS_BT709;
+                    };
+                    match qual {
+                        CodecVideo::H264 => {
+                            let h = &mut c.encodeCodecConfig.h264Config;
+                            h.idrPeriod = INFINITE_GOPLENGTH;
+                            h.set_repeatSPSPPS(1);
+                            h.entropyCodingMode = NV_ENC_H264_ENTROPY_CODING_MODE_CABAC;
+                            h.chromaFormatIDC = 1;
+                            h.maxNumRefFrames = 1;
+                            bt709(&mut h.h264VUIParameters);
+                        }
+                        CodecVideo::Hevc => {
+                            let h = &mut c.encodeCodecConfig.hevcConfig;
+                            h.idrPeriod = INFINITE_GOPLENGTH;
+                            h.set_repeatSPSPPS(1);
+                            h.set_chromaFormatIDC(1);
+                            bt709(&mut h.hevcVUIParameters);
+                        }
+                        CodecVideo::Av1 => {
+                            let a = &mut c.encodeCodecConfig.av1Config;
+                            a.idrPeriod = INFINITE_GOPLENGTH;
+                            a.set_repeatSeqHdr(1);
+                            a.set_chromaFormatIDC(1);
+                            a.colorPrimaries = NV_ENC_VUI_COLOR_PRIMARIES_BT709;
+                            a.transferCharacteristics = NV_ENC_VUI_TRANSFER_CHARACTERISTIC_BT709;
+                            a.matrixCoefficients = NV_ENC_VUI_MATRIX_COEFFS_BT709;
+                            a.colorRange = 0;
+                        }
+                    }
 
                     let i = &mut s.init;
                     i.version = INITIALIZE_PARAMS_VER;
-                    i.encodeGUID = CODEC_H264;
-                    i.presetGUID = PRESET_P4;
+                    i.encodeGUID = codec;
+                    i.presetGUID = guid_preset;
                     i.tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
                     i.encodeWidth = largura;
                     i.encodeHeight = altura;
@@ -348,6 +489,10 @@ impl Drop for EncoderNvenc {
 impl VideoEncoder for EncoderNvenc {
     fn nome(&self) -> &'static str {
         "nvenc"
+    }
+
+    fn codec(&self) -> CodecVideo {
+        self.codec
     }
 
     fn gpu(&self) -> Option<&str> {
@@ -497,6 +642,7 @@ mod tests {
         let mut enc = EncoderNvenc::novo(
             dev,
             nome,
+            CodecVideo::H264,
             ConfigEncoder {
                 bitrate_bps: 8_000_000,
                 fps_max: 60.0,
@@ -545,6 +691,60 @@ mod tests {
                 vy.abs_diff(ey) <= 3 && vu.abs_diff(eu) <= 3 && vv.abs_diff(ev) <= 3,
                 "caso {i}: YUV ({vy}, {vu}, {vv}), esperado ({ey}, {eu}, {ev})"
             );
+        }
+    }
+
+    /// HEVC (e AV1, se a GPU tiver) do NVENC decodificado no NVDEC.
+    #[test]
+    fn hevc_e_av1_ida_e_volta_no_nvdec() {
+        use crate::linux::nvdec::{self, DecoderNvdec};
+        let Some((dev, nome, _)) = gpus().into_iter().next() else {
+            eprintln!("sem NVENC: pulando");
+            return;
+        };
+        for codec in [CodecVideo::Hevc, CodecVideo::Av1] {
+            if !codecs(dev).contains(&codec) || !nvdec::codecs(dev).contains(&codec) {
+                eprintln!("{codec:?} sem encode ou decode nesta GPU: pulando");
+                continue;
+            }
+            let mut enc = EncoderNvenc::novo(
+                dev,
+                nome.clone(),
+                codec,
+                ConfigEncoder {
+                    bitrate_bps: 8_000_000,
+                    fps_max: 60.0,
+                },
+            )
+            .unwrap();
+            let mut dec = DecoderNvdec::novo(dev, nome.clone(), codec).unwrap();
+            let (l, a) = (640u32, 360u32);
+            let mut au = Vec::new();
+            let mut vistos = 0;
+            for i in 0..10u32 {
+                let v = (i * 20 + 30) as u8;
+                let img = vec![v; (l * a * 4) as usize];
+                let q = QuadroRgb {
+                    largura: l,
+                    altura: a,
+                    stride: l as usize * 4,
+                    ordem: OrdemRgb::Bgrx,
+                    dados: &img,
+                };
+                enc.codificar(&q, i == 0, &mut au).unwrap();
+                dec.decodificar(&au, &mut |y| {
+                    assert_eq!((y.largura, y.altura), (l, a));
+                    let esperado = 16 + i32::from(v) * 219 / 255;
+                    let visto = i32::from(y.planos[0].dados[(a as usize / 2) * l as usize + 7]);
+                    assert!(
+                        (visto - esperado).abs() <= 3,
+                        "{codec:?} {i}: {visto} vs {esperado}"
+                    );
+                    vistos += 1;
+                })
+                .unwrap();
+            }
+            assert!(vistos >= 9, "{codec:?}: {vistos}");
         }
     }
 }
