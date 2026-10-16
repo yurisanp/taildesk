@@ -4,6 +4,7 @@
 
 pub mod cuda;
 pub mod gpu;
+pub mod nvdec;
 pub mod nvenc;
 pub mod va;
 pub mod vaapi;

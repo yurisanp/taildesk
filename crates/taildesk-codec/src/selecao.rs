@@ -2,8 +2,8 @@
 //!
 //! [`opcoes_encoder`] lista o que dá para usar nesta máquina, em ordem de preferência: primeiro a
 //! GPU ligada às telas (onde a imagem já está e que costuma ser a integrada, que gasta menos),
-//! depois as outras, e o openh264 por último. Numa mesma GPU NVIDIA o NVENC vem antes do
-//! VA-API. [`abrir_encoder`] tenta cada opção até uma abrir e codificar o quadro de teste.
+//! depois as outras, e o openh264 por último. [`abrir_encoder`] tenta cada opção até uma abrir e
+//! codificar o quadro de teste. Os decoders seguem outra ordem (ver [`opcoes_decoder`]).
 //!
 //! `TAILDESK_ENCODER` e `TAILDESK_DECODER` (ex.: `vaapi`, `nvenc,openh264`) restringem e
 //! reordenam a lista pelo nome do backend, para diagnóstico.
@@ -61,7 +61,12 @@ impl Opcao {
         match &self.onde {
             Onde::Cpu => Ok(Box::new(DecoderOpenH264::novo()?)),
             #[cfg(target_os = "linux")]
-            _ => Err(ErroCodec::Backend(format!(
+            Onde::Nvidia(dev) => Ok(Box::new(crate::linux::nvdec::DecoderNvdec::novo(
+                *dev,
+                self.gpu.clone().unwrap_or_default(),
+            )?)),
+            #[cfg(target_os = "linux")]
+            Onde::Va(_) => Err(ErroCodec::Backend(format!(
                 "{}: decoder indisponível",
                 self.backend
             ))),
@@ -137,8 +142,39 @@ pub fn opcoes_encoder() -> Vec<Opcao> {
 }
 
 /// Decoders desta máquina, em ordem de preferência.
+///
+/// O openh264 vem primeiro: com SIMD ele decodifica 1920x1200 em ~1,5 ms, e o NVDEC leva 2,4 ms
+/// ou mais porque o quadro volta da GPU para a CPU antes de ir para o render (medido com o
+/// `medir_encode` num i7-12700H com RTX 3060). O hardware passa na frente quando o quadro for
+/// direto do decoder para a textura do wgpu.
 pub fn opcoes_decoder() -> Vec<Opcao> {
-    filtrar(vec![openh264()], "TAILDESK_DECODER")
+    let mut opcoes = vec![openh264()];
+    #[cfg(target_os = "linux")]
+    {
+        use crate::linux::{gpu, nvdec};
+        let mut nvidia = nvdec::gpus();
+        for g in gpu::gpus()
+            .into_iter()
+            .filter(|g| g.fabricante == gpu::NVIDIA)
+        {
+            if let Some(i) = nvidia.iter().position(|(_, _, pci)| *pci == g.pci) {
+                let (dev, nome, _) = nvidia.remove(i);
+                opcoes.push(Opcao {
+                    backend: "nvdec",
+                    gpu: Some(nome),
+                    onde: Onde::Nvidia(dev),
+                });
+            }
+        }
+        for (dev, nome, _) in nvidia {
+            opcoes.push(Opcao {
+                backend: "nvdec",
+                gpu: Some(nome),
+                onde: Onde::Nvidia(dev),
+            });
+        }
+    }
+    filtrar(opcoes, "TAILDESK_DECODER")
 }
 
 /// Abre o primeiro encoder que funcionar. Os que falharam vão para `falhas` (backend e erro),
@@ -201,6 +237,7 @@ mod tests {
             eprintln!("{} ({:?}) falhou: {e}", o.backend, o.gpu);
         }
         eprintln!("encoder: {} {:?}", enc.nome(), enc.gpu());
-        assert!(abrir_decoder(&mut falhas).is_ok());
+        let dec = abrir_decoder(&mut falhas).unwrap();
+        eprintln!("decoder: {} {:?}", dec.nome(), dec.gpu());
     }
 }

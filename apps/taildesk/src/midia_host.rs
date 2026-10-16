@@ -100,6 +100,7 @@ impl Fluxo {
                 .unwrap_or(u32::MAX),
             skipped: (a.pulados - b.pulados).try_into().unwrap_or(u32::MAX),
             keyframes: (a.chaves - b.chaves).try_into().unwrap_or(u32::MAX),
+            loss_ppm: 0,
         }
     }
 }
@@ -256,12 +257,27 @@ async fn cursor(canal: CanalMidia, mut rx: mpsc::Receiver<CursorCapturado>) {
 async fn stats(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
     let mut t = tokio::time::interval(INTERVALO_STATS);
     t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let caminho = |c: &quinn::Connection| {
+        let p = c.stats().path;
+        (p.sent_packets, p.lost_packets)
+    };
+    let mut antes = caminho(&canal.conn);
     loop {
         t.tick().await;
+        let agora = caminho(&canal.conn);
+        let (enviados, perdidos) = (agora.0 - antes.0, agora.1 - antes.1);
+        antes = agora;
+        let loss_ppm = (perdidos * 1_000_000)
+            .checked_div(enviados)
+            .unwrap_or(0)
+            .min(1_000_000) as u32;
         let msgs: Vec<VideoStats> = compartilhado
             .fluxos()
             .iter_mut()
-            .map(|(&id, f)| f.stats(id))
+            .map(|(&id, f)| VideoStats {
+                loss_ppm,
+                ..f.stats(id)
+            })
             .collect();
         for m in msgs {
             // Informativo: fila cheia perde esta amostra e a próxima vem em um segundo.
@@ -751,7 +767,12 @@ mod tests {
         )
         .unwrap();
         travar(&recepcoes).insert(c.stream_id as u8, (3, r));
-        let leitor = tokio::spawn(ler_datagramas(controlador.clone(), recepcoes.clone()));
+        let contadores = Arc::new(crate::video::Contadores::default());
+        let leitor = tokio::spawn(ler_datagramas(
+            controlador.clone(),
+            recepcoes.clone(),
+            contadores.clone(),
+        ));
         for _ in 0..400 {
             if decodificados.load(Ordering::Relaxed) >= 5 {
                 break;
@@ -759,6 +780,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         assert!(decodificados.load(Ordering::Relaxed) >= 5);
+        assert!(contadores.bytes.load(Ordering::Relaxed) > 0);
 
         // Cursor: a forma no stream de cursor, antes do `CursorShapeRef`; a posição no controle.
         let Msg::CursorShapeRef(r) =
@@ -776,6 +798,14 @@ mod tests {
             unreachable!()
         };
         assert!(p.visible && p.display_id == 3 && p.y == u32::from(normalizar(5, 96)));
+        // Estatísticas para o painel de diagnóstico: encoder escolhido e quadros saindo.
+        let Msg::VideoStats(st) = proxima(&mut rx, |m| matches!(m, Msg::VideoStats(_))).await
+        else {
+            unreachable!()
+        };
+        eprintln!("encoder escolhido: {} ({:?})", st.encoder, st.gpu);
+        assert_eq!(st.display_id, 3);
+        assert!(!st.encoder.is_empty());
 
         // Parar confirma com `VideoStopped` e solta a captura.
         midia

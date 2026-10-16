@@ -479,6 +479,9 @@ pub struct VideoStats {
     pub skipped: u32,
     #[prost(uint32, tag = "9")]
     pub keyframes: u32,
+    /// Pacotes QUIC que o host mandou e deu como perdidos no intervalo, em partes por milhão.
+    #[prost(uint32, tag = "10")]
+    pub loss_ppm: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Message)]
@@ -1560,6 +1563,7 @@ mod tests {
                 encode_us: 4300,
                 skipped: 2,
                 keyframes: 1,
+                loss_ppm: 1500,
             }),
             Msg::CodecSelected(CodecSelected {
                 display_id: 1,
