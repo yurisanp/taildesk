@@ -1,9 +1,12 @@
 //! Encoder H.264 no VA-API (Intel pelo iHD, AMD e outras GPUs pelo Mesa).
 //!
-//! Só P depois do IDR, uma referência, POC tipo 2 (sem reordenação) e CBR com HRD de um quadro.
+//! Só P depois do IDR, uma referência, POC tipo 2 (sem reordenação) e CBR com HRD de
+//! [`QUADROS_HRD`] quadros e QP no máximo [`QP_MAXIMO`].
 //! SPS e PPS vão como packed headers ([`crate::h264`], com o VUI em BT.709); o driver escreve os
 //! cabeçalhos de slice. A imagem é
-//! convertida para NV12 direto na superfície mapeada (`vaDeriveImage`), sem cópia intermediária.
+//! convertida para NV12 numa `VAImage` linear e copiada para a superfície com `vaPutImage`: o
+//! `vaDeriveImage` do iHD expõe a superfície com tiling, e escrever nela como linear embaralha a
+//! imagem.
 
 use std::ffi::c_void;
 use std::path::Path;
@@ -15,6 +18,12 @@ use crate::{ConfigEncoder, ErroCodec, QuadroRgb, TipoQuadro, VideoEncoder, cor};
 
 /// Superfícies de reconstrução: a referência atual e a do quadro em codificação.
 const RECONSTRUCAO: usize = 2;
+/// HRD em quadros. Com um quadro só, o controle de taxa do iHD vai para QP 51 e completa a taxa
+/// com enchimento: texto rolando sai a 22 dB de PSNR em 1080p a 8 Mbit/s (36 dB com 8 quadros e
+/// o teto de QP abaixo).
+const QUADROS_HRD: u32 = 8;
+/// Teto de QP: acima disso o texto fica ilegível; o quadro sai maior e o HRD absorve.
+const QP_MAXIMO: u32 = 42;
 /// `log2_max_frame_num_minus4`: `frame_num` anda módulo 256.
 const LOG2_MAX_FRAME_NUM_MENOS4: u32 = 4;
 
@@ -75,6 +84,8 @@ struct Sessao {
     /// [0] = entrada; o resto, reconstruções.
     superficies: [VASurfaceID; 1 + RECONSTRUCAO],
     codificado: VABufferID,
+    /// NV12 linear onde a CPU escreve antes do `vaPutImage`.
+    imagem: VAImage,
     largura: u32,
     altura: u32,
 }
@@ -146,6 +157,9 @@ impl EncoderVaapi {
         // SAFETY: recursos criados em `abrir` neste display, destruídos uma vez, na ordem
         // inversa da criação.
         unsafe {
+            if s.imagem.image_id != VA_INVALID_ID {
+                va.vaDestroyImage(self.d.dpy, s.imagem.image_id);
+            }
             va.vaDestroyBuffer(self.d.dpy, s.codificado);
             va.vaDestroyContext(self.d.dpy, s.contexto);
             let mut sup = s.superficies;
@@ -162,6 +176,10 @@ impl EncoderVaapi {
             contexto: VA_INVALID_ID,
             superficies: [VA_INVALID_SURFACE; 1 + RECONSTRUCAO],
             codificado: VA_INVALID_ID,
+            imagem: VAImage {
+                image_id: VA_INVALID_ID,
+                ..zerada()
+            },
             largura,
             altura,
         };
@@ -232,6 +250,22 @@ impl EncoderVaapi {
                         &mut s.codificado,
                     ),
                     "vaCreateBuffer(coded)",
+                )?;
+                let mut formato = VAImageFormat {
+                    fourcc: VA_FOURCC_NV12,
+                    byte_order: VA_LSB_FIRST,
+                    bits_per_pixel: 12,
+                    ..Default::default()
+                };
+                d.checar(
+                    va.vaCreateImage(
+                        d.dpy,
+                        &mut formato,
+                        largura as i32,
+                        altura as i32,
+                        &mut s.imagem,
+                    ),
+                    "vaCreateImage",
                 )?;
             }
             Ok(())
@@ -314,46 +348,49 @@ impl EncoderVaapi {
         }
     }
 
-    /// Converte o quadro para NV12 na superfície de entrada.
+    /// Converte o quadro para NV12 na imagem linear e copia para a superfície de entrada.
     fn carregar(&self, q: &QuadroRgb<'_>) -> Result<(), String> {
         let s = self.sessao.as_ref().expect("sessão aberta");
-        let (d, va) = (&self.d, &self.d.libs.va);
-        // SAFETY: `VAImage` é POD; o derive preenche a imagem da superfície de entrada, que
-        // fica mapeada só entre o map e o unmap, com `data_size` bytes. Os planos Y e UV ficam
-        // em `offsets` com `pitches` bytes por linha, e `para_nv12` confere que cabem.
+        let (d, va, img) = (&self.d, &self.d.libs.va, &s.imagem);
+        // SAFETY: a imagem desta sessão fica mapeada só entre o map e o unmap, com `data_size`
+        // bytes; os planos Y e UV ficam em `offsets` com `pitches` bytes por linha, e
+        // `para_nv12` confere que cabem. O `vaPutImage` copia para a superfície da sessão.
         unsafe {
-            let mut img: VAImage = zerada();
+            let mut p: *mut c_void = std::ptr::null_mut();
+            d.checar(va.vaMapBuffer(d.dpy, img.buf, &mut p), "vaMapBuffer")?;
+            let tudo = std::slice::from_raw_parts_mut(p.cast::<u8>(), img.data_size as usize);
+            let (o0, o1) = (img.offsets[0] as usize, img.offsets[1] as usize);
+            let ok = o0 < o1 && o1 <= tudo.len() && {
+                let (antes, uv) = tudo.split_at_mut(o1);
+                cor::para_nv12(
+                    q,
+                    &mut antes[o0..],
+                    img.pitches[0] as usize,
+                    uv,
+                    img.pitches[1] as usize,
+                )
+            };
+            d.checar(va.vaUnmapBuffer(d.dpy, img.buf), "vaUnmapBuffer")?;
+            if !ok {
+                return Err("imagem menor que o quadro".to_string());
+            }
+            let (l, a) = (s.largura, s.altura);
             d.checar(
-                va.vaDeriveImage(d.dpy, s.superficies[0], &mut img),
-                "vaDeriveImage",
-            )?;
-            let r = (|| {
-                if img.format.fourcc != VA_FOURCC_NV12 {
-                    return Err("superfície não é NV12".to_string());
-                }
-                let mut p: *mut c_void = std::ptr::null_mut();
-                d.checar(va.vaMapBuffer(d.dpy, img.buf, &mut p), "vaMapBuffer")?;
-                let tudo = std::slice::from_raw_parts_mut(p.cast::<u8>(), img.data_size as usize);
-                let (o0, o1) = (img.offsets[0] as usize, img.offsets[1] as usize);
-                let ok = o0 < o1 && o1 <= tudo.len() && {
-                    let (antes, uv) = tudo.split_at_mut(o1);
-                    cor::para_nv12(
-                        q,
-                        &mut antes[o0..],
-                        img.pitches[0] as usize,
-                        uv,
-                        img.pitches[1] as usize,
-                    )
-                };
-                d.checar(va.vaUnmapBuffer(d.dpy, img.buf), "vaUnmapBuffer")?;
-                if ok {
-                    Ok(())
-                } else {
-                    Err("superfície menor que o quadro".to_string())
-                }
-            })();
-            va.vaDestroyImage(d.dpy, img.image_id);
-            r
+                va.vaPutImage(
+                    d.dpy,
+                    s.superficies[0],
+                    img.image_id,
+                    0,
+                    0,
+                    l,
+                    a,
+                    0,
+                    0,
+                    l,
+                    a,
+                ),
+                "vaPutImage",
+            )
         }
     }
 
@@ -435,14 +472,13 @@ impl EncoderVaapi {
             rc.window_size = 1000;
             rc.initial_qp = 26;
             rc.min_qp = 10;
-            rc.max_qp = 51;
+            rc.max_qp = QP_MAXIMO;
             self.misc(VAEncMiscParameterTypeRateControl, &rc)?;
             let mut fr: VAEncMiscParameterFrameRate = zerada();
             fr.framerate = fps | (1 << 16);
             self.misc(VAEncMiscParameterTypeFrameRate, &fr)?;
             let mut hrd: VAEncMiscParameterHRD = zerada();
-            // Um quadro de buffer: nenhum quadro grande atrasa os seguintes.
-            hrd.buffer_size = bps / fps;
+            hrd.buffer_size = bps / fps * QUADROS_HRD;
             hrd.initial_buffer_fullness = hrd.buffer_size / 2;
             self.misc(VAEncMiscParameterTypeHRD, &hrd)?;
             self.taxa_mudou = false;

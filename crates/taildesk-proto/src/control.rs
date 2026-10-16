@@ -482,6 +482,11 @@ pub struct VideoStats {
     /// Pacotes QUIC que o host mandou e deu como perdidos no intervalo, em partes por milhão.
     #[prost(uint32, tag = "10")]
     pub loss_ppm: u32,
+    /// Tamanho real dos quadros que saem (o da captura, em pixels físicos).
+    #[prost(uint32, tag = "11")]
+    pub width: u32,
+    #[prost(uint32, tag = "12")]
+    pub height: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Message)]
@@ -1564,6 +1569,8 @@ mod tests {
                 skipped: 2,
                 keyframes: 1,
                 loss_ppm: 1500,
+                width: 2560,
+                height: 1600,
             }),
             Msg::CodecSelected(CodecSelected {
                 display_id: 1,
