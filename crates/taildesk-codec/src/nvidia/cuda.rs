@@ -75,7 +75,8 @@ impl Cuda {
             // SAFETY: o `libcuda.so.1` é a biblioteca do driver; carregá-la só roda os
             // construtores dela. Cada símbolo é lido com a assinatura de cuda.h (API v2).
             let cuda = unsafe {
-                let lib = libloading::Library::new("libcuda.so.1").ok()?;
+                let lib = libloading::Library::new(super::biblioteca("libcuda.so.1", "nvcuda.dll"))
+                    .ok()?;
                 Cuda {
                     init: *lib.get(b"cuInit\0").ok()?,
                     device_get_count: *lib.get(b"cuDeviceGetCount\0").ok()?,

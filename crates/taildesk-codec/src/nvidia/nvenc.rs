@@ -114,7 +114,11 @@ fn api() -> Option<&'static Api> {
         // SAFETY: biblioteca do driver da NVIDIA; os dois símbolos têm as assinaturas de
         // nvEncodeAPI.h. A tabela é zerada (o formato que a API espera) e preenchida por ela.
         unsafe {
-            let lib = libloading::Library::new("libnvidia-encode.so.1").ok()?;
+            let lib = libloading::Library::new(super::biblioteca(
+                "libnvidia-encode.so.1",
+                "nvEncodeAPI64.dll",
+            ))
+            .ok()?;
             let max: libloading::Symbol<unsafe extern "C" fn(*mut u32) -> NVENCSTATUS> =
                 lib.get(b"NvEncodeAPIGetMaxSupportedVersion\0").ok()?;
             let mut v = 0;
@@ -697,7 +701,7 @@ mod tests {
     /// HEVC (e AV1, se a GPU tiver) do NVENC decodificado no NVDEC.
     #[test]
     fn hevc_e_av1_ida_e_volta_no_nvdec() {
-        use crate::linux::nvdec::{self, DecoderNvdec};
+        use crate::nvidia::nvdec::{self, DecoderNvdec};
         let Some((dev, nome, _)) = gpus().into_iter().next() else {
             eprintln!("sem NVENC: pulando");
             return;

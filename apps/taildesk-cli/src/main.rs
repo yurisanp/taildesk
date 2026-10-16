@@ -15,7 +15,7 @@ mod portal;
 
 const USAGE: &str = "uso: taildesk-cli <host | connect <peer> | probe | bench-net <peer> | \
                      portal [--so-tela] [--video] | captura-dxgi [segundos] [--video] | \
-                     atualizar [--pre] [--instalar] | --version>";
+                     atualizar [--pre] [--instalar] | codecs | --version>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -30,6 +30,10 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("bench-net") => bench_net::main(&args[1..]),
+        Some("codecs") => {
+            print!("{}", taildesk_codec::relatorio());
+            ExitCode::SUCCESS
+        }
         Some("atualizar") => atualizar::main(&args[1..]),
         #[cfg(target_os = "linux")]
         Some("portal") => portal::main(&args[1..]),
