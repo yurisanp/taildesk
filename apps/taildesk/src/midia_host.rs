@@ -44,6 +44,7 @@ fn codecs_aceitos(caps: &[taildesk_proto::control::CodecCap]) -> Vec<CodecVideo>
             Codec::H264 => Some(CodecVideo::H264),
             Codec::Hevc => Some(CodecVideo::Hevc),
             Codec::Av1 => Some(CodecVideo::Av1),
+            Codec::PyroWave => Some(CodecVideo::PyroWave),
             _ => None,
         })
         .collect()
@@ -54,6 +55,7 @@ fn codec_proto(c: CodecVideo) -> Codec {
         CodecVideo::H264 => Codec::H264,
         CodecVideo::Hevc => Codec::Hevc,
         CodecVideo::Av1 => Codec::Av1,
+        CodecVideo::PyroWave => Codec::PyroWave,
     }
 }
 

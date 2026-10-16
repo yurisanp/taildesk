@@ -16,6 +16,8 @@ pub mod linux;
 #[cfg(any(target_os = "linux", windows))]
 pub mod nvidia;
 mod openh264;
+#[cfg(any(target_os = "linux", windows))]
+pub mod pyrowave;
 mod selecao;
 #[cfg(windows)]
 pub mod windows;
@@ -32,6 +34,8 @@ pub enum CodecVideo {
     H264,
     Hevc,
     Av1,
+    /// Wavelet intra-only em compute Vulkan: latência mínima, taxa alta (rede local).
+    PyroWave,
 }
 
 /// Ordem dos bytes de cada pixel da imagem capturada (4 bytes por pixel, o 4º ignorado).

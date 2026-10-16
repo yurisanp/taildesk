@@ -103,7 +103,10 @@ só com decoder de hardware (NVDEC no Linux; Media Foundation com D3D11 no Windo
 escolhe AV1 > HEVC > H.264 entre os encoders de hardware que tem (NVENC: H.264/HEVC, AV1 a
 partir da Ada; VA-API: H.264), com openh264 por último no H.264. Sem probe em disco: cada
 backend testa um quadro ao abrir. `TAILDESK_CODEC`, `TAILDESK_ENCODER` e `TAILDESK_DECODER`
-forçam a escolha para diagnóstico.
+forçam a escolha para diagnóstico. PyroWave (`taildesk-codec::pyrowave`, biblioteca MIT aberta em tempo de
+execução, empacotada pelo `packaging/pyrowave/build.sh`) é anunciado quando a biblioteca e o
+Vulkan abrem, mas só é escolhido quando pedido (escolha manual no controlador ou
+`TAILDESK_CODEC=pyrowave`): ele pede centenas de Mbit/s.
 
 ## 7. Recuperação de erros
 

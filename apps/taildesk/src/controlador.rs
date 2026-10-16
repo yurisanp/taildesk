@@ -155,6 +155,7 @@ impl SessaoUi {
         let codec = match Codec::try_from(c.codec) {
             Ok(Codec::Hevc) => CodecVideo::Hevc,
             Ok(Codec::Av1) => CodecVideo::Av1,
+            Ok(Codec::PyroWave) => CodecVideo::PyroWave,
             _ => CodecVideo::H264,
         };
         let decoder = taildesk_codec::abrir_decoder(codec, &mut falhas);
@@ -760,6 +761,7 @@ async fn rodar(
                 CodecVideo::H264 => Codec::H264,
                 CodecVideo::Hevc => Codec::Hevc,
                 CodecVideo::Av1 => Codec::Av1,
+                CodecVideo::PyroWave => Codec::PyroWave,
             }
             .into(),
             ..CodecCap::default()
