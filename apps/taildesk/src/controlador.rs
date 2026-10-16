@@ -23,8 +23,8 @@ use taildesk_proto::control::{
     MouseButton, MouseMove, Msg, Platform, QualityPrefs, RequestKeyframe, Scroll, SetVideoQuality,
     mouse_move,
 };
-use taildesk_session::conexao::PORTA;
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
+use taildesk_session::conexao::{PORTA, clipboard};
 use taildesk_session::{ControllerState, CursorControlador, EndReason, UmPorVez, atalho};
 use taildesk_transport::{Pin, client_endpoint};
 use taildesk_tsapi::LocalApi;
@@ -35,6 +35,7 @@ use crate::preferencias::{self, CODECS, TAXAS_KBPS};
 use crate::video::{Contadores, DecoderMedido, Recepcoes, Tela, ler_datagramas, travar};
 use crate::{config, no_app};
 
+mod area;
 mod arquivos;
 mod diagnostico;
 mod qualidade;
@@ -139,6 +140,9 @@ struct SessaoUi {
     /// Último nível do indicador e se a rota era relay (para avisar quando piora).
     nivel: Nivel,
     relay: bool,
+    /// Área de transferência compartilhada (ligada ao vivo com a permissão).
+    area: area::Area,
+    rt: tokio::runtime::Handle,
 }
 
 impl SessaoUi {
@@ -524,8 +528,13 @@ impl SessaoUi {
                     ControllerState::AwaitingConsent { .. } => self
                         .janela
                         .set_etapa(format!("Esperando {} aceitar…", self.host).into()),
-                    ControllerState::Live { .. } => {
+                    ControllerState::Live { permissions } => {
                         self.janela.set_ao_vivo(true);
+                        if permissions.clipboard
+                            && let Some(saida) = self.saida.clone()
+                        {
+                            self.area.ligar(&self.janela, &self.rt, saida);
+                        }
                         if !antes {
                             // Pede o vídeo do monitor principal, agora que pode.
                             self.monitores = UmPorVez::new();
@@ -537,6 +546,7 @@ impl SessaoUi {
                         self.janela.set_terminou(true);
                         self.janela.set_etapa(texto_fim(r, &self.host).into());
                         self.saida = None;
+                        self.area.desligar();
                         travar(&self.recepcoes).clear();
                     }
                 }
@@ -882,6 +892,7 @@ impl Controlador {
         let video = config::ler().video;
         let recepcoes = Recepcoes::default();
         let contadores = Arc::new(Contadores::default());
+        let entrada_area = area::Entrada::default();
         self.sessoes.borrow_mut().insert(
             id,
             SessaoUi {
@@ -916,10 +927,23 @@ impl Controlador {
                 },
                 nivel: Nivel::Medindo,
                 relay: false,
+                area: area::Area::new(entrada_area.clone()),
+                rt: rt.clone(),
             },
         );
         arquivos::ligar_soltar(id, 50);
-        rt.spawn(rodar(id, nome, ip, info, recepcoes, contadores, fechar_rx));
+        rt.spawn(rodar(
+            id,
+            nome,
+            ip,
+            info,
+            Midia {
+                recepcoes,
+                contadores,
+                area: entrada_area,
+            },
+            fechar_rx,
+        ));
     }
 }
 
@@ -936,16 +960,27 @@ fn fechar(id: IdLocal) {
     });
 }
 
+/// O que a task da sessão entrega sem passar pela thread da interface.
+struct Midia {
+    recepcoes: Recepcoes,
+    contadores: Arc<Contadores>,
+    area: area::Entrada,
+}
+
 /// Conecta e repassa os eventos à janela até a sessão acabar ou ser fechada.
 async fn rodar(
     id: IdLocal,
     nome: String,
     ip: IpAddr,
     teclado: KeyboardInfo,
-    recepcoes: Recepcoes,
-    contadores: Arc<Contadores>,
+    midia: Midia,
     mut fechar_rx: oneshot::Receiver<()>,
 ) {
+    let Midia {
+        recepcoes,
+        contadores,
+        area: entrada_area,
+    } = midia;
     let remoto = SocketAddr::new(ip, PORTA);
     // Quem é o host na tailnet: o fingerprint fica ligado ao `node_stable_id` (TOFU).
     let overlay = SystemOverlay::new(LocalApi::default());
@@ -982,7 +1017,11 @@ async fn rodar(
             arch: std::env::consts::ARCH.into(),
             device_model: String::new(),
         }),
-        features: vec![Feature::Files.into(), Feature::MultiDisplay.into()],
+        features: vec![
+            Feature::Files.into(),
+            Feature::MultiDisplay.into(),
+            Feature::Clipboard.into(),
+        ],
         decode_caps,
         keyboard: Some(teclado),
         ..Hello::default()
@@ -1051,6 +1090,18 @@ async fn rodar(
     loop {
         tokio::select! {
             ev = eventos.recv() => match ev {
+                Some(EventoControlador::Mensagem(m)) if area::e_da_area(&m) => {
+                    match entrada_area.atual() {
+                        Some(tx) => {
+                            let _ = tx.send(*m).await;
+                        }
+                        None => {
+                            if let Some(r) = clipboard::sem_sistema(&m) {
+                                sessao.enviar(r).await;
+                            }
+                        }
+                    }
+                }
                 Some(ev) => na_sessao(id, move |s| s.evento(ev)),
                 None => break,
             },

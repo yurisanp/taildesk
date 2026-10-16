@@ -236,6 +236,11 @@ fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
 impl Maquina for MaquinaApp {
     type Entrada = EntradaApp;
     type Midia = MidiaApp;
+    #[cfg(target_os = "linux")]
+    type Area = crate::area::AreaPortal;
+    #[cfg(windows)]
+    type Area = crate::area::AreaWin;
+    #[cfg(not(any(windows, target_os = "linux")))]
     type Area = taildesk_session::conexao::clipboard::SemArea;
 
     fn descricao(&self) -> Descricao {
@@ -321,6 +326,31 @@ impl Maquina for MaquinaApp {
         MidiaApp::new(canal, Fonte::Nenhuma, Vec::new())
     }
 
+    #[cfg(target_os = "linux")]
+    async fn area(
+        &self,
+    ) -> Option<(
+        Self::Area,
+        tokio::sync::mpsc::Receiver<taildesk_session::conexao::clipboard::DoSistema>,
+    )> {
+        // Só a sessão que `entrada`/`midia` já abriu: sem ela, nada de outro diálogo.
+        let portal = self.portal.lock().await.clone()?;
+        crate::area::portal(portal)
+    }
+
+    #[cfg(windows)]
+    async fn area(
+        &self,
+    ) -> Option<(
+        Self::Area,
+        tokio::sync::mpsc::Receiver<taildesk_session::conexao::clipboard::DoSistema>,
+    )> {
+        crate::area::windows()
+            .inspect_err(|e| eprintln!("taildesk: área de transferência indisponível: {e}"))
+            .ok()
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     async fn area(
         &self,
     ) -> Option<(
@@ -567,6 +597,7 @@ impl Ui {
         janela.set_detalhe(detalhe.join(" · ").into());
         janela.set_oferece_controle(prompt.offer.control);
         janela.set_oferece_arquivos(prompt.offer.files);
+        janela.set_oferece_area(prompt.offer.clipboard);
         let offer = prompt.offer;
         let fraca = janela.as_weak();
         janela.on_permitir(move || {
@@ -575,7 +606,7 @@ impl Ui {
                 view: true,
                 control: offer.control && j.get_controlar(),
                 files: offer.files && j.get_arquivos(),
-                clipboard: offer.clipboard,
+                clipboard: offer.clipboard && j.get_area(),
                 audio: offer.audio,
             };
             responder(

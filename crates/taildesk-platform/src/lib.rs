@@ -3,6 +3,12 @@
 //! portal+PipeWire, XShm), injeção de input (SendInput, portal/libei, XTest), cursor e segredos
 //! (`docs/context/10-plano-windows-linux.md`).
 
+pub mod area;
+pub mod area_formatos;
+#[cfg(target_os = "linux")]
+pub mod area_wayland;
+#[cfg(windows)]
+pub mod area_windows;
 pub mod arquivos;
 pub mod captura;
 #[cfg(windows)]

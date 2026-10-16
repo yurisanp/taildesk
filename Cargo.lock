@@ -5252,6 +5252,7 @@ dependencies = [
 name = "taildesk"
 version = "0.2.0"
 dependencies = [
+ "futures-util",
  "pollster",
  "quinn",
  "slint",
@@ -5338,6 +5339,7 @@ dependencies = [
  "futures-util",
  "keyring-core",
  "pipewire",
+ "png",
  "rfd",
  "rustix 1.1.5",
  "taildesk-keyboard",

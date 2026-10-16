@@ -12,6 +12,7 @@
 // Sem console no Windows: é um app gráfico.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod area;
 mod atualizacao;
 mod config;
 mod controlador;
