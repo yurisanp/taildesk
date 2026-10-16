@@ -482,10 +482,13 @@ async fn paste_files_and_folder_from_clipboard() {
 
     host.files.serve_clipboard(vec![doc.clone(), pasta.clone()]);
     let colados = ctl.files.paste_clipboard(&lista, &destino).await.unwrap();
-    assert_eq!(
-        colados,
-        vec![destino.join("nota.txt"), destino.join("Fotos")]
-    );
+    // No Windows o caminho volta com o nome longo da pasta temporária (sem `\\?\`).
+    let nomes: Vec<_> = colados.iter().map(|p| p.file_name().unwrap()).collect();
+    assert_eq!(nomes, ["nota.txt", "Fotos"]);
+    for p in &colados {
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), "colado");
+        assert!(!p.to_string_lossy().starts_with(r"\\?\"), "{p:?}");
+    }
     assert_eq!(fs::read(&colados[0]).unwrap(), data(70_000, 3));
     assert_eq!(
         fs::read(colados[1].join("a.jpg")).unwrap(),

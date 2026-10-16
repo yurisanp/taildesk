@@ -477,7 +477,7 @@ impl<L: Link> Files<L> {
                 out.push(self.fetch_file(&remote, dest, &mut count).await?);
             }
         }
-        Ok(out)
+        Ok(out.into_iter().map(plain_path).collect())
     }
 
     async fn fetch_file(
@@ -963,6 +963,19 @@ impl<L: Link> Files<L> {
             me.track(xfer_id, Direction::In, &task);
         });
     }
+}
+
+/// Sem o prefixo `\\?\` que o `canonicalize` do Windows põe: o Explorer e os apps não aceitam
+/// esses caminhos no `CF_HDROP`. Caminhos de rede (`\\?\UNC\`) ficam como estão.
+fn plain_path(p: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(s) = p.to_str()
+        && let Some(rest) = s.strip_prefix(r"\\?\")
+        && rest.as_bytes().get(1) == Some(&b':')
+    {
+        return PathBuf::from(rest);
+    }
+    p
 }
 
 fn listing_error(req_id: u32, code: FileErrorCode) -> FsListing {
