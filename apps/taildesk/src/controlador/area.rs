@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use taildesk_proto::control::{Control, Msg};
-use taildesk_session::conexao::clipboard::Ponte;
+use taildesk_session::conexao::clipboard::{ArquivosDaArea, Ponte};
 use taildesk_ui::JanelaSessao;
 use tokio::sync::mpsc;
 
@@ -40,10 +40,21 @@ pub(super) fn e_da_area(m: &Msg) -> bool {
 }
 
 /// A área de transferência de uma janela de sessão.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(super) struct Area {
     entrada: Entrada,
     ponte: Option<Ponte>,
+    /// Serviço de arquivos da sessão, para copiar e colar arquivos.
+    arquivos: Option<Arc<dyn ArquivosDaArea>>,
+}
+
+impl std::fmt::Debug for Area {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Area")
+            .field("ponte", &self.ponte)
+            .field("arquivos", &self.arquivos.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Area {
@@ -51,7 +62,13 @@ impl Area {
         Area {
             entrada,
             ponte: None,
+            arquivos: None,
         }
+    }
+
+    /// O serviço de arquivos da sessão (antes de ficar ao vivo).
+    pub(super) fn arquivos(&mut self, a: Arc<dyn ArquivosDaArea>) {
+        self.arquivos = Some(a);
     }
 
     /// Liga (ao ficar ao vivo com a permissão). Sem backend neste sistema, os pedidos do host
@@ -66,7 +83,7 @@ impl Area {
             return;
         }
         let _dentro = rt.enter();
-        let Some(ponte) = ponte(janela, saida) else {
+        let Some(ponte) = ponte(janela, saida, self.arquivos.clone()) else {
             return;
         };
         self.entrada.trocar(Some(ponte.entrada()));
@@ -80,8 +97,10 @@ impl Area {
     }
 }
 
+type Arquivos = Option<Arc<dyn ArquivosDaArea>>;
+
 #[cfg(target_os = "linux")]
-fn ponte(janela: &JanelaSessao, saida: mpsc::Sender<Control>) -> Option<Ponte> {
+fn ponte(janela: &JanelaSessao, saida: mpsc::Sender<Control>, arq: Arquivos) -> Option<Ponte> {
     use slint::ComponentHandle;
     use slint::winit_030::WinitWindowAccessor;
     use slint::winit_030::winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
@@ -99,18 +118,18 @@ fn ponte(janela: &JanelaSessao, saida: mpsc::Sender<Control>) -> Option<Ponte> {
                 .ok()
         })
         .flatten()?;
-    Some(Ponte::iniciar(area, rx, saida, true))
+    Some(Ponte::com_arquivos(area, rx, saida, true, arq))
 }
 
 #[cfg(windows)]
-fn ponte(_: &JanelaSessao, saida: mpsc::Sender<Control>) -> Option<Ponte> {
+fn ponte(_: &JanelaSessao, saida: mpsc::Sender<Control>, arq: Arquivos) -> Option<Ponte> {
     let (area, rx) = crate::area::windows()
         .inspect_err(|e| eprintln!("taildesk: área de transferência indisponível: {e}"))
         .ok()?;
-    Some(Ponte::iniciar(area, rx, saida, true))
+    Some(Ponte::com_arquivos(area, rx, saida, true, arq))
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-fn ponte(_: &JanelaSessao, _: mpsc::Sender<Control>) -> Option<Ponte> {
+fn ponte(_: &JanelaSessao, _: mpsc::Sender<Control>, _: Arquivos) -> Option<Ponte> {
     None
 }

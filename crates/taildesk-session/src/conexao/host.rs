@@ -25,7 +25,7 @@ use taildesk_proto::control::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-use super::clipboard::{DoSistema, Ponte, Sistema, sem_sistema};
+use super::clipboard::{ArquivosDaArea, DoSistema, Ponte, Sistema, sem_sistema};
 use super::{ESPERA_HELLO, FimLeitura, Leitor, StreamUni, classificar, controle, encerrar};
 use crate::host::{ConsentAnswer, ConsentPrompt, HelloReply, HostSession, HostState};
 use crate::policy::HostSettings;
@@ -494,10 +494,10 @@ async fn ao_vivo<M: Maquina>(
     };
 
     let area = if permissoes.clipboard {
-        maquina
-            .area()
-            .await
-            .map(|(s, rx)| Ponte::iniciar(s, rx, saida.clone(), true))
+        maquina.area().await.map(|(s, rx)| {
+            let arq: Arc<dyn ArquivosDaArea> = Arc::new(arquivos.clone());
+            Ponte::com_arquivos(s, rx, saida.clone(), true, Some(arq))
+        })
     } else {
         None
     };

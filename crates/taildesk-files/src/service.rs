@@ -18,10 +18,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use taildesk_proto::control::{
-    Control, FileAccept, FileCancel, FileDone, FileError, FileErrorCode, FileOffer, FileRequest,
-    FsAccess, FsEntry, FsList, FsListing, FsRoot, FsRoots, FsRootsRequest, Msg,
+    ClipFile, Control, FileAccept, FileCancel, FileDone, FileError, FileErrorCode, FileOffer,
+    FileRequest, FsAccess, FsEntry, FsEntryKind, FsList, FsListing, FsRoot, FsRoots,
+    FsRootsRequest, Msg,
 };
-use taildesk_proto::files::{Hash, INBOX_ROOT, limits};
+use taildesk_proto::files::{CLIPBOARD_ROOT, Hash, INBOX_ROOT, limits};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
@@ -142,7 +143,18 @@ struct State {
     /// Pedidos de download feitos por este lado: `xfer_id` → pasta de destino.
     downloads: HashMap<u32, PathBuf>,
     tasks: HashMap<u32, (AbortHandle, Direction)>,
+    /// O que está copiado na área de transferência daqui, servido na [`CLIPBOARD_ROOT`].
+    clipboard: Vec<PathBuf>,
+    /// Quem espera uma listagem pedida por [`Files::paste_clipboard`].
+    listing_waiters: HashMap<u32, oneshot::Sender<FsListing>>,
+    /// Quem espera um download pedido por [`Files::paste_clipboard`].
+    done_waiters: HashMap<u32, oneshot::Sender<Result<PathBuf, FileErrorCode>>>,
 }
+
+/// Arquivos baixados numa colagem, no máximo (pastas grandes demais falham).
+const PASTE_MAX_FILES: usize = 10_000;
+/// Profundidade máxima de pasta numa colagem.
+const PASTE_MAX_DEPTH: usize = 32;
 
 #[derive(Debug)]
 struct Inner<L> {
@@ -232,7 +244,27 @@ impl<L: Link> Files<L> {
     }
 
     async fn emit(&self, e: Event) {
+        match &e {
+            Event::Finished {
+                xfer_id,
+                direction: Direction::In,
+                path,
+            } => self.wake_download(*xfer_id, Ok(path.clone())),
+            Event::Failed {
+                xfer_id,
+                direction: Direction::In,
+                code,
+                ..
+            } => self.wake_download(*xfer_id, Err(*code)),
+            _ => {}
+        }
         let _ = self.inner.events.send(e).await;
+    }
+
+    fn wake_download(&self, xfer_id: u32, result: Result<PathBuf, FileErrorCode>) {
+        if let Some(tx) = self.state().done_waiters.remove(&xfer_id) {
+            let _ = tx.send(result);
+        }
     }
 
     fn progress(&self, xfer_id: u32, total: u64) -> impl FnMut(u64) + Send + 'static {
@@ -282,6 +314,37 @@ impl<L: Link> Files<L> {
 
     fn root(&self, id: u32) -> Option<&SharedRoot> {
         self.inner.cfg.roots.iter().find(|r| r.id == id)
+    }
+
+    /// Pasta e caminho relativo a ler para um pedido do peer em `root`.
+    fn readable(&self, root: u32, path: &str) -> Result<(PathBuf, String), FileErrorCode> {
+        if root == CLIPBOARD_ROOT {
+            return self.clipboard_target(path);
+        }
+        Ok((self.readable_root(root)?.to_owned(), path.to_owned()))
+    }
+
+    /// `"<índice>/<nome>[/...]"` na área de transferência: a pasta do item copiado e o caminho
+    /// a partir dela (o `resolve_in_root` de quem chama segura o resto).
+    fn clipboard_target(&self, path: &str) -> Result<(PathBuf, String), FileErrorCode> {
+        let (idx, rel) = path.split_once('/').ok_or(FileErrorCode::BadPath)?;
+        let idx: usize = idx.parse().map_err(|_| FileErrorCode::BadPath)?;
+        let item = self
+            .state()
+            .clipboard
+            .get(idx)
+            .cloned()
+            .ok_or(FileErrorCode::NotFound)?;
+        let name = item
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or(FileErrorCode::NotFound)?;
+        let rest = rel.strip_prefix(name).ok_or(FileErrorCode::NotFound)?;
+        if !(rest.is_empty() || rest.starts_with('/')) {
+            return Err(FileErrorCode::NotFound);
+        }
+        let parent = item.parent().ok_or(FileErrorCode::NotFound)?;
+        Ok((parent.to_owned(), rel.to_owned()))
     }
 
     fn readable_root(&self, id: u32) -> Result<&Path, FileErrorCode> {
@@ -386,6 +449,122 @@ impl<L: Link> Files<L> {
         xfer_id
     }
 
+    /// Passa a servir `items` (o que foi copiado aqui) na [`CLIPBOARD_ROOT`], só leitura, no
+    /// lugar do que havia. Lista vazia = nada.
+    pub fn serve_clipboard(&self, items: Vec<PathBuf>) {
+        self.state().clipboard = items;
+    }
+
+    /// Baixa o que o peer copiou (`files` da oferta dele em vigor) para dentro de `dest`, com
+    /// as pastas inteiras. Devolve o caminho local de cada item, na ordem da oferta.
+    pub async fn paste_clipboard(
+        &self,
+        files: &[ClipFile],
+        dest: &Path,
+    ) -> Result<Vec<PathBuf>, FileErrorCode> {
+        tokio::fs::create_dir_all(dest)
+            .await
+            .map_err(|_| FileErrorCode::Io)?;
+        let mut count = 0;
+        let mut out = Vec::with_capacity(files.len());
+        for (i, f) in files.iter().enumerate() {
+            let remote = format!("{i}/{}", f.name);
+            if f.dir {
+                let local = resolve_in_root(dest, &f.name).map_err(|_| FileErrorCode::BadPath)?;
+                self.fetch_dir(&remote, &local, &mut count).await?;
+                out.push(local);
+            } else {
+                out.push(self.fetch_file(&remote, dest, &mut count).await?);
+            }
+        }
+        Ok(out)
+    }
+
+    async fn fetch_file(
+        &self,
+        remote: &str,
+        dest_dir: &Path,
+        count: &mut usize,
+    ) -> Result<PathBuf, FileErrorCode> {
+        *count += 1;
+        if *count > PASTE_MAX_FILES {
+            return Err(FileErrorCode::Denied);
+        }
+        let xfer_id = self.new_id();
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut st = self.state();
+            st.downloads.insert(xfer_id, dest_dir.to_owned());
+            st.done_waiters.insert(xfer_id, tx);
+        }
+        self.send(Msg::FileRequest(FileRequest {
+            xfer_id,
+            root: CLIPBOARD_ROOT,
+            path: remote.to_owned(),
+        }))
+        .await;
+        rx.await.unwrap_or(Err(FileErrorCode::Io))
+    }
+
+    /// Uma pasta inteira, de cima para baixo, sem recursão (a pilha fica aqui).
+    async fn fetch_dir(
+        &self,
+        remote: &str,
+        local: &Path,
+        count: &mut usize,
+    ) -> Result<(), FileErrorCode> {
+        let mut pending = vec![(remote.to_owned(), local.to_owned(), 0usize)];
+        while let Some((remote, local, depth)) = pending.pop() {
+            if depth > PASTE_MAX_DEPTH {
+                return Err(FileErrorCode::Denied);
+            }
+            tokio::fs::create_dir_all(&local)
+                .await
+                .map_err(|_| FileErrorCode::Io)?;
+            let mut start = 0u32;
+            loop {
+                let page = self.list_wait(&remote, start).await?;
+                for e in &page.entries {
+                    let sub = format!("{remote}/{}", e.name);
+                    match e.kind() {
+                        FsEntryKind::Dir => {
+                            let l = resolve_in_root(&local, &e.name)
+                                .map_err(|_| FileErrorCode::BadPath)?;
+                            pending.push((sub, l, depth + 1));
+                        }
+                        FsEntryKind::File => {
+                            self.fetch_file(&sub, &local, count).await?;
+                        }
+                        _ => {}
+                    }
+                }
+                if !page.more || page.entries.is_empty() {
+                    break;
+                }
+                start += page.entries.len() as u32;
+            }
+        }
+        Ok(())
+    }
+
+    async fn list_wait(&self, path: &str, start: u32) -> Result<FsListing, FileErrorCode> {
+        let req_id = self.new_id();
+        let (tx, rx) = oneshot::channel();
+        self.state().listing_waiters.insert(req_id, tx);
+        self.send(Msg::FsList(FsList {
+            req_id,
+            root: CLIPBOARD_ROOT,
+            path: path.to_owned(),
+            start,
+        }))
+        .await;
+        let page = rx.await.map_err(|_| FileErrorCode::Io)?;
+        match page.error() {
+            FileErrorCode::Unspecified => Ok(page),
+            code => Err(code),
+        }
+    }
+
     /// Cancela uma transferência nos dois lados. O `.part` fica para retomar.
     pub async fn cancel(&self, xfer_id: u32) {
         if self.forget(xfer_id) {
@@ -411,7 +590,15 @@ impl<L: Link> Files<L> {
             Msg::FsRootsRequest(_) => self.on_roots_request().await,
             Msg::FsRoots(m) => self.emit(Event::Roots(m)).await,
             Msg::FsList(m) => self.on_list(m).await,
-            Msg::FsListing(m) => self.emit(Event::Listing(m)).await,
+            Msg::FsListing(m) => {
+                let waiter = self.state().listing_waiters.remove(&m.req_id);
+                match waiter {
+                    Some(tx) => {
+                        let _ = tx.send(m);
+                    }
+                    None => self.emit(Event::Listing(m)).await,
+                }
+            }
             Msg::FileOffer(m) => self.on_offer(m).await,
             Msg::FileRequest(m) => self.on_request(m).await,
             Msg::FileAccept(m) => self.on_accept(m).await,
@@ -438,11 +625,9 @@ impl<L: Link> Files<L> {
     }
 
     async fn on_list(&self, m: FsList) {
-        let reply = match self.readable_root(m.root) {
+        let reply = match self.readable(m.root, &m.path) {
             Err(code) => listing_error(m.req_id, code),
-            Ok(root) => {
-                let root = root.to_owned();
-                let path = m.path.clone();
+            Ok((root, path)) => {
                 let listed = tokio::task::spawn_blocking(move || list_dir(&root, &path)).await;
                 match listed {
                     Ok(Ok(all)) => {
@@ -463,9 +648,9 @@ impl<L: Link> Files<L> {
     }
 
     async fn on_request(&self, m: FileRequest) {
-        let path = match self.readable_root(m.root) {
+        let path = match self.readable(m.root, &m.path) {
             Err(code) => return self.reject(m.xfer_id, code).await,
-            Ok(root) => match resolve_in_root(root, &m.path) {
+            Ok((root, rel)) => match resolve_in_root(&root, &rel) {
                 Ok(p) => p,
                 Err(e) => return self.reject(m.xfer_id, XferError::Path(e).code()).await,
             },
@@ -522,6 +707,7 @@ impl<L: Link> Files<L> {
             st.incoming.contains_key(&m.xfer_id) || st.incoming.len() >= MAX_PENDING_IN
         };
         if busy {
+            self.wake_download(m.xfer_id, Err(FileErrorCode::Busy));
             return self.reject(m.xfer_id, FileErrorCode::Busy).await;
         }
         let incoming = match Incoming::prepare(root, &rel, m.size, m.mtime_ms).await {
@@ -535,6 +721,7 @@ impl<L: Link> Files<L> {
                     None,
                     code_name(code),
                 );
+                self.wake_download(m.xfer_id, Err(code));
                 return self.reject(m.xfer_id, code).await;
             }
         };
