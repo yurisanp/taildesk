@@ -1,7 +1,9 @@
 //! App desktop do TailDesk: janela principal com os dispositivos da tailnet e ícone na bandeja
 //! do sistema. Fechar a janela deixa o app na bandeja; "Sair" no menu do ícone encerra.
 //!
-//! Uso: `taildesk [--oculto]`. `--oculto` abre só na bandeja (para iniciar com o sistema).
+//! Uso: `taildesk [--oculto]`. `--oculto` abre só na bandeja (para iniciar com o sistema). No
+//! Windows também `--servico`, `--instalar-servico` e `--remover-servico` (serviço do Windows,
+//! `taildesk_platform::servico_windows`).
 //! Abrir o TailDesk de novo só mostra a janela da instância que já roda.
 //!
 //! Integração nativa com o desktop: no Wayland a janela é um xdg_toplevel com app_id `taildesk`
@@ -302,6 +304,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "--oculto" | "--hidden" => oculto = true,
+            // Serviço do Windows ("Iniciar com o sistema"): o Gerenciador de Serviços roda
+            // `--servico`; o app se chama como administrador para instalar e remover.
+            #[cfg(windows)]
+            "--servico" => return Ok(taildesk_platform::servico_windows::rodar()?),
+            #[cfg(windows)]
+            "--instalar-servico" => {
+                let exe = taildesk_platform::inicio::executavel()?;
+                return Ok(taildesk_platform::servico_windows::instalar(&exe)?);
+            }
+            #[cfg(windows)]
+            "--remover-servico" => return Ok(taildesk_platform::servico_windows::remover()?),
             "--version" | "-V" => {
                 println!("taildesk {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
@@ -324,6 +337,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         }
     };
+
+    // "Iniciar com o sistema" apontando para outro executável (AppImage movido): corrige.
+    std::thread::spawn(|| {
+        use taildesk_platform::inicio;
+        if inicio::desatualizado()
+            && inicio::ligado()
+            && let Err(e) = inicio::ligar()
+        {
+            eprintln!("taildesk: não foi possível atualizar o início com o sistema: {e}");
+        }
+    });
 
     // Coordenadas do mouse e da captura em pixels reais em cada monitor.
     #[cfg(windows)]

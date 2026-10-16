@@ -169,9 +169,11 @@ pub fn mostrar(j: &JanelaPrincipal) {
     j.set_taxa_config(indice_taxa(c.video.taxa_kbps) as i32);
     let fraca = j.as_weak();
     std::thread::spawn(move || {
+        let inicio = taildesk_platform::inicio::ligado();
         let texto = video_local();
         let teclado = crate::host::layout_local();
         let _ = fraca.upgrade_in_event_loop(move |j| {
+            j.set_iniciar_com_sistema(inicio);
             j.set_video_local(texto.into());
             j.set_teclado_local(teclado.into());
         });
@@ -234,6 +236,33 @@ pub fn ligar(j: &JanelaPrincipal) {
         });
     });
     j.on_remover_senha(|| gravar_senha(None));
+    let fraca = j.as_weak();
+    j.on_iniciar_com_sistema_mudou(move |ligar| {
+        let fraca = fraca.clone();
+        // systemctl (ou o pedido de administrador no Windows) fora da thread da interface.
+        std::thread::spawn(move || {
+            use taildesk_platform::inicio;
+            let r = if ligar {
+                inicio::ligar()
+            } else {
+                inicio::desligar()
+            };
+            let agora = inicio::ligado();
+            let _ = fraca.upgrade_in_event_loop(move |j| {
+                j.set_iniciar_com_sistema(agora);
+                match r {
+                    Ok(()) if ligar => avisar(
+                        "O TailDesk vai abrir na bandeja sempre que você entrar no computador."
+                            .into(),
+                    ),
+                    Ok(()) => avisar("O TailDesk não abre mais sozinho.".into()),
+                    Err(e) => avisar(format!(
+                        "Não foi possível mudar o início com o sistema: {e}"
+                    )),
+                }
+            });
+        });
+    });
     j.on_pedir_sempre_mudou(|v| {
         no_app(move |app| {
             app.settings

@@ -16,9 +16,12 @@ pub mod captura_dxgi;
 #[cfg(target_os = "linux")]
 pub mod captura_pipewire;
 mod forma_cursor_dxgi;
+pub mod inicio;
 pub mod instancia;
 pub mod mouse;
 pub mod segredos;
+#[cfg(windows)]
+pub mod servico_windows;
 pub mod soltar;
 pub mod teclado;
 #[cfg(target_os = "linux")]
