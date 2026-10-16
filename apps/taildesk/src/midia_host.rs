@@ -1,5 +1,5 @@
 //! Vídeo do host (`13-multimonitor.md` §3): a captura de cada monitor pedido (DXGI no Windows,
-//! PipeWire pela sessão do portal no Wayland) vai para um [`EnvioVideo`] (openh264 → datagramas),
+//! PipeWire pela sessão do portal no Wayland) vai para um [`EnvioVideo`] (encoder → datagramas),
 //! e o cursor sai à parte: posição pelo stream de controle e forma pelo stream de cursor
 //! (`taildesk_proto::cursor`), para o controlador desenhar por cima do vídeo.
 //!
@@ -7,14 +7,16 @@
 //! ficam pausados (`ativar(id, false)`). Soltar a [`MidiaApp`] (fim da sessão) para tudo.
 
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
-use taildesk_codec::{ConfigEncoder, EncoderOpenH264, OrdemRgb, QuadroRgb};
+use taildesk_codec::{ConfigEncoder, OrdemRgb, QuadroRgb};
 use taildesk_media::video::{ConfigEnvio, EnvioVideo};
 use taildesk_platform::captura::{FormaCursor, FormatoPixel, Quadro};
 use taildesk_proto::control::{
     Codec, CodecSelected, ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg, StartVideo,
-    VideoStopReason, VideoStopped,
+    VideoStats, VideoStopReason, VideoStopped,
 };
 use taildesk_proto::cursor::{STREAM_MAGIC, ShapeHeader};
 use taildesk_proto::media::AUDIO_STREAM_MIN;
@@ -23,10 +25,14 @@ use taildesk_session::{AcaoForma, CursorHost};
 use taildesk_transport::SaidaQuic;
 use tokio::sync::mpsc;
 
-/// Streams de vídeo ao mesmo tempo com o openh264 (`ErrorCode::TooManyStreams`).
+/// Streams de vídeo ao mesmo tempo (`ErrorCode::TooManyStreams`).
 const MAX_FLUXOS: usize = 2;
-/// openh264 em software: 30 fps com folga em 1080p. O encode por hardware sobe isso (fase 4).
-const FPS: f32 = 30.0;
+/// openh264 em software: 30 fps com folga em 1080p.
+const FPS_SOFTWARE: f32 = 30.0;
+/// NVENC e VA-API codificam 1080p em menos de 10 ms.
+const FPS_HARDWARE: f32 = 60.0;
+/// Intervalo do `VideoStats` para o painel de diagnóstico do controlador.
+const INTERVALO_STATS: Duration = Duration::from_secs(1);
 /// Alvo inicial; a seleção adaptativa ajusta depois.
 const BITRATE_BPS: u32 = 8_000_000;
 /// Eventos de cursor esperando a task (posição descartável; forma é rara).
@@ -42,16 +48,73 @@ struct CursorCapturado {
     forma: Option<(ShapeHeader, Vec<u8>)>,
 }
 
+/// Contadores do envio no último `VideoStats`.
+#[derive(Debug, Default, Clone, Copy)]
+struct Amostra {
+    quadros: u64,
+    bytes: u64,
+    encode_us: u64,
+    pulados: u64,
+    chaves: u64,
+}
+
+/// Vídeo de um monitor saindo.
+#[derive(Debug)]
+struct Fluxo {
+    envio: EnvioVideo,
+    encoder: &'static str,
+    gpu: String,
+    bitrate_bps: u32,
+    anterior: (Instant, Amostra),
+}
+
+impl Fluxo {
+    fn amostra(&self) -> Amostra {
+        let e = self.envio.estatisticas();
+        Amostra {
+            quadros: e.quadros.load(Ordering::Relaxed),
+            bytes: e.bytes.load(Ordering::Relaxed),
+            encode_us: e.encode_us.load(Ordering::Relaxed),
+            pulados: e.pulados.load(Ordering::Relaxed),
+            chaves: e.chaves.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Estatísticas desde a última chamada.
+    fn stats(&mut self, display_id: u32) -> VideoStats {
+        let (agora, a) = (Instant::now(), self.amostra());
+        let (antes, b) = std::mem::replace(&mut self.anterior, (agora, a));
+        let segundos = agora.duration_since(antes).as_secs_f64().max(1e-3);
+        let quadros = a.quadros - b.quadros;
+        VideoStats {
+            display_id,
+            encoder: self.encoder.into(),
+            gpu: self.gpu.clone(),
+            fps_x100: (quadros as f64 * 100.0 / segundos) as u32,
+            bitrate_kbps: ((a.bytes - b.bytes) as f64 * 8.0 / 1000.0 / segundos) as u32,
+            target_kbps: self.bitrate_bps / 1000,
+            encode_us: (a.encode_us - b.encode_us)
+                .checked_div(quadros)
+                .unwrap_or(0)
+                .try_into()
+                .unwrap_or(u32::MAX),
+            skipped: (a.pulados - b.pulados).try_into().unwrap_or(u32::MAX),
+            keyframes: (a.chaves - b.chaves).try_into().unwrap_or(u32::MAX),
+            loss_ppm: 0,
+        }
+    }
+}
+
 /// O que a thread da captura enxerga.
 #[derive(Debug)]
 struct Compartilhado {
-    /// Envio de cada monitor pedido (`display_id` → envio).
-    fluxos: Mutex<HashMap<u32, EnvioVideo>>,
+    /// Vídeo de cada monitor pedido (`display_id` → fluxo).
+    fluxos: Mutex<HashMap<u32, Fluxo>>,
     cursor: mpsc::Sender<CursorCapturado>,
 }
 
 impl Compartilhado {
-    fn fluxos(&self) -> MutexGuard<'_, HashMap<u32, EnvioVideo>> {
+    fn fluxos(&self) -> MutexGuard<'_, HashMap<u32, Fluxo>> {
         self.fluxos.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -121,8 +184,8 @@ impl AoQuadro {
         if let Some(img) = &q.imagem {
             self.tamanhos
                 .insert(q.display_id, (img.largura, img.altura));
-            if let Some(envio) = self.compartilhado.fluxos().get(&q.display_id) {
-                envio.entregar(&QuadroRgb {
+            if let Some(f) = self.compartilhado.fluxos().get(&q.display_id) {
+                f.envio.entregar(&QuadroRgb {
                     largura: img.largura,
                     altura: img.altura,
                     stride: img.stride,
@@ -190,6 +253,39 @@ async fn cursor(canal: CanalMidia, mut rx: mpsc::Receiver<CursorCapturado>) {
     }
 }
 
+/// Manda o `VideoStats` de cada monitor saindo, uma vez por [`INTERVALO_STATS`].
+async fn stats(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
+    let mut t = tokio::time::interval(INTERVALO_STATS);
+    t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let caminho = |c: &quinn::Connection| {
+        let p = c.stats().path;
+        (p.sent_packets, p.lost_packets)
+    };
+    let mut antes = caminho(&canal.conn);
+    loop {
+        t.tick().await;
+        let agora = caminho(&canal.conn);
+        let (enviados, perdidos) = (agora.0 - antes.0, agora.1 - antes.1);
+        antes = agora;
+        let loss_ppm = (perdidos * 1_000_000)
+            .checked_div(enviados)
+            .unwrap_or(0)
+            .min(1_000_000) as u32;
+        let msgs: Vec<VideoStats> = compartilhado
+            .fluxos()
+            .iter_mut()
+            .map(|(&id, f)| VideoStats {
+                loss_ppm,
+                ..f.stats(id)
+            })
+            .collect();
+        for m in msgs {
+            // Informativo: fila cheia perde esta amostra e a próxima vem em um segundo.
+            canal.tentar_enviar(Msg::VideoStats(m));
+        }
+    }
+}
+
 /// Captura de todos os monitores, com pausa por monitor.
 enum Captura {
     #[cfg(windows)]
@@ -239,24 +335,28 @@ pub struct MidiaApp {
     stream_id: HashMap<u32, u8>,
     proximo_stream: u8,
     tarefa_cursor: tokio::task::JoinHandle<()>,
+    tarefa_stats: tokio::task::JoinHandle<()>,
 }
 
 impl MidiaApp {
     pub fn new(canal: CanalMidia, fonte: Fonte, monitores: Vec<DisplayInfo>) -> MidiaApp {
         let (tx, rx) = mpsc::channel(FILA_CURSOR);
         let tarefa_cursor = tokio::spawn(cursor(canal.clone(), rx));
+        let compartilhado = Arc::new(Compartilhado {
+            fluxos: Mutex::new(HashMap::new()),
+            cursor: tx,
+        });
+        let tarefa_stats = tokio::spawn(stats(canal.clone(), compartilhado.clone()));
         MidiaApp {
             canal,
             fonte,
             monitores,
-            compartilhado: Arc::new(Compartilhado {
-                fluxos: Mutex::new(HashMap::new()),
-                cursor: tx,
-            }),
+            compartilhado,
             captura: None,
             stream_id: HashMap::new(),
             proximo_stream: 0,
             tarefa_cursor,
+            tarefa_stats,
         }
     }
 
@@ -349,9 +449,9 @@ impl MidiaApp {
                 .erro(ErrorCode::DisplayNotShared, id, String::new())
                 .await;
         }
-        if let Some(envio) = self.compartilhado.fluxos().get(&id) {
+        if let Some(f) = self.compartilhado.fluxos().get(&id) {
             // Já está saindo (o controlador reabriu a aba): só um quadro-chave novo.
-            envio.pedir_chave();
+            f.envio.pedir_chave();
             return;
         }
         if self.compartilhado.fluxos().len() >= MAX_FLUXOS {
@@ -374,25 +474,62 @@ impl MidiaApp {
                 }
             }
         }
-        let envio = EncoderOpenH264::novo(ConfigEncoder {
-            bitrate_bps: BITRATE_BPS,
-            fps_max: FPS,
+        // Hardware primeiro (NVENC, VA-API), openh264 por último; o probe codifica um quadro.
+        let encoder = tokio::task::spawn_blocking(|| {
+            for opcao in taildesk_codec::opcoes_encoder() {
+                let fps = if opcao.hardware() {
+                    FPS_HARDWARE
+                } else {
+                    FPS_SOFTWARE
+                };
+                let config = ConfigEncoder {
+                    bitrate_bps: BITRATE_BPS,
+                    fps_max: fps,
+                };
+                match opcao.abrir_encoder(config) {
+                    Ok(enc) => return Ok((enc, fps)),
+                    Err(e) => eprintln!(
+                        "taildesk: encoder {} ({}) indisponível: {e}",
+                        opcao.backend,
+                        opcao.gpu.as_deref().unwrap_or("CPU")
+                    ),
+                }
+            }
+            Err("nenhum encoder de vídeo abriu".to_string())
         })
+        .await
         .map_err(|e| e.to_string())
-        .and_then(|enc| {
+        .and_then(|r| r);
+        let mut fps = FPS_SOFTWARE;
+        let envio = encoder.and_then(|(enc, f)| {
+            fps = f;
+            let (nome, gpu) = (enc.nome(), enc.gpu().unwrap_or_default().to_string());
+            eprintln!(
+                "taildesk: vídeo do monitor {id}: {nome} ({})",
+                if gpu.is_empty() { "CPU" } else { &gpu }
+            );
             let stream_id = self.proximo_stream;
             EnvioVideo::iniciar(
                 ConfigEnvio {
                     stream_id,
-                    fps_max: FPS,
+                    fps_max: fps,
                 },
-                Box::new(enc),
+                enc,
                 Box::new(SaidaQuic(self.canal.conn.clone())),
             )
-            .map(|e| (stream_id, e))
+            .map(|e| {
+                let fluxo = Fluxo {
+                    anterior: (Instant::now(), Amostra::default()),
+                    envio: e,
+                    encoder: nome,
+                    gpu,
+                    bitrate_bps: BITRATE_BPS,
+                };
+                (stream_id, fluxo)
+            })
             .map_err(|e| e.to_string())
         });
-        let (stream_id, envio) = match envio {
+        let (stream_id, fluxo) = match envio {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("taildesk: encoder: {e}");
@@ -410,7 +547,7 @@ impl MidiaApp {
                 chroma444: false,
                 width: m.width,
                 height: m.height,
-                fps_target: FPS as u32,
+                fps_target: fps as u32,
                 bitrate_kbps: BITRATE_BPS / 1000,
                 // BT.709, faixa limitada (o que o openh264 produz).
                 color: Some(ColorInfo {
@@ -422,14 +559,18 @@ impl MidiaApp {
             }))
             .await;
         self.stream_id.insert(id, stream_id);
-        self.compartilhado.fluxos().insert(id, envio);
+        self.compartilhado.fluxos().insert(id, fluxo);
         if let Some(c) = &self.captura {
             c.ativar(id, true);
         }
     }
 
     async fn parar(&mut self, display_id: u32) {
-        let envio = self.compartilhado.fluxos().remove(&display_id);
+        let envio = self
+            .compartilhado
+            .fluxos()
+            .remove(&display_id)
+            .map(|f| f.envio);
         self.stream_id.remove(&display_id);
         if let Some(c) = &self.captura {
             c.ativar(display_id, false);
@@ -448,8 +589,8 @@ impl MidiaApp {
     }
 
     fn pedir_chave(&self, display_id: u32) {
-        if let Some(e) = self.compartilhado.fluxos().get(&display_id) {
-            e.pedir_chave();
+        if let Some(f) = self.compartilhado.fluxos().get(&display_id) {
+            f.envio.pedir_chave();
         }
     }
 }
@@ -473,6 +614,7 @@ impl Drop for MidiaApp {
         self.captura = None;
         self.compartilhado.fluxos().clear();
         self.tarefa_cursor.abort();
+        self.tarefa_stats.abort();
     }
 }
 
@@ -625,7 +767,12 @@ mod tests {
         )
         .unwrap();
         travar(&recepcoes).insert(c.stream_id as u8, (3, r));
-        let leitor = tokio::spawn(ler_datagramas(controlador.clone(), recepcoes.clone()));
+        let contadores = Arc::new(crate::video::Contadores::default());
+        let leitor = tokio::spawn(ler_datagramas(
+            controlador.clone(),
+            recepcoes.clone(),
+            contadores.clone(),
+        ));
         for _ in 0..400 {
             if decodificados.load(Ordering::Relaxed) >= 5 {
                 break;
@@ -633,6 +780,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         assert!(decodificados.load(Ordering::Relaxed) >= 5);
+        assert!(contadores.bytes.load(Ordering::Relaxed) > 0);
 
         // Cursor: a forma no stream de cursor, antes do `CursorShapeRef`; a posição no controle.
         let Msg::CursorShapeRef(r) =
@@ -650,6 +798,14 @@ mod tests {
             unreachable!()
         };
         assert!(p.visible && p.display_id == 3 && p.y == u32::from(normalizar(5, 96)));
+        // Estatísticas para o painel de diagnóstico: encoder escolhido e quadros saindo.
+        let Msg::VideoStats(st) = proxima(&mut rx, |m| matches!(m, Msg::VideoStats(_))).await
+        else {
+            unreachable!()
+        };
+        eprintln!("encoder escolhido: {} ({:?})", st.encoder, st.gpu);
+        assert_eq!(st.display_id, 3);
+        assert!(!st.encoder.is_empty());
 
         // Parar confirma com `VideoStopped` e solta a captura.
         midia

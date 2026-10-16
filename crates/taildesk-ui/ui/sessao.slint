@@ -1,6 +1,6 @@
 // Janela da sessão no controlador (`12-levantamento-ux.md` §5.3 e §5.6): etapas de conexão,
 // barra com abas dos monitores e teclado, vídeo do monitor ativo e o cursor do host desenhado
-// por cima (cursor separado, `07-protocolo.md`).
+// por cima (cursor separado, `07-protocolo.md`) e o painel de diagnóstico do vídeo e da rede.
 import { Tema } from "tema.slint";
 import { Botao, Toast } from "componentes.slint";
 import { ArquivosNaSessao } from "arquivos.slint";
@@ -10,6 +10,45 @@ export struct AbaMonitor {
     ativa: bool,
     // `false`: o host não liberou este monitor (Wayland).
     liberada: bool,
+}
+
+// Uma linha do painel de diagnóstico; `titulo` = cabeçalho de seção (sem valor).
+export struct LinhaDiag {
+    rotulo: string,
+    valor: string,
+    titulo: bool,
+}
+
+component PainelDiagnostico inherits Rectangle {
+    in property <[LinhaDiag]> linhas;
+    width: 380px;
+    height: lista.preferred-height + 24px;
+    border-radius: Tema.raio;
+    background: #0d1117e0;
+    lista := VerticalLayout {
+        x: 12px;
+        y: 12px;
+        width: parent.width - 24px;
+        spacing: 3px;
+        for l in root.linhas: HorizontalLayout {
+            padding-top: l.titulo ? 6px : 0px;
+            spacing: 8px;
+            Text {
+                text: l.rotulo;
+                width: l.titulo ? 356px : 128px;
+                font-size: Tema.fonte-pequena;
+                font-weight: l.titulo ? 700 : 400;
+                color: l.titulo ? #ffffff : #9aa4b2;
+                overflow: elide;
+            }
+            if !l.titulo: Text {
+                text: l.valor;
+                font-size: Tema.fonte-pequena;
+                color: #e9ebef;
+                wrap: word-wrap;
+            }
+        }
+    }
 }
 
 export component JanelaSessao inherits Window {
@@ -29,6 +68,9 @@ export component JanelaSessao inherits Window {
     in property <bool> cursor-visivel;
     in property <length> cursor-x;
     in property <length> cursor-y;
+    // Painel de diagnóstico (botão "Diagnóstico" na barra).
+    in-out property <bool> diagnostico-aberto: false;
+    in property <[LinhaDiag]> diagnostico;
     // Tamanho da área de vídeo (para o app converter o mouse).
     out property <length> area-largura: video.width;
     out property <length> area-altura: video.height;
@@ -84,6 +126,13 @@ export component JanelaSessao inherits Window {
                     color: Tema.texto-2;
                     vertical-alignment: center;
                 }
+                if root.ao-vivo: Botao {
+                    y: 4px;
+                    altura: 32px;
+                    texto: @tr("Diagnóstico");
+                    discreto: !root.diagnostico-aberto;
+                    clicado => { root.diagnostico-aberto = !root.diagnostico-aberto; }
+                }
                 Botao {
                     y: 4px;
                     altura: 32px;
@@ -133,6 +182,11 @@ export component JanelaSessao inherits Window {
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 wrap: word-wrap;
+            }
+            if root.diagnostico-aberto && root.ao-vivo: PainelDiagnostico {
+                linhas: root.diagnostico;
+                x: parent.width - self.width - 12px;
+                y: 12px;
             }
             if root.toast != "": Toast {
                 texto: root.toast;

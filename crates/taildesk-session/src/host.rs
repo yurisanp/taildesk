@@ -114,6 +114,7 @@ pub fn need(msg: &Msg) -> Need {
         | Msg::Pong(_)
         | Msg::Error(_)
         | Msg::CodecSelected(_)
+        | Msg::VideoStats(_)
         | Msg::VideoStopped(_)
         | Msg::DisplaysChanged(_)
         | Msg::CursorPos(_)

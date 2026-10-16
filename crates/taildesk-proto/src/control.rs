@@ -44,6 +44,8 @@ pub mod limits {
     pub const MESSAGE_LEN: usize = 1024;
     /// Capacidades de codec por lista.
     pub const CODEC_CAPS: usize = 32;
+    /// Nome de um backend de codec (`VideoStats.encoder`).
+    pub const CODEC_NAME_LEN: usize = 32;
     /// Recursos no `Hello`.
     pub const FEATURES: usize = 32;
     /// Bitmap de fragmentos de um `Nack`: `frag_count` cabe em u16, então 8 KiB cobre todos.
@@ -73,7 +75,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 100, 101, 102, 103, 104"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 100, 101, 102, 103, 104"
     )]
     pub msg: Option<Msg>,
 }
@@ -116,6 +118,8 @@ pub enum Msg {
     PictureLoss(PictureLoss),
     #[prost(message, tag = "28")]
     Nack(Nack),
+    #[prost(message, tag = "29")]
+    VideoStats(VideoStats),
 
     // Mouse
     #[prost(message, tag = "40")]
@@ -444,6 +448,40 @@ pub struct CodecSelected {
     pub bitrate_kbps: u32,
     #[prost(message, optional, tag = "10")]
     pub color: Option<ColorInfo>,
+}
+
+/// H→C: como o vídeo de um monitor está saindo do host, uma vez por segundo, para o painel de
+/// diagnóstico. Só informativo: o controlador não decide nada por ela.
+#[derive(Clone, PartialEq, Message)]
+pub struct VideoStats {
+    #[prost(uint32, tag = "1")]
+    pub display_id: u32,
+    /// Backend do encoder (`nvenc`, `vaapi`, `mf`, `openh264`).
+    #[prost(string, tag = "2")]
+    pub encoder: String,
+    /// GPU que codifica; vazio = CPU.
+    #[prost(string, tag = "3")]
+    pub gpu: String,
+    /// Quadros enviados por segundo, × 100.
+    #[prost(uint32, tag = "4")]
+    pub fps_x100: u32,
+    /// Taxa que saiu no último intervalo.
+    #[prost(uint32, tag = "5")]
+    pub bitrate_kbps: u32,
+    /// Alvo atual do controle de taxa.
+    #[prost(uint32, tag = "6")]
+    pub target_kbps: u32,
+    /// Média de captura → access unit (conversão + encode), em µs.
+    #[prost(uint32, tag = "7")]
+    pub encode_us: u32,
+    /// Quadros capturados que não saíram (substituídos ou pulados pelo controle de taxa).
+    #[prost(uint32, tag = "8")]
+    pub skipped: u32,
+    #[prost(uint32, tag = "9")]
+    pub keyframes: u32,
+    /// Pacotes QUIC que o host mandou e deu como perdidos no intervalo, em partes por milhão.
+    #[prost(uint32, tag = "10")]
+    pub loss_ppm: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Message)]
@@ -1229,6 +1267,10 @@ impl Control {
             Msg::Error(m) => at_most("message", m.message.len(), limits::MESSAGE_LEN),
             Msg::DisplaysChanged(m) => displays(&m.displays),
             Msg::CodecSelected(m) => video_stream(m.stream_id),
+            Msg::VideoStats(m) => {
+                at_most("encoder", m.encoder.len(), limits::CODEC_NAME_LEN)?;
+                at_most("gpu", m.gpu.len(), limits::SHORT_TEXT_LEN)
+            }
             Msg::Nack(m) => at_most(
                 "missing_frag_bitmap",
                 m.missing_frag_bitmap.len(),
@@ -1511,6 +1553,18 @@ mod tests {
                 }),
                 priority: Priority::Focused.into(),
             }),
+            Msg::VideoStats(VideoStats {
+                display_id: 1,
+                encoder: "nvenc".into(),
+                gpu: "NVIDIA GeForce RTX 3060 Laptop GPU".into(),
+                fps_x100: 5994,
+                bitrate_kbps: 7900,
+                target_kbps: 8000,
+                encode_us: 4300,
+                skipped: 2,
+                keyframes: 1,
+                loss_ppm: 1500,
+            }),
             Msg::CodecSelected(CodecSelected {
                 display_id: 1,
                 stream_id: 1,
@@ -1748,6 +1802,21 @@ mod tests {
             .validate()
             .is_ok()
         );
+    }
+
+    #[test]
+    fn limites_das_estatisticas_de_video() {
+        let stats = |encoder: &str, gpu: &str| {
+            Msg::VideoStats(VideoStats {
+                encoder: encoder.into(),
+                gpu: gpu.into(),
+                ..Default::default()
+            })
+        };
+        let gpu = "g".repeat(limits::SHORT_TEXT_LEN);
+        assert!(Control::from(stats("vaapi", &gpu)).validate().is_ok());
+        assert_eq!(invalida(stats(&"e".repeat(33), "")).field, "encoder");
+        assert_eq!(invalida(stats("nvenc", &format!("{gpu}x"))).field, "gpu");
     }
 
     #[test]

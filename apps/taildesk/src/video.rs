@@ -11,12 +11,13 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
 
 use slint::wgpu_30::{WGPUConfiguration, wgpu};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
-use taildesk_codec::{Faixa, FormatoYuv, Matriz, QuadroYuv};
+use taildesk_codec::{ErroCodec, Faixa, FormatoYuv, Matriz, QuadroYuv, VideoDecoder};
 use taildesk_media::video::RecepcaoVideo;
 use taildesk_render::{Conversor, Plano, Superficie};
 
@@ -115,6 +116,77 @@ impl Caixa {
     }
 }
 
+/// Contadores do vídeo de uma sessão no controlador, para o painel de diagnóstico.
+#[derive(Debug, Default)]
+pub struct Contadores {
+    pub datagramas: AtomicU64,
+    pub bytes: AtomicU64,
+    pub decodificados: AtomicU64,
+    /// Soma dos tempos de decode, em µs.
+    pub decode_us: AtomicU64,
+    pub erros_decode: AtomicU64,
+    /// Quadros que se perderam e pediram quadro-chave ao host.
+    pub pedidos_chave: AtomicU64,
+    /// Quadros que a janela mostrou (os outros foram substituídos antes).
+    pub exibidos: AtomicU64,
+    /// Backend e GPU do decoder em uso.
+    decoder: Mutex<(&'static str, String)>,
+}
+
+impl Contadores {
+    pub fn decoder(&self) -> (&'static str, String) {
+        self.decoder
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// Decoder que conta quadros e tempo de decode em [`Contadores`].
+pub struct DecoderMedido {
+    dentro: Box<dyn VideoDecoder>,
+    contadores: Arc<Contadores>,
+}
+
+impl DecoderMedido {
+    pub fn novo(dentro: Box<dyn VideoDecoder>, contadores: Arc<Contadores>) -> Self {
+        *contadores
+            .decoder
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) =
+            (dentro.nome(), dentro.gpu().unwrap_or_default().to_owned());
+        DecoderMedido { dentro, contadores }
+    }
+}
+
+impl VideoDecoder for DecoderMedido {
+    fn nome(&self) -> &'static str {
+        self.dentro.nome()
+    }
+
+    fn gpu(&self) -> Option<&str> {
+        self.dentro.gpu()
+    }
+
+    fn decodificar(
+        &mut self,
+        access_unit: &[u8],
+        ao_quadro: &mut dyn FnMut(&QuadroYuv<'_>),
+    ) -> Result<bool, ErroCodec> {
+        let t = Instant::now();
+        let r = self.dentro.decodificar(access_unit, ao_quadro);
+        let c = &self.contadores;
+        c.decode_us
+            .fetch_add(t.elapsed().as_micros() as u64, Ordering::Relaxed);
+        match &r {
+            Ok(true) => c.decodificados.fetch_add(1, Ordering::Relaxed),
+            Ok(false) => 0,
+            Err(_) => c.erros_decode.fetch_add(1, Ordering::Relaxed),
+        };
+        r
+    }
+}
+
 /// Recepções de uma sessão por `stream_id` (a task dos datagramas e a interface mexem).
 pub type Recepcoes = Arc<Mutex<HashMap<u8, (u32, RecepcaoVideo)>>>;
 
@@ -123,8 +195,16 @@ pub fn travar(r: &Recepcoes) -> MutexGuard<'_, HashMap<u8, (u32, RecepcaoVideo)>
 }
 
 /// Lê os datagramas da conexão e entrega cada um à recepção do stream dele (byte 1 do header).
-pub async fn ler_datagramas(conn: quinn::Connection, recepcoes: Recepcoes) {
+pub async fn ler_datagramas(
+    conn: quinn::Connection,
+    recepcoes: Recepcoes,
+    contadores: Arc<Contadores>,
+) {
     while let Ok(d) = conn.read_datagram().await {
+        contadores.datagramas.fetch_add(1, Ordering::Relaxed);
+        contadores
+            .bytes
+            .fetch_add(d.len() as u64, Ordering::Relaxed);
         let Some(&stream) = d.get(1) else { continue };
         if let Some((_, r)) = travar(&recepcoes).get_mut(&stream) {
             r.receber(&d);

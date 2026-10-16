@@ -5,14 +5,16 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use slint::platform::PointerEventButton;
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::{
     CloseRequestResponse, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel,
 };
-use taildesk_codec::{DecoderOpenH264, QuadroYuv};
+use taildesk_codec::QuadroYuv;
 use taildesk_keyboard::{Controller, Hid, KeyMsg, Keymap, Level, Mode, Mods, Translation};
 use taildesk_media::video::RecepcaoVideo;
 use taildesk_overlay::{Overlay, SystemOverlay};
@@ -28,10 +30,18 @@ use taildesk_tsapi::LocalApi;
 use taildesk_ui::{AbaMonitor, JanelaSessao};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::video::{Recepcoes, Tela, ler_datagramas, travar};
+use crate::video::{Contadores, DecoderMedido, Recepcoes, Tela, ler_datagramas, travar};
 use crate::{config, no_app};
 
 mod arquivos;
+mod diagnostico;
+
+use diagnostico::{Diagnostico, Rede};
+
+/// Atualização do painel de diagnóstico.
+const INTERVALO_DIAGNOSTICO: Duration = Duration::from_secs(1);
+/// Rota do Tailscale (pede um `ping` disco ao `tailscaled`, então menos vezes).
+const INTERVALO_ROTA: Duration = Duration::from_secs(10);
 
 type IdLocal = u64;
 
@@ -115,6 +125,8 @@ struct SessaoUi {
     tela: Tela,
     /// Monitor do vídeo que a janela mostra agora.
     video_display: Option<u32>,
+    contadores: Arc<Contadores>,
+    diagnostico: Diagnostico,
 }
 
 impl SessaoUi {
@@ -139,14 +151,24 @@ impl SessaoUi {
             return;
         };
         let display = c.display_id;
-        let decoder = match DecoderOpenH264::novo() {
-            Ok(d) => d,
+        let mut falhas = Vec::new();
+        let decoder = taildesk_codec::abrir_decoder(&mut falhas);
+        for (opcao, e) in falhas {
+            eprintln!(
+                "taildesk: decoder {} ({}) indisponível: {e}",
+                opcao.backend,
+                opcao.gpu.as_deref().unwrap_or("CPU")
+            );
+        }
+        let decoder = match decoder {
+            Ok(d) => DecoderMedido::novo(d, self.contadores.clone()),
             Err(e) => {
                 self.janela
                     .set_etapa(format!("Não foi possível decodificar o vídeo: {e}").into());
                 return;
             }
         };
+        self.diagnostico.video(c);
         let (caixa, id) = (self.tela.caixa(), self.id);
         let ao_quadro = Box::new(move |_: u32, q: &QuadroYuv<'_>| {
             if caixa.guardar(q) {
@@ -154,7 +176,9 @@ impl SessaoUi {
             }
         });
         let saida = self.saida.clone();
+        let contadores = self.contadores.clone();
         let pedir_chave = Arc::new(move || {
+            contadores.pedidos_chave.fetch_add(1, Ordering::Relaxed);
             if let Some(s) = &saida {
                 let _ = s.try_send(Control {
                     msg: Some(Msg::RequestKeyframe(RequestKeyframe {
@@ -185,8 +209,19 @@ impl SessaoUi {
     /// Chamado pelo decode (pela fila da interface) quando há quadro novo.
     fn mostrar_quadro(&mut self) {
         if let Some(img) = self.tela.proxima_imagem() {
+            self.contadores.exibidos.fetch_add(1, Ordering::Relaxed);
             self.janela.set_quadro(img);
             self.janela.set_tem_video(true);
+        }
+    }
+
+    /// Recalcula o painel de diagnóstico (uma vez por [`INTERVALO_DIAGNOSTICO`]).
+    fn atualizar_diagnostico(&mut self, rede: Rede) {
+        self.diagnostico.rede(rede);
+        let linhas = self.diagnostico.linhas(&self.contadores);
+        if self.janela.get_diagnostico_aberto() {
+            self.janela
+                .set_diagnostico(ModelRc::new(VecModel::from(linhas)));
         }
     }
 
@@ -369,6 +404,7 @@ impl SessaoUi {
                 }
                 Msg::CursorShapeRef(r) => self.cursor.on_shape_ref(r),
                 Msg::CodecSelected(c) => self.iniciar_video(&c),
+                Msg::VideoStats(v) => self.diagnostico.host(v),
                 Msg::VideoStopped(v) => {
                     self.parar_video(v.display_id);
                     self.monitores.on_video_stopped(&v, &mut out);
@@ -641,6 +677,7 @@ impl Controlador {
         };
         let (fechar_tx, fechar_rx) = oneshot::channel();
         let recepcoes = Recepcoes::default();
+        let contadores = Arc::new(Contadores::default());
         self.sessoes.borrow_mut().insert(
             id,
             SessaoUi {
@@ -664,10 +701,12 @@ impl Controlador {
                 recepcoes: recepcoes.clone(),
                 tela: Tela::default(),
                 video_display: None,
+                contadores: contadores.clone(),
+                diagnostico: Diagnostico::default(),
             },
         );
         arquivos::ligar_soltar(id, 50);
-        rt.spawn(rodar(id, nome, ip, info, recepcoes, fechar_rx));
+        rt.spawn(rodar(id, nome, ip, info, recepcoes, contadores, fechar_rx));
     }
 }
 
@@ -691,6 +730,7 @@ async fn rodar(
     ip: IpAddr,
     teclado: KeyboardInfo,
     recepcoes: Recepcoes,
+    contadores: Arc<Contadores>,
     mut fechar_rx: oneshot::Receiver<()>,
 ) {
     let remoto = SocketAddr::new(ip, PORTA);
@@ -759,16 +799,41 @@ async fn rodar(
         s.saida = Some(saida);
         s.painel.ligar(servico);
     });
-    let datagramas = tokio::spawn(ler_datagramas(sessao.conexao().clone(), recepcoes));
+    let conn = sessao.conexao().clone();
+    let datagramas = tokio::spawn(ler_datagramas(conn.clone(), recepcoes, contadores));
+    // Rota pelo Tailscale (direta ou DERP), em segundo plano: o `ping` disco pode demorar.
+    let rota = Arc::new(Mutex::new(None));
+    let tarefa_rota = tokio::spawn({
+        let rota = rota.clone();
+        async move {
+            let mut t = tokio::time::interval(INTERVALO_ROTA);
+            loop {
+                t.tick().await;
+                let p = overlay.path(ip).await;
+                *rota
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(p);
+            }
+        }
+    });
+    let mut diag = tokio::time::interval(INTERVALO_DIAGNOSTICO);
     loop {
         tokio::select! {
             ev = eventos.recv() => match ev {
                 Some(ev) => na_sessao(id, move |s| s.evento(ev)),
                 None => break,
             },
+            _ = diag.tick() => {
+                let rede = Rede {
+                    rtt: conn.rtt(),
+                    rota: rota.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone(),
+                };
+                na_sessao(id, move |s| s.atualizar_diagnostico(rede));
+            }
             _ = &mut fechar_rx => break,
         }
     }
+    tarefa_rota.abort();
     datagramas.abort();
     sessao.encerrar().await;
     drop(endpoint);
