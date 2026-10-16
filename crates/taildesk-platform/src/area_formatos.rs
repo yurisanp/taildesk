@@ -234,9 +234,75 @@ pub fn texto_para_utf16(t: &[u8]) -> Vec<u16> {
     u
 }
 
+/// Tamanho do `DROPFILES` (`pFiles`, `pt`, `fNC`, `fWide`).
+const DROPFILES: usize = 20;
+
+/// `CF_HDROP` (`DROPFILES` + lista de caminhos terminada em `\0\0`) → caminhos.
+pub fn hdrop_para_caminhos(b: &[u8]) -> Vec<String> {
+    if b.len() < DROPFILES {
+        return Vec::new();
+    }
+    let inicio = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize;
+    let largo = i32::from_le_bytes([b[16], b[17], b[18], b[19]]) != 0;
+    let Some(lista) = b.get(inicio..) else {
+        return Vec::new();
+    };
+    let nomes: Vec<String> = if largo {
+        let u: Vec<u16> = lista
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        u.split(|&c| c == 0)
+            .take_while(|n| !n.is_empty())
+            .map(String::from_utf16_lossy)
+            .collect()
+    } else {
+        lista
+            .split(|&c| c == 0)
+            .take_while(|n| !n.is_empty())
+            .map(|n| String::from_utf8_lossy(n).into_owned())
+            .collect()
+    };
+    nomes
+}
+
+/// Caminhos → `CF_HDROP` em UTF-16.
+pub fn caminhos_para_hdrop(caminhos: &[String]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(DROPFILES as u32).to_le_bytes());
+    out.extend_from_slice(&[0; 12]);
+    out.extend_from_slice(&1i32.to_le_bytes());
+    for c in caminhos {
+        for u in c.encode_utf16().chain(std::iter::once(0)) {
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+    }
+    out.extend_from_slice(&[0, 0]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hdrop_ida_e_volta() {
+        let c = vec![
+            r"C:\Users\Ana\nota.txt".to_string(),
+            r"D:\Fotos ção".to_string(),
+        ];
+        let b = caminhos_para_hdrop(&c);
+        assert_eq!(hdrop_para_caminhos(&b), c);
+        // Versão ANSI (fWide = 0) e lixo.
+        let mut ansi = vec![20, 0, 0, 0];
+        ansi.extend_from_slice(&[0; 16]);
+        ansi.extend_from_slice(b"C:\\a\0C:\\b\0\0");
+        assert_eq!(hdrop_para_caminhos(&ansi), vec!["C:\\a", "C:\\b"]);
+        assert!(hdrop_para_caminhos(&[1, 2, 3]).is_empty());
+        let mut fora = b.clone();
+        fora[0] = 0xff;
+        assert!(hdrop_para_caminhos(&fora).is_empty());
+    }
 
     fn imagem() -> Rgba {
         // 3×2: cores diferentes e um pixel meio transparente.

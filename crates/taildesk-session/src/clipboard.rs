@@ -23,6 +23,8 @@ use taildesk_proto::control::{
 pub struct Copiado {
     pub formatos: Vec<(ClipFormat, u64)>,
     pub arquivos: Vec<ClipFile>,
+    /// Caminho local de cada item de `arquivos` (vazio no que veio do peer).
+    pub locais: Vec<std::path::PathBuf>,
 }
 
 /// O que a sessão precisa fazer depois de uma mensagem do peer.
@@ -182,6 +184,7 @@ impl AreaTransferencia {
                         copiado: Copiado {
                             formatos,
                             arquivos: o.files.clone(),
+                            locais: Vec::new(),
                         },
                     }),
                     None,
@@ -301,6 +304,7 @@ mod tests {
         Copiado {
             formatos: vec![(ClipFormat::Text, n)],
             arquivos: Vec::new(),
+            locais: Vec::new(),
         }
     }
 
@@ -477,6 +481,7 @@ mod tests {
         let Msg::ClipboardOffer(o) = a.copiado(&Copiado {
             formatos: vec![(ClipFormat::Text, 3)],
             arquivos: vec![arq.clone()],
+            locais: Vec::new(),
         }) else {
             panic!()
         };
@@ -484,6 +489,7 @@ mod tests {
         let Msg::ClipboardOffer(o) = a.copiado(&Copiado {
             formatos: vec![(ClipFormat::Files, 0), (ClipFormat::Text, 5)],
             arquivos: vec![arq.clone()],
+            locais: Vec::new(),
         }) else {
             panic!()
         };

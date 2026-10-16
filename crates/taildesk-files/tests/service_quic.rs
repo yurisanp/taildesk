@@ -431,3 +431,92 @@ async fn big_file_does_not_stall_datagrams() {
     );
     assert!(pct(0.99) < 100.0, "p99 do atraso alto demais");
 }
+
+/// Joga fora os eventos de um lado (a colagem espera pelos próprios canais).
+fn drain(p: &mut Peer) {
+    let (_tx, rx) = mpsc::channel(1);
+    let mut events = std::mem::replace(&mut p.events, rx);
+    tokio::spawn(async move { while events.recv().await.is_some() {} });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn paste_files_and_folder_from_clipboard() {
+    use taildesk_proto::control::ClipFile;
+
+    let tmp = TempDir::new("area");
+    let copiados = tmp.dir("copiados");
+    let doc = copiados.join("nota.txt");
+    fs::write(&doc, data(70_000, 3)).unwrap();
+    let pasta = copiados.join("Fotos");
+    fs::create_dir_all(pasta.join("sub/fundo")).unwrap();
+    fs::write(pasta.join("a.jpg"), data(300_000, 1)).unwrap();
+    fs::write(pasta.join("sub/fundo/b.txt"), b"b").unwrap();
+
+    // Sem a permissão `files`: a área de transferência basta.
+    let (mut host, mut ctl) = session(
+        Config::closed(Side::Host, "h"),
+        Config::closed(Side::Controller, "c"),
+    )
+    .await;
+    drain(&mut host);
+    drain(&mut ctl);
+
+    let lista = vec![
+        ClipFile {
+            name: "nota.txt".into(),
+            size: 70_000,
+            dir: false,
+        },
+        ClipFile {
+            name: "Fotos".into(),
+            size: 0,
+            dir: true,
+        },
+    ];
+    // Nada copiado ainda: não acha.
+    let destino = tmp.0.join("colado");
+    assert_eq!(
+        ctl.files.paste_clipboard(&lista, &destino).await,
+        Err(FileErrorCode::NotFound)
+    );
+
+    host.files.serve_clipboard(vec![doc.clone(), pasta.clone()]);
+    let colados = ctl.files.paste_clipboard(&lista, &destino).await.unwrap();
+    // No Windows o caminho volta com o nome longo da pasta temporária (sem `\\?\`).
+    let nomes: Vec<_> = colados.iter().map(|p| p.file_name().unwrap()).collect();
+    assert_eq!(nomes, ["nota.txt", "Fotos"]);
+    for p in &colados {
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), "colado");
+        assert!(!p.to_string_lossy().starts_with(r"\\?\"), "{p:?}");
+    }
+    assert_eq!(fs::read(&colados[0]).unwrap(), data(70_000, 3));
+    assert_eq!(
+        fs::read(colados[1].join("a.jpg")).unwrap(),
+        data(300_000, 1)
+    );
+    assert_eq!(fs::read(colados[1].join("sub/fundo/b.txt")).unwrap(), b"b");
+
+    // Nome trocado ou caminho para fora do item copiado: recusado.
+    let errado = vec![ClipFile {
+        name: "copiados".into(),
+        size: 0,
+        dir: true,
+    }];
+    assert!(
+        ctl.files
+            .paste_clipboard(&errado, &tmp.0.join("outro"))
+            .await
+            .is_err()
+    );
+    let fora = vec![ClipFile {
+        name: "nota.txt/../Fotos".into(),
+        size: 0,
+        dir: false,
+    }];
+    assert!(
+        ctl.files
+            .paste_clipboard(&fora, &tmp.0.join("outro2"))
+            .await
+            .is_err()
+    );
+}

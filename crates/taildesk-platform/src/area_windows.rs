@@ -5,11 +5,13 @@
 //!   (`ExcludeClipboardContentFromMonitorProcessing`).
 //! - Oferta do peer: renderização atrasada (`SetClipboardData(formato, NULL)`); quando um app
 //!   cola chega `WM_RENDERFORMAT` e o conteúdo é pedido ao peer ali mesmo, com prazo.
-//! - Formatos: texto (`CF_UNICODETEXT`), HTML (`"HTML Format"`) e imagem (`"PNG"`, e `CF_DIB`
-//!   para os apps que só leem bitmap). As conversões ficam em [`crate::area_formatos`].
+//! - Formatos: texto (`CF_UNICODETEXT`), HTML (`"HTML Format"`), imagem (`"PNG"`, e `CF_DIB`
+//!   para os apps que só leem bitmap) e arquivos (`CF_HDROP`, com `"Preferred DropEffect"` =
+//!   copiar). As conversões ficam em [`crate::area_formatos`].
 
 use std::collections::HashMap;
 use std::io;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -37,19 +39,24 @@ use crate::area_formatos as fmt;
 
 const CF_DIB: u32 = 8;
 const CF_UNICODETEXT: u32 = 13;
+const CF_HDROP: u32 = 15;
 const CF_DIBV5: u32 = 17;
+/// `DROPEFFECT_COPY`.
+const COPIAR: u32 = 1;
 /// Há comandos na fila.
 const WM_COMANDO: u32 = WM_APP + 1;
 
 /// O que a área de transferência avisa (na thread dela: só repasse).
 #[derive(Debug)]
 pub enum DaArea {
-    /// Alguém copiou em outro app; os formatos que dá para levar.
-    Copiou(Vec<ClipFormat>),
+    /// Alguém copiou em outro app; os formatos que dá para levar e, com
+    /// [`ClipFormat::Files`], os caminhos copiados.
+    Copiou(Vec<ClipFormat>, Vec<PathBuf>),
 }
 
 /// Pede ao peer o conteúdo de um formato da oferta em vigor (bloqueia a thread da área até
-/// voltar; `None` = colar vazio). Texto e HTML em UTF-8, imagem em PNG.
+/// voltar; `None` = colar vazio). Texto e HTML em UTF-8, imagem em PNG, arquivos como os
+/// caminhos locais já baixados, um por linha.
 pub type Pedir = Box<dyn FnMut(ClipFormat) -> Option<Vec<u8>> + Send>;
 
 enum Comando {
@@ -95,6 +102,7 @@ struct Registrados {
     html: u32,
     png: u32,
     excluir: u32,
+    efeito: u32,
 }
 
 impl Registrados {
@@ -107,6 +115,7 @@ impl Registrados {
                 excluir: RegisterClipboardFormatW(
                     wide("ExcludeClipboardContentFromMonitorProcessing").as_ptr(),
                 ),
+                efeito: RegisterClipboardFormatW(wide("Preferred DropEffect").as_ptr()),
             }
         }
     }
@@ -116,6 +125,7 @@ impl Registrados {
             ClipFormat::Text => vec![CF_UNICODETEXT],
             ClipFormat::Html => vec![self.html],
             ClipFormat::Png => vec![self.png, CF_DIB],
+            ClipFormat::Files => vec![CF_HDROP],
             _ => Vec::new(),
         }
     }
@@ -124,6 +134,7 @@ impl Registrados {
         match id {
             CF_UNICODETEXT => Some(ClipFormat::Text),
             CF_DIB | CF_DIBV5 => Some(ClipFormat::Png),
+            CF_HDROP => Some(ClipFormat::Files),
             _ if id == self.html => Some(ClipFormat::Html),
             _ if id == self.png => Some(ClipFormat::Png),
             _ => None,
@@ -394,9 +405,32 @@ impl Estado {
         if disponivel(self.ids.png) || disponivel(CF_DIBV5) || disponivel(CF_DIB) {
             formatos.push(ClipFormat::Png);
         }
-        if !formatos.is_empty() {
-            (self.aviso)(DaArea::Copiou(formatos));
+        let mut caminhos = Vec::new();
+        if disponivel(CF_HDROP) {
+            caminhos = self.caminhos();
+            if !caminhos.is_empty() {
+                formatos.push(ClipFormat::Files);
+            }
         }
+        if !formatos.is_empty() {
+            (self.aviso)(DaArea::Copiou(formatos, caminhos));
+        }
+    }
+
+    /// Os arquivos copiados (`CF_HDROP`).
+    fn caminhos(&self) -> Vec<PathBuf> {
+        if !abrir_area(self.hwnd) {
+            return Vec::new();
+        }
+        let _aberta = Aberta;
+        ler_global(CF_HDROP)
+            .map(|b| {
+                fmt::hdrop_para_caminhos(&b)
+                    .into_iter()
+                    .map(PathBuf::from)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn comando(&mut self, c: Comando) {
@@ -410,10 +444,17 @@ impl Estado {
                 // SAFETY: área aberta por nós; NULL = renderização atrasada.
                 unsafe {
                     EmptyClipboard();
-                    for f in formatos {
+                    for &f in &formatos {
                         for id in self.ids.do_windows(f) {
                             SetClipboardData(id, std::ptr::null_mut());
                         }
+                    }
+                    // Colar arquivos copia (não move); vai já, é pequeno.
+                    if formatos.contains(&ClipFormat::Files)
+                        && let Some(h) = global_de(&COPIAR.to_le_bytes())
+                        && SetClipboardData(self.ids.efeito, h).is_null()
+                    {
+                        GlobalFree(h);
                     }
                 }
             }
@@ -453,6 +494,10 @@ impl Estado {
                     .and_then(|img| fmt::rgba_para_png(&img))
                     .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))
             }
+            ClipFormat::Files => {
+                let b = ler_global(CF_HDROP).ok_or_else(nao)?;
+                Ok(fmt::hdrop_para_caminhos(&b).join("\n").into_bytes())
+            }
             _ => Err(nao()),
         }
     }
@@ -480,6 +525,14 @@ impl Estado {
                     .collect(),
             ),
             CF_DIB => fmt::png_para_rgba(&dados).map(|img| fmt::rgba_para_dib(&img)),
+            CF_HDROP => {
+                let caminhos: Vec<String> = String::from_utf8_lossy(&dados)
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                Some(fmt::caminhos_para_hdrop(&caminhos))
+            }
             _ if id == self.ids.html => {
                 let mut v = fmt::fragmento_para_cf_html(&dados);
                 v.push(0);

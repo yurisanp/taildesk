@@ -4,13 +4,22 @@
 //!
 //! Conteúdo grande sai em pedaços pela fila do controle com `send` (espera a vez), então mouse
 //! e teclado continuam passando entre um pedaço e outro.
+//!
+//! Arquivos copiados não vão pelas mensagens 70–73: a ponte serve os caminhos locais no
+//! serviço de arquivos da sessão ([`ArquivosDaArea`]) e, quando alguém daqui cola, baixa o que
+//! o peer copiou para uma pasta temporária e entrega ao sistema os caminhos baixados.
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use taildesk_proto::control::{ClipErrorCode, ClipFormat, Control, Msg};
+use taildesk_files::service::{Files, Link};
+use taildesk_proto::control::{ClipErrorCode, ClipFile, ClipFormat, Control, FileErrorCode, Msg};
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 
 use super::controle;
 use crate::clipboard::{AreaTransferencia, Copiado, Evento};
@@ -21,7 +30,8 @@ pub enum DoSistema {
     /// Alguém copiou aqui (nunca a oferta do peer que nós mesmos pusemos).
     Copiou(Copiado),
     /// Alguém colou aqui a oferta `seq` do peer: responda com o conteúdo, ou `None` para colar
-    /// vazio.
+    /// vazio. Em [`ClipFormat::Files`] o conteúdo são os caminhos locais já baixados, um por
+    /// linha (UTF-8).
     Colar {
         seq: u32,
         formato: ClipFormat,
@@ -39,6 +49,47 @@ pub trait Sistema: Send + 'static {
         &mut self,
         formato: ClipFormat,
     ) -> impl Future<Output = Result<Vec<u8>, ClipErrorCode>> + Send + 'static;
+}
+
+/// Arquivos da área de transferência, pelo serviço de arquivos da sessão.
+pub trait ArquivosDaArea: Send + Sync + 'static {
+    /// Passa a servir ao peer o que foi copiado aqui (vazio = nada).
+    fn servir(&self, itens: Vec<PathBuf>);
+    /// Baixa o que o peer copiou para dentro de `destino`; o caminho local de cada item.
+    fn baixar(&self, arquivos: Vec<ClipFile>, destino: PathBuf) -> Baixando;
+}
+
+/// Download de uma colagem de arquivos em andamento.
+pub type Baixando = Pin<Box<dyn Future<Output = Result<Vec<PathBuf>, FileErrorCode>> + Send>>;
+
+impl<L: Link> ArquivosDaArea for Files<L> {
+    fn servir(&self, itens: Vec<PathBuf>) {
+        self.serve_clipboard(itens);
+    }
+
+    fn baixar(&self, arquivos: Vec<ClipFile>, destino: PathBuf) -> Baixando {
+        let me = self.clone();
+        Box::pin(async move { me.paste_clipboard(&arquivos, &destino).await })
+    }
+}
+
+/// Pasta nova para os arquivos de uma colagem (o sistema limpa a pasta temporária).
+fn pasta_da_colagem() -> PathBuf {
+    static N: AtomicU64 = AtomicU64::new(0);
+    std::env::temp_dir().join("taildesk-colar").join(format!(
+        "{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+/// Resposta de uma colagem de arquivos: os caminhos locais, um por linha, em UTF-8.
+fn caminhos(v: &[PathBuf]) -> Vec<u8> {
+    v.iter()
+        .map(|p| p.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .into_bytes()
 }
 
 /// Para quem não tem área de transferência: nunca é criada ([`Maquina::area`] devolve `None`).
@@ -87,8 +138,19 @@ impl Ponte {
         saida: mpsc::Sender<Control>,
         permitido: bool,
     ) -> Ponte {
+        Ponte::com_arquivos(sistema, do_sistema, saida, permitido, None)
+    }
+
+    /// Como [`Ponte::iniciar`], com arquivos copiados e colados pelo serviço de arquivos.
+    pub fn com_arquivos<S: Sistema>(
+        sistema: S,
+        do_sistema: mpsc::Receiver<DoSistema>,
+        saida: mpsc::Sender<Control>,
+        permitido: bool,
+        arquivos: Option<Arc<dyn ArquivosDaArea>>,
+    ) -> Ponte {
         let (do_peer, rx) = mpsc::channel(FILA_PEER);
-        let tarefa = tokio::spawn(rodar(sistema, do_sistema, rx, saida, permitido));
+        let tarefa = tokio::spawn(rodar(sistema, do_sistema, rx, saida, permitido, arquivos));
         Ponte { do_peer, tarefa }
     }
 
@@ -126,8 +188,14 @@ async fn rodar<S: Sistema>(
     mut do_peer: mpsc::Receiver<Msg>,
     saida: mpsc::Sender<Control>,
     permitido: bool,
+    arquivos: Option<Arc<dyn ArquivosDaArea>>,
 ) {
     let mut area = AreaTransferencia::default();
+    // Arquivos: a lista da oferta do peer em vigor e a última colagem já baixada.
+    let mut oferta_peer: Option<(u32, Vec<ClipFile>)> = None;
+    let mut colado: Option<(u32, Vec<u8>)> = None;
+    // Downloads de colagens; soltar a ponte cancela.
+    let mut baixando = JoinSet::new();
     // Quem está esperando cada colagem pedida.
     let mut esperando: HashMap<(u32, ClipFormat), Vec<Resposta>> = HashMap::new();
     // Leituras do sistema prontas para virar pedaços: (seq, formato, conteúdo).
@@ -158,8 +226,33 @@ async fn rodar<S: Sistema>(
                 None => break,
                 Some(_) if !permitido => {}
                 Some(DoSistema::Copiou(c)) => {
+                    if let Some(a) = &arquivos {
+                        let tem = c.formatos.iter().any(|(f, _)| *f == ClipFormat::Files);
+                        a.servir(if tem { c.locais.clone() } else { Vec::new() });
+                    }
                     if !enviar(area.copiado(&c)).await {
                         break;
+                    }
+                }
+                Some(DoSistema::Colar { seq, formato: ClipFormat::Files, resposta }) => {
+                    let chave = (seq, ClipFormat::Files);
+                    match (&colado, &oferta_peer, &arquivos) {
+                        (Some((s, d)), _, _) if *s == seq => {
+                            let _ = resposta.send(Some(d.clone()));
+                        }
+                        _ if esperando.contains_key(&chave) => {
+                            esperando.entry(chave).or_default().push(resposta);
+                        }
+                        (_, Some((s, lista)), Some(a)) if *s == seq && !lista.is_empty() => {
+                            esperando.insert(chave, vec![resposta]);
+                            let download = a.baixar(lista.clone(), pasta_da_colagem());
+                            baixando.spawn(async move {
+                                (seq, download.await.ok().map(|v| caminhos(&v)))
+                            });
+                        }
+                        _ => {
+                            let _ = resposta.send(None);
+                        }
                     }
                 }
                 Some(DoSistema::Colar { seq, formato, resposta }) => {
@@ -186,7 +279,11 @@ async fn rodar<S: Sistema>(
                 }
                 match evento {
                     None => {}
-                    Some(Evento::Oferta { seq, copiado }) => sistema.oferecer(seq, &copiado),
+                    Some(Evento::Oferta { seq, copiado }) => {
+                        oferta_peer = Some((seq, copiado.arquivos.clone()));
+                        colado = None;
+                        sistema.oferecer(seq, &copiado);
+                    }
                     Some(Evento::Ler { seq, formato }) => {
                         let leitura = sistema.ler(formato);
                         let lido = lido_tx.clone();
@@ -208,6 +305,16 @@ async fn rodar<S: Sistema>(
                             let _ = r.send(None);
                         }
                     }
+                }
+            }
+            Some(Ok((seq, dados))) = baixando.join_next() => {
+                if let Some(d) = &dados
+                    && oferta_peer.as_ref().is_some_and(|(s, _)| *s == seq)
+                {
+                    colado = Some((seq, d.clone()));
+                }
+                for r in esperando.remove(&(seq, ClipFormat::Files)).unwrap_or_default() {
+                    let _ = r.send(dados.clone());
                 }
             }
             Some((seq, formato, dados)) = lido_rx.recv() => {
@@ -299,6 +406,7 @@ mod tests {
             .send(DoSistema::Copiou(Copiado {
                 formatos: vec![(ClipFormat::Text, conteudo.len() as u64)],
                 arquivos: Vec::new(),
+                locais: Vec::new(),
             }))
             .await
             .unwrap();
@@ -332,6 +440,7 @@ mod tests {
             .send(DoSistema::Copiou(Copiado {
                 formatos: vec![(ClipFormat::Text, 7)],
                 arquivos: Vec::new(),
+                locais: Vec::new(),
             }))
             .await
             .unwrap();
@@ -348,6 +457,85 @@ mod tests {
             c.msg,
             Some(Msg::ClipboardError(e)) if e.code == ClipErrorCode::Denied as i32
         ));
+    }
+
+    /// Serviço de arquivos de mentira: anota o que serve e quantas vezes baixou.
+    #[derive(Default)]
+    struct ArquivosFalsos {
+        servidos: Mutex<Vec<PathBuf>>,
+        baixados: Mutex<usize>,
+    }
+
+    impl ArquivosDaArea for ArquivosFalsos {
+        fn servir(&self, itens: Vec<PathBuf>) {
+            *self.servidos.lock().unwrap() = itens;
+        }
+
+        fn baixar(&self, arquivos: Vec<ClipFile>, destino: PathBuf) -> Baixando {
+            *self.baixados.lock().unwrap() += 1;
+            Box::pin(async move { Ok(arquivos.iter().map(|f| destino.join(&f.name)).collect()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn arquivos_sao_servidos_e_baixados_uma_vez() {
+        let falsos = Arc::new(ArquivosFalsos::default());
+        let (h_sis, h_rx) = mpsc::channel(8);
+        let (h_saida_tx, mut h_saida) = mpsc::channel(64);
+        let host = Ponte::com_arquivos(
+            Falsa::default(),
+            h_rx,
+            h_saida_tx,
+            true,
+            Some(falsos.clone() as Arc<dyn ArquivosDaArea>),
+        );
+        let ctl_falsos = Arc::new(ArquivosFalsos::default());
+        let (c_sis, c_rx) = mpsc::channel(8);
+        let (c_saida_tx, _c_saida) = mpsc::channel(64);
+        let ctl_falsa = Falsa::default();
+        let ctl = Ponte::com_arquivos(
+            ctl_falsa.clone(),
+            c_rx,
+            c_saida_tx,
+            true,
+            Some(ctl_falsos.clone() as Arc<dyn ArquivosDaArea>),
+        );
+        let arq = ClipFile {
+            name: "a.txt".into(),
+            size: 3,
+            dir: false,
+        };
+        h_sis
+            .send(DoSistema::Copiou(Copiado {
+                formatos: vec![(ClipFormat::Files, 0)],
+                arquivos: vec![arq.clone()],
+                locais: vec![PathBuf::from("/home/yuri/a.txt")],
+            }))
+            .await
+            .unwrap();
+        let oferta = h_saida.recv().await.unwrap().msg.unwrap();
+        assert_eq!(
+            *falsos.servidos.lock().unwrap(),
+            vec![PathBuf::from("/home/yuri/a.txt")]
+        );
+        ctl.mensagem(oferta).await;
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let (seq, _) = ctl_falsa.ofertas.lock().unwrap()[0].clone();
+        for _ in 0..2 {
+            let (r, c) = oneshot::channel();
+            c_sis
+                .send(DoSistema::Colar {
+                    seq,
+                    formato: ClipFormat::Files,
+                    resposta: r,
+                })
+                .await
+                .unwrap();
+            let d = String::from_utf8(c.await.unwrap().unwrap()).unwrap();
+            assert!(d.ends_with("a.txt") && !d.contains('\n'), "{d}");
+        }
+        assert_eq!(*ctl_falsos.baixados.lock().unwrap(), 1);
+        drop(host);
     }
 
     #[tokio::test]

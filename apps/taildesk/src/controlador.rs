@@ -1067,6 +1067,7 @@ async fn rodar(
     let servico = sessao.arquivos().clone();
     na_sessao(id, move |s| {
         s.saida = Some(saida);
+        s.area.arquivos(Arc::new(servico.clone()));
         s.painel.ligar(servico);
     });
     let conn = sessao.conexao().clone();
