@@ -4,12 +4,14 @@
 //!
 //! Arquivo de texto, uma linha por item, campos separados por tabulação:
 //! `pedir_sempre\t1`, `confiavel\t<node_stable_id>\t<nome>`, `host\t<node_stable_id>\t<sha256>`,
-//! `atualizar_auto\t1`, `canal\testavel|pre`.
+//! `atualizar_auto\t1`, `canal\testavel|pre`, `codec\tauto|h264|hevc|av1|pyrowave`,
+//! `taxa_kbps\t<n>` (0 = automática).
 
 use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
 
+use taildesk_proto::control::Codec;
 use taildesk_session::{HostSettings, TrustedDevice};
 use taildesk_transport::tls::{Fingerprint, from_hex, to_hex};
 
@@ -19,6 +21,44 @@ pub struct Config {
     /// Hosts conhecidos: `node_stable_id` → fingerprint do certificado.
     pub hosts: BTreeMap<String, Fingerprint>,
     pub atualizacao: PrefsAtualizacao,
+    pub video: PrefsVideo,
+}
+
+/// Configurações → Sessão: vídeo pedido ao host em toda sessão nova (o seletor da janela da
+/// sessão muda só a sessão aberta).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PrefsVideo {
+    /// `Unspecified` = automático.
+    pub codec: Codec,
+    /// `0` = automática.
+    pub taxa_kbps: u32,
+}
+
+/// Nome do codec no arquivo.
+fn nome_codec(c: Codec) -> &'static str {
+    match c {
+        Codec::H264 => "h264",
+        Codec::Hevc => "hevc",
+        Codec::Av1 => "av1",
+        Codec::Vp8 => "vp8",
+        Codec::Vp9 => "vp9",
+        Codec::PyroWave => "pyrowave",
+        Codec::Unspecified => "auto",
+    }
+}
+
+fn codec_de(nome: &str) -> Codec {
+    [
+        Codec::H264,
+        Codec::Hevc,
+        Codec::Av1,
+        Codec::Vp8,
+        Codec::Vp9,
+        Codec::PyroWave,
+    ]
+    .into_iter()
+    .find(|c| nome_codec(*c) == nome)
+    .unwrap_or(Codec::Unspecified)
 }
 
 /// Configurações → Atualizações (`docs/context/16-atualizacao-automatica.md` §5).
@@ -63,6 +103,13 @@ fn analisar(texto: &str) -> Config {
             ["pedir_sempre", v] => c.host.ask_always = *v != "0",
             ["atualizar_auto", v] => c.atualizacao.automatica = *v != "0",
             ["canal", v] => c.atualizacao.pre = *v == "pre",
+            ["codec", v] => c.video.codec = codec_de(v),
+            ["taxa_kbps", v] => {
+                c.video.taxa_kbps = v
+                    .parse::<u32>()
+                    .unwrap_or(0)
+                    .min(taildesk_proto::control::limits::VIDEO_KBPS);
+            }
             ["confiavel", id, nome] if !id.is_empty() => c.host.trusted.push(TrustedDevice {
                 node_stable_id: (*id).to_owned(),
                 name: (*nome).to_owned(),
@@ -85,6 +132,11 @@ fn escrever(c: &Config) -> String {
         "atualizar_auto\t{}\ncanal\t{}\n",
         u8::from(c.atualizacao.automatica),
         if c.atualizacao.pre { "pre" } else { "estavel" }
+    );
+    s += &format!(
+        "codec\t{}\ntaxa_kbps\t{}\n",
+        nome_codec(c.video.codec),
+        c.video.taxa_kbps
     );
     for t in &c.host.trusted {
         s += &format!(
@@ -135,10 +187,15 @@ mod tests {
             automatica: false,
             pre: true,
         };
+        c.video = PrefsVideo {
+            codec: Codec::Hevc,
+            taxa_kbps: 20_000,
+        };
         let texto = escrever(&c);
         let volta = analisar(&texto);
         assert!(!volta.host.ask_always);
         assert_eq!(volta.atualizacao, c.atualizacao);
+        assert_eq!(volta.video, c.video);
         assert_eq!(volta.host.trusted[0].name, "notebookyuri");
         assert_eq!(volta.hosts, c.hosts);
         // Linhas desconhecidas ou estragadas não derrubam a leitura.
@@ -152,5 +209,10 @@ mod tests {
     fn padrao_pede_sempre() {
         assert!(analisar("").host.ask_always);
         assert_eq!(analisar("").atualizacao, PrefsAtualizacao::default());
+        assert_eq!(analisar("").video, PrefsVideo::default());
+        // Codec desconhecido (de uma versão futura) e taxa absurda voltam ao automático/teto.
+        let v = analisar("codec\tvvc\ntaxa_kbps\t99999999999\n").video;
+        assert_eq!(v.codec, Codec::Unspecified);
+        assert_eq!(v.taxa_kbps, 0);
     }
 }

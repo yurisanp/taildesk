@@ -66,7 +66,8 @@ pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
         }
         tokio::time::sleep(Duration::from_secs(5)).await;
     };
-    let inbox = taildesk_platform::pasta_downloads().map(|d| d.join("TailDesk"));
+    crate::midia_host::preparar_encode_caps().await;
+    let inbox = crate::preferencias::pasta_entrada();
     let config = Arc::new(ConfigHost {
         settings,
         inbox,
@@ -196,6 +197,11 @@ fn teclado_do_host() -> (Keymap, String) {
     (Keymap::default(), String::new())
 }
 
+/// Layout deste computador como o protocolo nomeia ("ABNT2"), para as Configurações.
+pub fn layout_local() -> String {
+    taildesk_keyboard::layout_tag(&teclado_do_host().1)
+}
+
 #[cfg(windows)]
 fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
     use taildesk_platform::captura_dxgi::listar_monitores;
@@ -246,6 +252,7 @@ impl Maquina for MaquinaApp {
                 os_layout_id,
                 extra_hid: Vec::new(),
             },
+            encode_caps: crate::midia_host::encode_caps(),
             keymap,
         }
     }
@@ -454,7 +461,7 @@ impl std::fmt::Debug for Ui {
     }
 }
 
-fn gravar_settings(settings: &Arc<Mutex<HostSettings>>) {
+pub fn gravar_settings(settings: &Arc<Mutex<HostSettings>>) {
     let host = settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let mut c = config::ler();
     c.host = host;
@@ -498,6 +505,7 @@ impl Ui {
                 self.fechar_pedido(sessao);
                 // "Lembrar" pode ter mudado a lista.
                 gravar_settings(settings);
+                crate::com_app(crate::App::atualizar_configuracoes);
                 self.faixa(sessao, &peer.hostname, permissoes, comandos);
             }
             EventoHost::Fim { sessao, .. } => {

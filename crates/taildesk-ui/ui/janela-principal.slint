@@ -1,6 +1,6 @@
 // Janela principal do app: dispositivos da tailnet (levantamento §5.2) e configurações (§5.9),
 // com o estado real do Tailscale deste computador (§5.1 e "Tailscale parou durante o uso").
-import { AboutSlint, LineEdit, ScrollView, Switch, ListView } from "std-widgets.slint";
+import { AboutSlint, ComboBox, LineEdit, ScrollView, Switch, ListView } from "std-widgets.slint";
 import { Tema } from "tema.slint";
 import { Botao, Cartao, ChipStatus, Dispositivo, Estado, ItemNav, LinhaInfo, PontoStatus, Separador, Textos, Toast } from "componentes.slint";
 import { CartaoAtualizacoes, FaixaAtualizacao, InfoAtualizacao } from "atualizacao.slint";
@@ -306,90 +306,223 @@ component OpcaoConfig inherits HorizontalLayout {
     }
 }
 
+// Título de grupo das Configurações.
+component TituloGrupo inherits Text {
+    font-weight: 700;
+    color: Tema.texto-2;
+    font-size: Tema.fonte-pequena;
+}
+
+// Linha com rótulo, descrição e uma lista de escolha à direita.
+component OpcaoLista inherits HorizontalLayout {
+    in property <string> titulo;
+    in property <string> descricao;
+    in property <[string]> opcoes;
+    in-out property <int> escolhida;
+    callback mudou(int);
+    spacing: 16px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    VerticalLayout {
+        horizontal-stretch: 1;
+        alignment: center;
+        spacing: 3px;
+        Text { text: root.titulo; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+        if root.descricao != "": Text { text: root.descricao; color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+    }
+    VerticalLayout {
+        alignment: center;
+        ComboBox {
+            width: 200px;
+            model: root.opcoes;
+            current-index <=> root.escolhida;
+            selected => { root.mudou(self.current-index); }
+        }
+    }
+}
+
+// Um dispositivo confiável com o botão Revogar.
+component LinhaConfiavel inherits HorizontalLayout {
+    in property <string> nome;
+    callback revogar();
+    spacing: 8px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    VerticalLayout { alignment: center; PontoStatus { estado: Estado.online; } }
+    Text { horizontal-stretch: 1; text: root.nome; color: Tema.texto; font-size: Tema.fonte; vertical-alignment: center; overflow: elide; }
+    Botao { texto: @tr("Revogar"); discreto: true; perigo: true; altura: 26px; clicado => { root.revogar(); } }
+}
+
 component SecaoConfiguracoes inherits ScrollView {
     in-out property <bool> aceitando;
+    in-out property <bool> pedir-sempre;
+    in property <[string]> confiaveis;
+    in property <string> pasta-entrada;
     in property <string> tailscale;
     in property <string> versao-app;
     in property <bool> bandeja;
     in property <InfoAtualizacao> atualizacao;
     in-out property <bool> atualizar-auto;
     in-out property <bool> canal-pre;
+    in property <[string]> codecs;
+    in-out property <int> codec;
+    in property <[string]> taxas;
+    in-out property <int> taxa;
+    in property <string> video-local;
+    in property <string> teclado-local;
     callback aceitando-mudou(bool);
+    callback pedir-sempre-mudou(bool);
+    callback revogar(int);
+    callback abrir-pasta-entrada();
+    callback codec-mudou(int);
+    callback taxa-mudou(int);
     callback abrir-link(string);
     callback atualizar-auto-mudou(bool);
     callback canal-pre-mudou(bool);
     callback procurar-atualizacao();
     callback atualizar-agora();
     callback reiniciar-app();
-    VerticalLayout {
-        padding: 20px;
-        spacing: 14px;
-        alignment: start;
-        Text { text: @tr("Configurações"); font-size: Tema.fonte-titulo; font-weight: 700; color: Tema.texto; }
+    HorizontalLayout {
+        alignment: center;
+        VerticalLayout {
+            // Em janela larga o texto não se espalha: coluna de no máximo 760 px.
+            width: min(root.visible-width, 800px);
+            padding: 20px;
+            spacing: 10px;
+            alignment: start;
+            Text { text: @tr("Configurações"); font-size: Tema.fonte-titulo; font-weight: 700; color: Tema.texto; }
 
-        Text { text: @tr("Este computador"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
-        Cartao {
-            VerticalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                OpcaoConfig {
-                    titulo: @tr("Aceitar conexões");
-                    descricao: @tr("Outros dispositivos da sua tailnet podem pedir acesso a este computador. Nada acontece sem você permitir.");
-                    ligado <=> root.aceitando;
-                    mudou(v) => { root.aceitando-mudou(v); }
-                }
-                Separador { }
-                LinhaInfo {
-                    rotulo: @tr("Ao fechar a janela");
-                    valor: root.bandeja ? @tr("O TailDesk continua na bandeja do sistema. Para sair, use Sair no menu do ícone.") : @tr("O sistema não tem bandeja: fechar a janela encerra o TailDesk.");
-                }
-            }
-        }
-
-        Text { text: @tr("Rede"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
-        Cartao {
-            VerticalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                LinhaInfo { rotulo: @tr("Tailscale deste computador"); valor: root.tailscale; }
-                Separador { }
-                LinhaInfo {
-                    rotulo: @tr("Conta, login e saída da tailnet");
-                    valor: @tr("Ficam com o próprio Tailscale; o TailDesk não muda nada nele.");
-                    acao: @tr("Painel do Tailscale");
-                    acionar => { root.abrir-link("https://login.tailscale.com/admin/machines"); }
-                }
-            }
-        }
-
-        Text { text: @tr("Atualizações"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
-        CartaoAtualizacoes {
-            info: root.atualizacao;
-            automatica <=> root.atualizar-auto;
-            pre <=> root.canal-pre;
-            automatica-mudou(v) => { root.atualizar-auto-mudou(v); }
-            pre-mudou(v) => { root.canal-pre-mudou(v); }
-            procurar => { root.procurar-atualizacao(); }
-            atualizar => { root.atualizar-agora(); }
-            reiniciar => { root.reiniciar-app(); }
-            abrir-link(u) => { root.abrir-link(u); }
-        }
-
-        // Atribuição exigida pela licença royalty-free do Slint para apps desktop.
-        Text { text: @tr("Sobre"); font-weight: 700; color: Tema.texto-2; font-size: Tema.fonte-pequena; }
-        Cartao {
-            VerticalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                LinhaInfo {
-                    rotulo: @tr("TailDesk {}", root.versao-app);
-                    valor: @tr("Código aberto, MIT OR Apache-2.0");
-                    acao: @tr("Abrir no GitHub");
-                    acionar => { root.abrir-link("https://github.com/yurisanp/taildesk"); }
+            TituloGrupo { text: @tr("Este computador"); }
+            Cartao {
+                VerticalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    OpcaoConfig {
+                        titulo: @tr("Aceitar conexões");
+                        descricao: @tr("Outros dispositivos da sua tailnet podem pedir acesso a este computador. Nada acontece sem você permitir.");
+                        ligado <=> root.aceitando;
+                        mudou(v) => { root.aceitando-mudou(v); }
+                    }
+                    Separador { }
+                    OpcaoConfig {
+                        titulo: @tr("Pedir minha permissão a cada conexão");
+                        descricao: @tr("Desligado, os dispositivos confiáveis abaixo entram sem perguntar. O aviso de sessão ativa aparece sempre.");
+                        ligado <=> root.pedir-sempre;
+                        mudou(v) => { root.pedir-sempre-mudou(v); }
+                    }
+                    Separador { }
+                    VerticalLayout {
+                        padding-top: 8px;
+                        padding-bottom: 8px;
+                        spacing: 2px;
+                        Text { text: @tr("Dispositivos confiáveis"); font-size: Tema.fonte-pequena; color: Tema.texto-2; }
+                        if root.confiaveis.length == 0: Text {
+                            text: @tr("Nenhum. Marque “Lembrar deste dispositivo” no pedido de acesso para não precisar aceitar de novo.");
+                            font-size: Tema.fonte;
+                            color: Tema.texto;
+                            wrap: word-wrap;
+                        }
+                        for nome[i] in root.confiaveis: LinhaConfiavel {
+                            nome: nome;
+                            revogar => { root.revogar(i); }
+                        }
+                    }
+                    Separador { }
+                    LinhaInfo {
+                        rotulo: @tr("Pasta de entrada");
+                        valor: root.pasta-entrada != "" ? root.pasta-entrada : @tr("Pasta de downloads não encontrada");
+                        acao: root.pasta-entrada != "" ? @tr("Abrir") : "";
+                        acionar => { root.abrir-pasta-entrada(); }
+                    }
+                    Separador { }
+                    LinhaInfo {
+                        rotulo: @tr("Ao fechar a janela");
+                        valor: root.bandeja ? @tr("O TailDesk continua na bandeja do sistema. Para sair, use Sair no menu do ícone.") : @tr("O sistema não tem bandeja: fechar a janela encerra o TailDesk.");
+                    }
                 }
             }
+
+            TituloGrupo { text: @tr("Sessão"); }
+            Cartao {
+                VerticalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    OpcaoLista {
+                        titulo: @tr("Codec de vídeo");
+                        descricao: @tr("Automático usa o melhor que as duas máquinas têm em hardware. Se o escolhido faltar de um lado, a sessão volta ao automático.");
+                        opcoes: root.codecs;
+                        escolhida <=> root.codec;
+                        mudou(i) => { root.codec-mudou(i); }
+                    }
+                    Separador { }
+                    OpcaoLista {
+                        titulo: @tr("Taxa de bits");
+                        descricao: @tr("Automática ajusta ao tamanho da tela e à rede. Uma taxa fixa alta pede uma rede rápida.");
+                        opcoes: root.taxas;
+                        escolhida <=> root.taxa;
+                        mudou(i) => { root.taxa-mudou(i); }
+                    }
+                    Separador { }
+                    VerticalLayout {
+                        padding-top: 8px;
+                        padding-bottom: 8px;
+                        spacing: 2px;
+                        Text { text: @tr("Vídeo deste computador"); font-size: Tema.fonte-pequena; color: Tema.texto-2; }
+                        Text { text: root.video-local; font-size: Tema.fonte; color: Tema.texto; wrap: word-wrap; }
+                    }
+                    Separador { }
+                    LinhaInfo {
+                        rotulo: @tr("Teclado");
+                        valor: root.teclado-local != "" ? @tr("Automático: traduz quando os layouts são diferentes (este computador: {})", root.teclado-local) : @tr("Automático: traduz quando os layouts são diferentes");
+                    }
+                }
+            }
+
+            TituloGrupo { text: @tr("Rede"); }
+            Cartao {
+                VerticalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    LinhaInfo { rotulo: @tr("Tailscale deste computador"); valor: root.tailscale; }
+                    Separador { }
+                    LinhaInfo {
+                        rotulo: @tr("Conta, login e saída da tailnet");
+                        valor: @tr("Ficam com o próprio Tailscale; o TailDesk não muda nada nele.");
+                        acao: @tr("Painel do Tailscale");
+                        acionar => { root.abrir-link("https://login.tailscale.com/admin/machines"); }
+                    }
+                }
+            }
+
+            TituloGrupo { text: @tr("Atualizações"); }
+            CartaoAtualizacoes {
+                info: root.atualizacao;
+                automatica <=> root.atualizar-auto;
+                pre <=> root.canal-pre;
+                automatica-mudou(v) => { root.atualizar-auto-mudou(v); }
+                pre-mudou(v) => { root.canal-pre-mudou(v); }
+                procurar => { root.procurar-atualizacao(); }
+                atualizar => { root.atualizar-agora(); }
+                reiniciar => { root.reiniciar-app(); }
+                abrir-link(u) => { root.abrir-link(u); }
+            }
+
+            // Atribuição exigida pela licença royalty-free do Slint para apps desktop.
+            TituloGrupo { text: @tr("Sobre"); }
+            Cartao {
+                VerticalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    LinhaInfo {
+                        rotulo: @tr("TailDesk {}", root.versao-app);
+                        valor: @tr("Código aberto, MIT OR Apache-2.0");
+                        acao: @tr("Abrir no GitHub");
+                        acionar => { root.abrir-link("https://github.com/yurisanp/taildesk"); }
+                    }
+                }
+            }
+            AboutSlint { }
         }
-        AboutSlint { }
     }
 }
 
@@ -411,6 +544,15 @@ export component JanelaPrincipal inherits Window {
     in-out property <int> secao: 0;
     in property <string> este-pc;
     in-out property <bool> aceitando: true;
+    in-out property <bool> pedir-sempre: true;
+    in property <[string]> confiaveis;
+    in property <string> pasta-entrada;
+    in property <[string]> codecs-config: [@tr("Automático"), "H.264", "HEVC", "AV1", "PyroWave"];
+    in-out property <int> codec-config: 0;
+    in property <[string]> taxas-config;
+    in-out property <int> taxa-config: 0;
+    in property <string> video-local: @tr("Verificando…");
+    in property <string> teclado-local;
     in-out property <string> toast;
     in property <EstadoTailscale> tailscale: EstadoTailscale.verificando;
     in property <string> tailscale-resumo;
@@ -429,6 +571,11 @@ export component JanelaPrincipal inherits Window {
     callback abrir-link(string);
     callback verificar();
     callback aceitando-mudou(bool);
+    callback pedir-sempre-mudou(bool);
+    callback revogar(int);
+    callback abrir-pasta-entrada();
+    callback codec-config-mudou(int);
+    callback taxa-config-mudou(int);
     callback atualizar-auto-mudou(bool);
     callback canal-pre-mudou(bool);
     callback procurar-atualizacao();
@@ -520,6 +667,20 @@ export component JanelaPrincipal inherits Window {
             if root.secao == 1: SecaoConfiguracoes {
                 vertical-stretch: 1;
                 aceitando <=> root.aceitando;
+                pedir-sempre <=> root.pedir-sempre;
+                confiaveis: root.confiaveis;
+                pasta-entrada: root.pasta-entrada;
+                codecs: root.codecs-config;
+                codec <=> root.codec-config;
+                taxas: root.taxas-config;
+                taxa <=> root.taxa-config;
+                video-local: root.video-local;
+                teclado-local: root.teclado-local;
+                pedir-sempre-mudou(v) => { root.pedir-sempre-mudou(v); }
+                revogar(i) => { root.revogar(i); }
+                abrir-pasta-entrada => { root.abrir-pasta-entrada(); }
+                codec-mudou(i) => { root.codec-config-mudou(i); }
+                taxa-mudou(i) => { root.taxa-config-mudou(i); }
                 tailscale: root.tailscale-resumo;
                 versao-app: root.versao-app;
                 bandeja: root.bandeja;

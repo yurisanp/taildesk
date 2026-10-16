@@ -54,6 +54,8 @@ pub mod limits {
     pub const COORD_MAX: u32 = u16::MAX as u32;
     /// Canais de áudio.
     pub const AUDIO_CHANNELS: u32 = 2;
+    /// Taxa fixa de vídeo pedida em `QualityPrefs` (1 Gbit/s).
+    pub const VIDEO_KBPS: u32 = 1_000_000;
     /// Texto de um `KeyChar`, em bytes (uma tecla, ou a string de um IME).
     pub const KEY_TEXT_LEN: usize = 256;
     /// Teclas físicas extras em `KeyboardInfo.extra_hid`.
@@ -75,7 +77,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 100, 101, 102, 103, 104"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 100, 101, 102, 103, 104"
     )]
     pub msg: Option<Msg>,
 }
@@ -120,6 +122,8 @@ pub enum Msg {
     Nack(Nack),
     #[prost(message, tag = "29")]
     VideoStats(VideoStats),
+    #[prost(message, tag = "30")]
+    SetVideoQuality(SetVideoQuality),
 
     // Mouse
     #[prost(message, tag = "40")]
@@ -397,6 +401,13 @@ pub struct QualityPrefs {
     pub mode: i32,
     #[prost(bool, tag = "3")]
     pub chroma444: bool,
+    /// Codec escolhido pelo usuário; `Unspecified` = automático. O host só atende se o
+    /// controlador decodifica (`Hello.decode_caps`) e ele tem encoder; senão fica no automático.
+    #[prost(enumeration = "Codec", tag = "4")]
+    pub codec: i32,
+    /// Taxa fixa; `0` = automática (o host ajusta pelo tamanho da imagem e pela rede).
+    #[prost(uint32, tag = "5")]
+    pub bitrate_kbps: u32,
 }
 
 /// C→H: começa o vídeo de um monitor. Vários podem estar ativos; trocar de monitor é
@@ -409,6 +420,17 @@ pub struct StartVideo {
     pub wanted: Option<QualityPrefs>,
     #[prost(enumeration = "Priority", tag = "3")]
     pub priority: i32,
+}
+
+/// C→H: troca codec ou taxa de um monitor que já está saindo (seletor da janela da sessão).
+/// Codec novo = encoder novo e outro `CodecSelected` (com outro `stream_id`); só a taxa =
+/// ajuste a quente, sem `CodecSelected`.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct SetVideoQuality {
+    #[prost(uint32, tag = "1")]
+    pub display_id: u32,
+    #[prost(message, optional, tag = "2")]
+    pub wanted: Option<QualityPrefs>,
 }
 
 /// Espaço de cor em códigos da ITU-T H.273.
@@ -487,6 +509,10 @@ pub struct VideoStats {
     pub width: u32,
     #[prost(uint32, tag = "12")]
     pub height: u32,
+    /// Banda que o QUIC do host estima para este caminho (janela de congestionamento ÷ RTT),
+    /// em kbit/s; `0` = sem estimativa. Com o vídeo limitando o envio, fica perto do que sai.
+    #[prost(uint32, tag = "13")]
+    pub est_kbps: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Message)]
@@ -1206,6 +1232,15 @@ fn keyboard(k: Option<&KeyboardInfo>) -> Result<(), InvalidMessage> {
     Ok(())
 }
 
+fn quality_prefs(p: Option<&QualityPrefs>) -> Result<(), InvalidMessage> {
+    let Some(p) = p else { return Ok(()) };
+    at_most(
+        "bitrate_kbps",
+        p.bitrate_kbps as usize,
+        limits::VIDEO_KBPS as usize,
+    )
+}
+
 fn audio_prefs(p: Option<&AudioPrefs>) -> Result<(), InvalidMessage> {
     match p {
         Some(p) => at_most(
@@ -1318,10 +1353,13 @@ impl Control {
             Msg::AudioConfig(AudioConfig { stream_id, .. })
             | Msg::StopAudio(StopAudio { stream_id })
             | Msg::AudioStopped(AudioStopped { stream_id, .. }) => audio_stream(*stream_id),
+            Msg::StartVideo(StartVideo { wanted, .. })
+            | Msg::SetVideoQuality(SetVideoQuality { wanted, .. }) => {
+                quality_prefs(wanted.as_ref())
+            }
             Msg::ConsentResult(_)
             | Msg::Ping(_)
             | Msg::Pong(_)
-            | Msg::StartVideo(_)
             | Msg::StopVideo(_)
             | Msg::SetPriority(_)
             | Msg::VideoStopped(_)
@@ -1555,8 +1593,18 @@ mod tests {
                     fps_max: 30,
                     mode: QualityMode::Text.into(),
                     chroma444: false,
+                    codec: Codec::Hevc.into(),
+                    bitrate_kbps: 0,
                 }),
                 priority: Priority::Focused.into(),
+            }),
+            Msg::SetVideoQuality(SetVideoQuality {
+                display_id: 1,
+                wanted: Some(QualityPrefs {
+                    codec: Codec::PyroWave.into(),
+                    bitrate_kbps: 20_000,
+                    ..QualityPrefs::default()
+                }),
             }),
             Msg::VideoStats(VideoStats {
                 display_id: 1,
@@ -1571,6 +1619,7 @@ mod tests {
                 loss_ppm: 1500,
                 width: 2560,
                 height: 1600,
+                est_kbps: 48_000,
             }),
             Msg::CodecSelected(CodecSelected {
                 display_id: 1,
@@ -1805,6 +1854,34 @@ mod tests {
         assert!(
             Control::from(Msg::DisplaysChanged(DisplaysChanged {
                 displays: dezesseis
+            }))
+            .validate()
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn taxa_fixa_tem_teto() {
+        let prefs = |kbps| {
+            Some(QualityPrefs {
+                bitrate_kbps: kbps,
+                ..QualityPrefs::default()
+            })
+        };
+        let e = invalida(Msg::SetVideoQuality(SetVideoQuality {
+            display_id: 0,
+            wanted: prefs(limits::VIDEO_KBPS + 1),
+        }));
+        assert_eq!(e.field, "bitrate_kbps");
+        let e = invalida(Msg::StartVideo(StartVideo {
+            wanted: prefs(u32::MAX),
+            ..StartVideo::default()
+        }));
+        assert_eq!(e.field, "bitrate_kbps");
+        assert!(
+            Control::from(Msg::SetVideoQuality(SetVideoQuality {
+                display_id: 0,
+                wanted: prefs(limits::VIDEO_KBPS),
             }))
             .validate()
             .is_ok()

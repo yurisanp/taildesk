@@ -8,15 +8,15 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
-use taildesk_codec::{CodecVideo, ConfigEncoder, OrdemRgb, QuadroRgb};
+use taildesk_codec::{CodecVideo, ConfigEncoder, Opcao, OrdemRgb, QuadroRgb};
 use taildesk_media::video::{ConfigEnvio, EnvioVideo};
 use taildesk_platform::captura::{FormaCursor, FormatoPixel, Quadro};
 use taildesk_proto::control::{
-    Codec, CodecSelected, ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg, StartVideo,
-    VideoStats, VideoStopReason, VideoStopped,
+    Codec, CodecCap, CodecSelected, ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg,
+    QualityPrefs, SetVideoQuality, StartVideo, VideoStats, VideoStopReason, VideoStopped,
 };
 use taildesk_proto::cursor::{STREAM_MAGIC, ShapeHeader};
 use taildesk_proto::media::AUDIO_STREAM_MIN;
@@ -36,18 +36,77 @@ const INTERVALO_STATS: Duration = Duration::from_secs(1);
 /// Alvo inicial, antes do primeiro quadro dizer o tamanho real da captura.
 const BITRATE_BPS: u32 = 8_000_000;
 
+/// Codecs que o host pode oferecer, do melhor para o pior (o `HelloAck.encode_caps`).
+const CODECS: [CodecVideo; 4] = [
+    CodecVideo::Av1,
+    CodecVideo::Hevc,
+    CodecVideo::H264,
+    CodecVideo::PyroWave,
+];
+
+/// Codec do protocolo que o TailDesk sabe codificar.
+fn codec_video(c: i32) -> Option<CodecVideo> {
+    match Codec::try_from(c).ok()? {
+        Codec::H264 => Some(CodecVideo::H264),
+        Codec::Hevc => Some(CodecVideo::Hevc),
+        Codec::Av1 => Some(CodecVideo::Av1),
+        Codec::PyroWave => Some(CodecVideo::PyroWave),
+        _ => None,
+    }
+}
+
 /// Codecs do `Hello.decode_caps` que o TailDesk sabe codificar (vazio = controlador antigo, só
 /// H.264).
-fn codecs_aceitos(caps: &[taildesk_proto::control::CodecCap]) -> Vec<CodecVideo> {
-    caps.iter()
-        .filter_map(|c| match Codec::try_from(c.codec).ok()? {
-            Codec::H264 => Some(CodecVideo::H264),
-            Codec::Hevc => Some(CodecVideo::Hevc),
-            Codec::Av1 => Some(CodecVideo::Av1),
-            Codec::PyroWave => Some(CodecVideo::PyroWave),
-            _ => None,
-        })
-        .collect()
+fn codecs_aceitos(caps: &[CodecCap]) -> Vec<CodecVideo> {
+    caps.iter().filter_map(|c| codec_video(c.codec)).collect()
+}
+
+/// Codecs com encoder nesta máquina, para o `HelloAck` (a lista sai uma vez por execução: listar
+/// as GPUs custa alguns milissegundos). [`preparar_encode_caps`] adianta isso no início.
+pub fn encode_caps() -> Vec<CodecCap> {
+    static CAPS: OnceLock<Vec<CodecCap>> = OnceLock::new();
+    CAPS.get_or_init(|| {
+        CODECS
+            .into_iter()
+            .filter_map(|c| {
+                let opcoes = taildesk_codec::opcoes_encoder(c);
+                let primeira = opcoes.first()?;
+                Some(CodecCap {
+                    codec: codec_proto(c).into(),
+                    hw: primeira.hardware(),
+                    ..CodecCap::default()
+                })
+            })
+            .collect()
+    })
+    .clone()
+}
+
+/// Calcula [`encode_caps`] fora da thread da rede, antes da primeira sessão.
+pub async fn preparar_encode_caps() {
+    let _ = tokio::task::spawn_blocking(encode_caps).await;
+}
+
+/// Encoders a tentar, em ordem: os do codec que o usuário escolheu (se o controlador decodifica)
+/// e depois os do automático, como reserva se nenhum do escolhido abrir.
+fn candidatos(aceitos: &[CodecVideo], pedido: Option<CodecVideo>) -> Vec<Opcao> {
+    let mut lista = match pedido {
+        Some(c) if aceitos.contains(&c) || c == CodecVideo::H264 => {
+            taildesk_codec::opcoes_encoder(c)
+        }
+        _ => Vec::new(),
+    };
+    for o in taildesk_codec::candidatos_encoder(aceitos) {
+        if !lista.contains(&o) {
+            lista.push(o);
+        }
+    }
+    lista
+}
+
+/// Taxa pedida pelo controlador (`QualityPrefs.bitrate_kbps`), em bit/s; `None` = automática.
+fn taxa_pedida(p: &QualityPrefs) -> Option<u32> {
+    (p.bitrate_kbps > 0).then(|| p.bitrate_kbps.saturating_mul(1000))
 }
 
 fn codec_proto(c: CodecVideo) -> Codec {
@@ -94,7 +153,10 @@ struct Fluxo {
     envio: EnvioVideo,
     encoder: &'static str,
     gpu: String,
+    codec: CodecVideo,
     bitrate_bps: u32,
+    /// Taxa escolhida pelo usuário: o ajuste pelo tamanho da imagem não mexe nela.
+    taxa_fixa: bool,
     fps: f32,
     anterior: (Instant, Amostra),
 }
@@ -119,7 +181,7 @@ impl Fluxo {
         let quadros = a.quadros - b.quadros;
         // O tamanho físico só se sabe pela captura (no Wayland com escala, maior que o lógico).
         let (largura, altura) = self.envio.estatisticas().tamanho();
-        if largura > 0 {
+        if largura > 0 && !self.taxa_fixa {
             let alvo = taxa_para(largura, altura, self.fps);
             if alvo.abs_diff(self.bitrate_bps) > self.bitrate_bps / 10 {
                 self.envio.ajustar_bitrate(alvo);
@@ -143,6 +205,7 @@ impl Fluxo {
             loss_ppm: 0,
             width: largura,
             height: altura,
+            est_kbps: 0,
         }
     }
 }
@@ -313,11 +376,13 @@ async fn stats(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
             .checked_div(enviados)
             .unwrap_or(0)
             .min(1_000_000) as u32;
+        let est_kbps = estimar_kbps(canal.conn.stats().path.cwnd, canal.conn.rtt());
         let msgs: Vec<VideoStats> = compartilhado
             .fluxos()
             .iter_mut()
             .map(|(&id, f)| VideoStats {
                 loss_ppm,
+                est_kbps,
                 ..f.stats(id)
             })
             .collect();
@@ -326,6 +391,12 @@ async fn stats(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
             canal.tentar_enviar(Msg::VideoStats(m));
         }
     }
+}
+
+/// Banda que a janela de congestionamento permite (bytes por RTT), em kbit/s.
+fn estimar_kbps(cwnd: u64, rtt: Duration) -> u32 {
+    let us = rtt.as_micros().max(100) as u64;
+    (cwnd.saturating_mul(8_000) / us).min(u64::from(u32::MAX)) as u32
 }
 
 /// Captura de todos os monitores, com pausa por monitor.
@@ -376,6 +447,8 @@ pub struct MidiaApp {
     captura: Option<Captura>,
     stream_id: HashMap<u32, u8>,
     proximo_stream: u8,
+    /// Codec e taxa pedidos para cada monitor (`StartVideo.wanted` e `SetVideoQuality`).
+    pedidos: HashMap<u32, QualityPrefs>,
     tarefa_cursor: tokio::task::JoinHandle<()>,
     tarefa_stats: tokio::task::JoinHandle<()>,
 }
@@ -397,6 +470,7 @@ impl MidiaApp {
             captura: None,
             stream_id: HashMap::new(),
             proximo_stream: 0,
+            pedidos: HashMap::new(),
             tarefa_cursor,
             tarefa_stats,
         }
@@ -481,6 +555,7 @@ impl MidiaApp {
 
     async fn iniciar(&mut self, s: &StartVideo) {
         let id = s.display_id;
+        let prefs = s.wanted.unwrap_or_default();
         let Some(m) = self.monitores.iter().find(|m| m.id == id).cloned() else {
             return self
                 .erro(ErrorCode::UnknownDisplay, id, String::new())
@@ -516,18 +591,33 @@ impl MidiaApp {
                 }
             }
         }
-        // O melhor codec que o controlador decodifica, hardware primeiro (NVENC, VA-API) e o
-        // openh264 por último; o probe codifica um quadro.
+        self.pedidos.insert(id, prefs);
+        if self.abrir_fluxo(&m, prefs).await
+            && let Some(c) = &self.captura
+        {
+            c.ativar(id, true);
+        }
+    }
+
+    /// Abre o encoder e o envio de um monitor e manda o `CodecSelected`. `false` = não abriu (o
+    /// controlador já recebeu o `VideoStopped`).
+    async fn abrir_fluxo(&mut self, m: &DisplayInfo, prefs: QualityPrefs) -> bool {
+        let id = m.id;
+        // O codec escolhido, se houver; senão o melhor que o controlador decodifica, hardware
+        // primeiro (NVENC, VA-API) e o openh264 por último. O probe codifica um quadro.
         let aceitos = codecs_aceitos(&self.canal.decode_caps);
+        let pedido = codec_video(prefs.codec);
+        let taxa_fixa = taxa_pedida(&prefs);
+        let bitrate_bps = taxa_fixa.unwrap_or(BITRATE_BPS);
         let encoder = tokio::task::spawn_blocking(move || {
-            for opcao in taildesk_codec::candidatos_encoder(&aceitos) {
+            for opcao in candidatos(&aceitos, pedido) {
                 let fps = if opcao.hardware() {
                     FPS_HARDWARE
                 } else {
                     FPS_SOFTWARE
                 };
                 let config = ConfigEncoder {
-                    bitrate_bps: BITRATE_BPS,
+                    bitrate_bps,
                     fps_max: fps,
                 };
                 match opcao.abrir_encoder(config) {
@@ -571,7 +661,9 @@ impl MidiaApp {
                     envio: e,
                     encoder: nome,
                     gpu,
-                    bitrate_bps: BITRATE_BPS,
+                    codec,
+                    bitrate_bps,
+                    taxa_fixa: taxa_fixa.is_some(),
                     fps,
                 };
                 (stream_id, fluxo)
@@ -582,7 +674,8 @@ impl MidiaApp {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("taildesk: encoder: {e}");
-                return self.parou(id, VideoStopReason::EncoderError).await;
+                self.parou(id, VideoStopReason::EncoderError).await;
+                return false;
             }
         };
         self.proximo_stream = (self.proximo_stream + 1) % AUDIO_STREAM_MIN;
@@ -597,7 +690,7 @@ impl MidiaApp {
                 width: m.width,
                 height: m.height,
                 fps_target: fps as u32,
-                bitrate_kbps: BITRATE_BPS / 1000,
+                bitrate_kbps: bitrate_bps / 1000,
                 // BT.709, faixa limitada (o que o openh264 produz).
                 color: Some(ColorInfo {
                     primaries: 1,
@@ -609,8 +702,54 @@ impl MidiaApp {
             .await;
         self.stream_id.insert(id, stream_id);
         self.compartilhado.fluxos().insert(id, fluxo);
-        if let Some(c) = &self.captura {
-            c.ativar(id, true);
+        true
+    }
+
+    /// Seletor da sessão: codec novo reabre o encoder (outro `CodecSelected`); só a taxa muda a
+    /// quente.
+    async fn qualidade(&mut self, q: &SetVideoQuality) {
+        let id = q.display_id;
+        let prefs = q.wanted.unwrap_or_default();
+        let antes = self.pedidos.insert(id, prefs).unwrap_or_default();
+        let Some(m) = self.monitores.iter().find(|m| m.id == id).cloned() else {
+            return;
+        };
+        let Some(atual) = self.compartilhado.fluxos().get(&id).map(|f| f.codec) else {
+            // Ainda não está saindo: vale no próximo `StartVideo`.
+            return;
+        };
+        // Pedir o codec que já está saindo não reabre nada.
+        let reabrir =
+            antes.codec != prefs.codec && codec_video(prefs.codec).is_none_or(|c| c != atual);
+        if reabrir {
+            let envio = self.compartilhado.fluxos().remove(&id).map(|f| f.envio);
+            self.stream_id.remove(&id);
+            if let Some(e) = envio {
+                let _ = tokio::task::spawn_blocking(move || drop(e)).await;
+            }
+            if !self.abrir_fluxo(&m, prefs).await {
+                self.pedidos.remove(&id);
+                if let Some(c) = &self.captura {
+                    c.ativar(id, false);
+                }
+            }
+            return;
+        }
+        if let Some(f) = self.compartilhado.fluxos().get_mut(&id) {
+            let alvo = match taxa_pedida(&prefs) {
+                Some(bps) => bps,
+                None => {
+                    let (l, a) = f.envio.estatisticas().tamanho();
+                    if l > 0 {
+                        taxa_para(l, a, f.fps)
+                    } else {
+                        BITRATE_BPS
+                    }
+                }
+            };
+            f.taxa_fixa = taxa_pedida(&prefs).is_some();
+            f.envio.ajustar_bitrate(alvo);
+            f.bitrate_bps = alvo;
         }
     }
 
@@ -621,6 +760,7 @@ impl MidiaApp {
             .remove(&display_id)
             .map(|f| f.envio);
         self.stream_id.remove(&display_id);
+        self.pedidos.remove(&display_id);
         if let Some(c) = &self.captura {
             c.ativar(display_id, false);
         }
@@ -649,6 +789,7 @@ impl Midia for MidiaApp {
         match msg {
             Msg::StartVideo(s) => self.iniciar(s).await,
             Msg::StopVideo(s) => self.parar(s.display_id).await,
+            Msg::SetVideoQuality(q) => self.qualidade(q).await,
             Msg::RequestKeyframe(r) => self.pedir_chave(r.display_id),
             Msg::PictureLoss(p) => self.pedir_chave(p.display_id),
             // Um stream por vez no controlador por enquanto: prioridade não muda nada.
@@ -872,6 +1013,124 @@ mod tests {
         assert!(midia.captura.is_none());
         drop(midia);
         leitor.abort();
+    }
+
+    /// Seletor da sessão: taxa fixa no `StartVideo`, volta ao automático a quente e troca de
+    /// codec reabre o encoder com outro `CodecSelected` (aqui cai no H.264, o que o
+    /// controlador decodifica).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn seletor_de_codec_e_taxa() {
+        let id = Identity::generate().unwrap();
+        let server = server_endpoint((Ipv4Addr::LOCALHOST, 0).into(), &id).unwrap();
+        let addr = server.local_addr().unwrap();
+        let aceitar = tokio::spawn(async move { server.accept().await.unwrap().await.unwrap() });
+        let client = client_endpoint(addr).unwrap();
+        let _controlador = connect(&client, addr, Pin::Sha256(id.fingerprint()))
+            .await
+            .unwrap();
+        let host = aceitar.await.unwrap();
+        let (saida, mut rx) = mpsc::channel(1024);
+        let monitor = DisplayInfo {
+            id: 1,
+            width: 160,
+            height: 96,
+            shared: true,
+            ..DisplayInfo::default()
+        };
+        let mut midia = MidiaApp::new(
+            CanalMidia {
+                conn: host,
+                saida,
+                decode_caps: Vec::new(),
+            },
+            Fonte::Sintetica,
+            vec![monitor],
+        );
+        let prefs = |codec: Codec, kbps| {
+            Some(QualityPrefs {
+                codec: codec.into(),
+                bitrate_kbps: kbps,
+                ..QualityPrefs::default()
+            })
+        };
+        midia
+            .mensagem(&Msg::StartVideo(StartVideo {
+                display_id: 1,
+                wanted: prefs(Codec::Unspecified, 5_000),
+                ..StartVideo::default()
+            }))
+            .await;
+        let Msg::CodecSelected(c) = proxima(&mut rx, |m| matches!(m, Msg::CodecSelected(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(c.bitrate_kbps, 5_000);
+        // Taxa fixa: o ajuste pelo tamanho (160x96 dá o piso de 4 Mbit/s) não mexe nela.
+        let Msg::VideoStats(st) = proxima(&mut rx, |m| matches!(m, Msg::VideoStats(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(st.target_kbps, 5_000);
+
+        // De volta ao automático, sem reabrir nada.
+        midia
+            .mensagem(&Msg::SetVideoQuality(SetVideoQuality {
+                display_id: 1,
+                wanted: prefs(Codec::Unspecified, 0),
+            }))
+            .await;
+        // Uma amostra de antes da troca ainda pode estar na fila.
+        let mut alvo = 0;
+        for _ in 0..3 {
+            let Msg::VideoStats(st) = proxima(&mut rx, |m| {
+                matches!(m, Msg::VideoStats(_) | Msg::CodecSelected(_))
+            })
+            .await
+            else {
+                panic!("taxa nova não pode reabrir o encoder");
+            };
+            alvo = st.target_kbps;
+            if alvo != 5_000 {
+                break;
+            }
+        }
+        assert_eq!(alvo, 4_000);
+
+        // Codec novo: encoder novo e outro stream. O controlador só decodifica H.264.
+        midia
+            .mensagem(&Msg::SetVideoQuality(SetVideoQuality {
+                display_id: 1,
+                wanted: prefs(Codec::Hevc, 0),
+            }))
+            .await;
+        let Msg::CodecSelected(n) = proxima(&mut rx, |m| {
+            matches!(m, Msg::CodecSelected(_) | Msg::VideoStopped(_))
+        })
+        .await
+        else {
+            panic!("trocar de codec não pode parar o vídeo");
+        };
+        assert_eq!(n.codec(), Codec::H264);
+        assert_ne!(n.stream_id, c.stream_id);
+        assert!(midia.captura.is_some());
+        drop(midia);
+    }
+
+    #[test]
+    fn banda_pela_janela_de_congestionamento() {
+        // 125 kB por 10 ms = 100 Mbit/s.
+        assert_eq!(estimar_kbps(125_000, Duration::from_millis(10)), 100_000);
+        assert_eq!(estimar_kbps(0, Duration::from_millis(10)), 0);
+        assert!(estimar_kbps(u64::MAX, Duration::ZERO) == u32::MAX);
+    }
+
+    #[test]
+    fn candidatos_poem_o_codec_pedido_na_frente() {
+        // Sem decoder do outro lado, o pedido é ignorado e fica o automático (H.264).
+        let auto = candidatos(&[], None);
+        assert_eq!(candidatos(&[], Some(CodecVideo::Hevc)), auto);
+        assert!(auto.iter().all(|o| o.codec == CodecVideo::H264));
+        assert_eq!(auto.last().map(|o| o.backend), Some("openh264"));
     }
 
     #[test]

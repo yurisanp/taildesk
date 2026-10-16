@@ -98,6 +98,9 @@ pub struct Descricao {
     pub plataforma: Platform,
     pub monitores: Vec<DisplayInfo>,
     pub teclado: KeyboardInfo,
+    /// Codecs que este host codifica (`HelloAck.encode_caps`; o seletor do controlador só
+    /// oferece os que os dois lados têm).
+    pub encode_caps: Vec<taildesk_proto::control::CodecCap>,
     /// Layout ativo, para traduzir o que o controlador digita.
     pub keymap: Keymap,
 }
@@ -267,7 +270,7 @@ async fn atender<I: Identificador, M: Maquina>(
         host_name: descricao.nome.clone(),
         platform: Some(descricao.plataforma.clone()),
         displays: descricao.monitores.clone(),
-        encode_caps: Vec::new(),
+        encode_caps: descricao.encode_caps.clone(),
         permissions: Some(campos.permissions),
         consent: campos.consent.into(),
         clock_ns: super::relogio_ns(),
@@ -537,6 +540,7 @@ async fn ao_vivo<M: Maquina>(
                     Msg::StartVideo(_)
                     | Msg::StopVideo(_)
                     | Msg::SetPriority(_)
+                    | Msg::SetVideoQuality(_)
                     | Msg::RequestKeyframe(_)
                     | Msg::PictureLoss(_) => midia.mensagem(&msg).await,
                     // O layout e o modo escolhidos valem no controlador, que traduz.

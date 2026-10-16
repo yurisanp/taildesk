@@ -11,6 +11,7 @@ use taildesk_overlay::{PathInfo, PathKind};
 use taildesk_proto::control::{Codec, CodecSelected, VideoStats};
 use taildesk_ui::LinhaDiag;
 
+use super::qualidade::{Medida, Variacao};
 use crate::video::Contadores;
 
 /// O que a task da sessão mede na conexão.
@@ -51,6 +52,11 @@ pub struct Diagnostico {
     video: Option<CodecSelected>,
     rede: Rede,
     perdidos: u64,
+    /// Quadros perdidos em cada um dos últimos segundos (para o indicador de qualidade).
+    perdidos_recentes: std::collections::VecDeque<u64>,
+    variacao: Variacao,
+    /// O que a última chamada de [`Diagnostico::linhas`] mediu.
+    medida: Medida,
 }
 
 impl Default for Diagnostico {
@@ -61,6 +67,9 @@ impl Default for Diagnostico {
             video: None,
             rede: Rede::default(),
             perdidos: 0,
+            perdidos_recentes: Default::default(),
+            variacao: Variacao::default(),
+            medida: Medida::default(),
         }
     }
 }
@@ -123,6 +132,20 @@ impl Diagnostico {
         self.rede = r;
     }
 
+    /// Último `VideoStats` do monitor mostrado.
+    pub fn stats_host(&self) -> Option<&VideoStats> {
+        self.host.as_ref()
+    }
+
+    pub fn codec_selecionado(&self) -> Option<&CodecSelected> {
+        self.video.as_ref()
+    }
+
+    /// Números da conexão medidos na última chamada de [`Diagnostico::linhas`].
+    pub fn medida(&self) -> &Medida {
+        &self.medida
+    }
+
     /// Linhas do painel com o que mudou desde a última chamada.
     pub fn linhas(&mut self, c: &Contadores) -> Vec<LinhaDiag> {
         let (agora, a) = (Instant::now(), Amostra::ler(c));
@@ -131,6 +154,11 @@ impl Diagnostico {
         let decodificados = a.decodificados - b.decodificados;
         let decode_us = (a.decode_us - b.decode_us) as f64 / decodificados.max(1) as f64;
         self.perdidos += a.pedidos_chave - b.pedidos_chave;
+        if self.perdidos_recentes.len() == 5 {
+            self.perdidos_recentes.pop_front();
+        }
+        self.perdidos_recentes
+            .push_back(a.pedidos_chave - b.pedidos_chave);
         let (decoder, gpu_dec) = c.decoder();
 
         let mut l = vec![titulo("Vídeo")];
@@ -190,6 +218,21 @@ impl Diagnostico {
             },
         ));
         let mbps = (a.bytes - b.bytes) as f64 * 8.0 / 1e6 / s;
+        self.medida = Medida {
+            rtt: self.rede.rtt,
+            variacao: self.variacao.medir(self.rede.rtt),
+            perda_ppm: self.host.as_ref().map_or(0, |h| h.loss_ppm),
+            banda_kbps: self.host.as_ref().map_or(0, |h| h.est_kbps),
+            video_kbps: (mbps * 1000.0) as u32,
+            rota: self.rede.rota.clone(),
+            quadros_perdidos: self.perdidos_recentes.iter().sum(),
+            fps_enviados: self
+                .host
+                .as_ref()
+                .map_or(0.0, |h| f64::from(h.fps_x100) / 100.0),
+            fps_exibidos: exibidos,
+            com_host: self.host.is_some(),
+        };
         l.push(linha(
             "Taxa",
             match &self.host {
