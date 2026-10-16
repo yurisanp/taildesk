@@ -1,4 +1,5 @@
-//! BGRx/RGBx → I420 (BT.709, faixa limitada), o formato que o openh264 recebe.
+//! BGRx/RGBx → I420 (o formato que o openh264 recebe) ou NV12 (VA-API), em BT.709 de faixa
+//! limitada.
 //!
 //! Inteiros de 8 bits de fração; cada bloco 2×2 dá 4 Y e um par U/V da média dos 4 pixels.
 //! Largura e altura ímpares perdem a última coluna/linha (o H.264 4:2:0 pede tamanhos pares).
@@ -53,27 +54,88 @@ impl I420 {
                 .zip(y0.chunks_exact_mut(2).zip(y1.chunks_exact_mut(2)))
                 .zip(us.iter_mut().zip(vs.iter_mut()));
             for (((a, b), (ya, yb)), (u, v)) in pares {
-                let px = |p: &[u8], i: usize| {
-                    (
-                        i32::from(p[i * 4 + R]),
-                        i32::from(p[i * 4 + G]),
-                        i32::from(p[i * 4 + B]),
-                    )
-                };
-                let (p0, p1, p2, p3) = (px(a, 0), px(a, 1), px(b, 0), px(b, 1));
-                ya[0] = luma(p0.0, p0.1, p0.2);
-                ya[1] = luma(p1.0, p1.1, p1.2);
-                yb[0] = luma(p2.0, p2.1, p2.2);
-                yb[1] = luma(p3.0, p3.1, p3.2);
-                let media = |s: i32| (s + 2) >> 2;
-                (*u, *v) = croma(
-                    media(p0.0 + p1.0 + p2.0 + p3.0),
-                    media(p0.1 + p1.1 + p2.1 + p3.1),
-                    media(p0.2 + p1.2 + p2.2 + p3.2),
-                );
+                (*u, *v) = bloco::<R, G, B>(a, b, ya, yb);
             }
         }
     }
+}
+
+/// Converte `q` para NV12 em memória de outro dono (uma superfície mapeada): `y` com
+/// `altura` linhas de `passo_y` bytes e `uv` com `altura / 2` linhas de `passo_uv`. Largura e
+/// altura ímpares perdem a última coluna/linha. `false` se os buffers não cabem.
+pub fn para_nv12(
+    q: &QuadroRgb<'_>,
+    y: &mut [u8],
+    passo_y: usize,
+    uv: &mut [u8],
+    passo_uv: usize,
+) -> bool {
+    let (l, a) = ((q.largura & !1) as usize, (q.altura & !1) as usize);
+    if !q.valido()
+        || passo_y < l
+        || passo_uv < l
+        || y.len() < (a - 1) * passo_y + l
+        || uv.len() < (a / 2 - 1) * passo_uv + l
+    {
+        return false;
+    }
+    match q.ordem {
+        OrdemRgb::Bgrx => nv12_em::<2, 1, 0>(q, l, a, y, passo_y, uv, passo_uv),
+        OrdemRgb::Rgbx => nv12_em::<0, 1, 2>(q, l, a, y, passo_y, uv, passo_uv),
+    }
+    true
+}
+
+fn nv12_em<const R: usize, const G: usize, const B: usize>(
+    q: &QuadroRgb<'_>,
+    l: usize,
+    a: usize,
+    y: &mut [u8],
+    passo_y: usize,
+    uv: &mut [u8],
+    passo_uv: usize,
+) {
+    for by in 0..a / 2 {
+        let l0 = &q.dados[2 * by * q.stride..][..l * 4];
+        let l1 = &q.dados[(2 * by + 1) * q.stride..][..l * 4];
+        let (y0, y1) = y[2 * by * passo_y..].split_at_mut(passo_y);
+        let pares = l0
+            .chunks_exact(8)
+            .zip(l1.chunks_exact(8))
+            .zip(y0[..l].chunks_exact_mut(2).zip(y1[..l].chunks_exact_mut(2)))
+            .zip(uv[by * passo_uv..][..l].chunks_exact_mut(2));
+        for (((a, b), (ya, yb)), c) in pares {
+            (c[0], c[1]) = bloco::<R, G, B>(a, b, ya, yb);
+        }
+    }
+}
+
+/// Um bloco 2×2: `a` e `b` são 2 pixels de cada linha; escreve os 4 Y e devolve (U, V).
+#[inline(always)]
+fn bloco<const R: usize, const G: usize, const B: usize>(
+    a: &[u8],
+    b: &[u8],
+    ya: &mut [u8],
+    yb: &mut [u8],
+) -> (u8, u8) {
+    let px = |p: &[u8], i: usize| {
+        (
+            i32::from(p[i * 4 + R]),
+            i32::from(p[i * 4 + G]),
+            i32::from(p[i * 4 + B]),
+        )
+    };
+    let (p0, p1, p2, p3) = (px(a, 0), px(a, 1), px(b, 0), px(b, 1));
+    ya[0] = luma(p0.0, p0.1, p0.2);
+    ya[1] = luma(p1.0, p1.1, p1.2);
+    yb[0] = luma(p2.0, p2.1, p2.2);
+    yb[1] = luma(p3.0, p3.1, p3.2);
+    let media = |s: i32| (s + 2) >> 2;
+    croma(
+        media(p0.0 + p1.0 + p2.0 + p3.0),
+        media(p0.1 + p1.1 + p2.1 + p3.1),
+        media(p0.2 + p1.2 + p2.2 + p3.2),
+    )
 }
 
 fn luma(r: i32, g: i32, b: i32) -> u8 {
@@ -138,6 +200,36 @@ mod tests {
         assert_eq!((i.largura, i.altura, i.y.len(), i.u.len()), (2, 2, 4, 1));
         i.converter(&q);
         assert_eq!((i.y[0], i.u[0], i.v[0]), (63, 102, 240));
+    }
+
+    #[test]
+    fn nv12_igual_ao_i420_com_passos() {
+        let (l, a) = (6u32, 4u32);
+        let dados: Vec<u8> = (0..l * a * 4).map(|i| (i * 37 % 251) as u8).collect();
+        let q = QuadroRgb {
+            largura: l,
+            altura: a,
+            stride: l as usize * 4,
+            ordem: OrdemRgb::Rgbx,
+            dados: &dados,
+        };
+        let mut i = I420::default();
+        i.preparar(l, a);
+        i.converter(&q);
+        let (py, puv) = (8, 10);
+        let mut y = vec![0u8; py * a as usize];
+        let mut uv = vec![0u8; puv * a as usize / 2];
+        assert!(para_nv12(&q, &mut y, py, &mut uv, puv));
+        for row in 0..a as usize {
+            assert_eq!(&y[row * py..row * py + 6], &i.y[row * 6..row * 6 + 6]);
+        }
+        for row in 0..a as usize / 2 {
+            for x in 0..3 {
+                assert_eq!(uv[row * puv + 2 * x], i.u[row * 3 + x]);
+                assert_eq!(uv[row * puv + 2 * x + 1], i.v[row * 3 + x]);
+            }
+        }
+        assert!(!para_nv12(&q, &mut y[..10], py, &mut uv, puv));
     }
 
     #[test]

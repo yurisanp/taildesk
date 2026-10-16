@@ -1,6 +1,6 @@
-//! Codecs de vídeo: traits [`VideoEncoder`]/[`VideoDecoder`], conversão de cor e o backend
-//! openh264 (MVP, nos dois lados). Media Foundation (Windows) e VA-API (Linux) entram depois,
-//! atrás das mesmas traits, com probe e fallback para o openh264.
+//! Codecs de vídeo: traits [`VideoEncoder`]/[`VideoDecoder`], conversão de cor e os backends:
+//! NVENC e VA-API no Linux, por hardware, e o openh264 em software nos dois sistemas. A escolha
+//! ([`abrir_encoder`]) prefere hardware, com probe e fallback até o openh264.
 //!
 //! O encoder recebe o quadro da captura (BGRx/RGBx com stride) e devolve um access unit em
 //! Annex-B num buffer do chamador; o decoder recebe o access unit e empresta os planos I420 a um
@@ -9,9 +9,15 @@
 use std::fmt;
 
 pub mod cor;
+#[cfg(target_os = "linux")]
+mod h264;
+#[cfg(target_os = "linux")]
+pub mod linux;
 mod openh264;
+mod selecao;
 
 pub use crate::openh264::{DecoderOpenH264, EncoderOpenH264};
+pub use crate::selecao::{Opcao, abrir_decoder, abrir_encoder, opcoes_decoder, opcoes_encoder};
 
 /// Ordem dos bytes de cada pixel da imagem capturada (4 bytes por pixel, o 4º ignorado).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,8 +130,13 @@ impl std::error::Error for ErroCodec {}
 
 /// Encoder de vídeo de um monitor.
 pub trait VideoEncoder: Send {
-    /// Nome para logs e para o teste de conexão (`openh264`, `mf`, `vaapi`).
+    /// Nome para logs e para o teste de conexão (`openh264`, `mf`, `vaapi`, `nvenc`).
     fn nome(&self) -> &'static str;
+
+    /// GPU que codifica (`None` = CPU).
+    fn gpu(&self) -> Option<&str> {
+        None
+    }
 
     /// Codifica `quadro` e escreve o access unit (Annex-B) em `saida`, que é limpo antes.
     /// `forcar_chave` pede um IDR (início, perda de pacotes). `Ok(None)` = o controle de taxa
@@ -144,6 +155,11 @@ pub trait VideoEncoder: Send {
 /// Decoder de vídeo de um monitor.
 pub trait VideoDecoder: Send {
     fn nome(&self) -> &'static str;
+
+    /// GPU que decodifica (`None` = CPU).
+    fn gpu(&self) -> Option<&str> {
+        None
+    }
 
     /// Decodifica um access unit e chama `ao_quadro` se saiu imagem. `Ok(false)` = ainda sem
     /// imagem (o decoder espera um IDR).
