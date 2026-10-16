@@ -666,9 +666,7 @@ impl Controlador {
                 video_display: None,
             },
         );
-        if let Some(s) = self.sessoes.borrow_mut().get_mut(&id) {
-            s.painel.ligar_soltar(&s.janela);
-        }
+        arquivos::ligar_soltar(id, 50);
         rt.spawn(rodar(id, nome, ip, info, recepcoes, fechar_rx));
     }
 }

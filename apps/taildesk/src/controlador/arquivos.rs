@@ -55,8 +55,9 @@ impl Painel {
         }
     }
 
-    /// Com a janela já mostrada, escuta arquivos arrastados para ela no Wayland.
-    pub(super) fn ligar_soltar(&mut self, janela: &JanelaSessao) {
+    /// Escuta arquivos arrastados para a janela no Wayland. `false` = a janela do winit ainda
+    /// não existe (ela só nasce quando o laço de eventos processa o `show`).
+    fn tentar_soltar(&mut self, janela: &JanelaSessao) -> bool {
         #[cfg(target_os = "linux")]
         {
             use slint::winit_030::WinitWindowAccessor;
@@ -64,32 +65,34 @@ impl Painel {
                 HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
             };
             let id = self.id;
-            self.soltar = janela
-                .window()
-                .with_winit_window(|w| {
-                    let (Ok(d), Ok(h)) = (w.display_handle(), w.window_handle()) else {
-                        return None;
-                    };
-                    let (RawDisplayHandle::Wayland(d), RawWindowHandle::Wayland(h)) =
-                        (d.as_raw(), h.as_raw())
-                    else {
-                        return None;
-                    };
-                    // SAFETY: display e superfície vêm da janela viva do winit; o wl_display é
-                    // do event loop, que vive até o fim do app (mais que o painel).
-                    let ouvinte = unsafe {
-                        taildesk_platform::soltar::ouvir_wayland(d.display, h.surface, move |s| {
-                            soltura(id, s);
-                        })
-                    };
-                    ouvinte
-                        .inspect_err(|e| eprintln!("taildesk: arrastar arquivos indisponível: {e}"))
-                        .ok()
-                })
-                .flatten();
+            let Some(ouvinte) = janela.window().with_winit_window(|w| {
+                let (Ok(d), Ok(h)) = (w.display_handle(), w.window_handle()) else {
+                    return None;
+                };
+                let (RawDisplayHandle::Wayland(d), RawWindowHandle::Wayland(h)) =
+                    (d.as_raw(), h.as_raw())
+                else {
+                    // X11: o winit entrega HoveredFile/DroppedFile.
+                    return None;
+                };
+                // SAFETY: display e superfície vêm da janela viva do winit; o wl_display é
+                // do event loop, que vive até o fim do app (mais que o painel).
+                let ouvinte = unsafe {
+                    taildesk_platform::soltar::ouvir_wayland(d.display, h.surface, move |s| {
+                        soltura(id, s);
+                    })
+                };
+                ouvinte
+                    .inspect_err(|e| eprintln!("taildesk: arrastar arquivos indisponível: {e}"))
+                    .ok()
+            }) else {
+                return false;
+            };
+            self.soltar = ouvinte;
         }
         #[cfg(not(target_os = "linux"))]
         let _ = janela;
+        true
     }
 
     /// Arquivos do sistema sobre a janela (mostra o aviso de soltar).
@@ -359,6 +362,17 @@ async fn enviar(id: IdLocal, servico: Servico, root: u32, base: String, escolhid
             }
         }
     }
+}
+
+/// Liga o arrastar de arquivos da janela da sessão `id` assim que a janela do winit existir
+/// (tenta a cada 100 ms, até `tentativas` vezes).
+pub(super) fn ligar_soltar(id: IdLocal, tentativas: u8) {
+    slint::Timer::single_shot(Duration::from_millis(100), move || {
+        let pronto = na_sessao_ja(id, |s| s.painel.tentar_soltar(&s.janela)).unwrap_or(true);
+        if !pronto && tentativas > 1 {
+            ligar_soltar(id, tentativas - 1);
+        }
+    });
 }
 
 /// Evento do ouvinte do Wayland (na thread dele).
