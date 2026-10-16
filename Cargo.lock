@@ -5250,7 +5250,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pollster",
  "quinn",
@@ -5274,7 +5274,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "taildesk-codec",
  "taildesk-media",
@@ -5288,7 +5288,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-codec"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libloading",
  "openh264",
@@ -5296,7 +5296,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-files"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "quinn",
@@ -5307,14 +5307,14 @@ dependencies = [
 
 [[package]]
 name = "taildesk-keyboard"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "taildesk-proto",
 ]
 
 [[package]]
 name = "taildesk-media"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "taildesk-codec",
  "taildesk-proto",
@@ -5322,7 +5322,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-overlay"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "taildesk-proto",
  "taildesk-tsapi",
@@ -5331,7 +5331,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-platform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ashpd",
  "futures-util",
@@ -5350,14 +5350,14 @@ dependencies = [
 
 [[package]]
 name = "taildesk-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "prost",
 ]
 
 [[package]]
 name = "taildesk-prototipo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "slint",
  "slint-build",
@@ -5365,7 +5365,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-render"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pollster",
  "slint",
@@ -5374,7 +5374,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-session"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "quinn",
  "taildesk-files",
@@ -5387,7 +5387,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-transport"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "quinn",
@@ -5402,7 +5402,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-tsapi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5411,7 +5411,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "slint",
  "slint-build",
@@ -5419,7 +5419,7 @@ dependencies = [
 
 [[package]]
 name = "taildesk-update"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "semver",
  "serde",
@@ -6931,7 +6931,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "yasna"
