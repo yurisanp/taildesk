@@ -30,6 +30,11 @@ pub mod limits {
 /// Raiz `0` dos comandos: a pasta de entrada de quem recebe (`~/Downloads/TailDesk`).
 pub const INBOX_ROOT: u32 = 0;
 
+/// Raiz dos arquivos copiados na área de transferência de quem envia (só leitura): o caminho é
+/// `"<índice em ClipboardOffer.files>/<nome>[/...]"` da oferta em vigor. Nunca aparece em
+/// `FsRoots`.
+pub const CLIPBOARD_ROOT: u32 = u32::MAX;
+
 /// BLAKE3 de 32 bytes.
 pub type Hash = [u8; 32];
 

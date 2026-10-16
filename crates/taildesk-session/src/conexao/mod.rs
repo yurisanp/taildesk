@@ -5,10 +5,12 @@
 //!   filtra por permissão e entrega mouse e teclado (já traduzido) à [`host::Entrada`].
 //! - [`controlador`]: conecta, manda o `Hello`, acompanha "Conectando" -> "Esperando aceitar" ->
 //!   ao vivo e entrega à interface o que o host manda.
+//! - [`clipboard`]: a área de transferência do sistema ligada à do peer.
 //!
 //! O código de SO (injeção, captura, keyring) fica fora: a interface e `taildesk-platform`
 //! entram pelas traits de [`host`].
 
+pub mod clipboard;
 pub mod controlador;
 pub mod host;
 

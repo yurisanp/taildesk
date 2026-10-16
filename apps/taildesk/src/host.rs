@@ -236,6 +236,7 @@ fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
 impl Maquina for MaquinaApp {
     type Entrada = EntradaApp;
     type Midia = MidiaApp;
+    type Area = taildesk_session::conexao::clipboard::SemArea;
 
     fn descricao(&self) -> Descricao {
         let (keymap, os_layout_id) = teclado_do_host();
@@ -318,6 +319,15 @@ impl Maquina for MaquinaApp {
     #[cfg(not(any(windows, target_os = "linux")))]
     async fn midia(&self, canal: CanalMidia) -> MidiaApp {
         MidiaApp::new(canal, Fonte::Nenhuma, Vec::new())
+    }
+
+    async fn area(
+        &self,
+    ) -> Option<(
+        Self::Area,
+        tokio::sync::mpsc::Receiver<taildesk_session::conexao::clipboard::DoSistema>,
+    )> {
+        None
     }
 }
 

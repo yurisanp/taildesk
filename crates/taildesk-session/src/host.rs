@@ -103,6 +103,12 @@ pub fn need(msg: &Msg) -> Need {
         | Msg::FileDone(_)
         | Msg::FileCancel(_)
         | Msg::FileError(_) => Need::Nothing,
+        // Idem a área de transferência: `clipboard::AreaTransferencia` responde `DENIED` sem
+        // `Permissions.clipboard`.
+        Msg::ClipboardOffer(_)
+        | Msg::ClipboardRequest(_)
+        | Msg::ClipboardData(_)
+        | Msg::ClipboardError(_) => Need::Nothing,
         // Soltar teclas ou parar áudio nunca é bloqueado: só encerra algo, e bloquear deixaria
         // tecla presa.
         Msg::ReleaseAll(_)
