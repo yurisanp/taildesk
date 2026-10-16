@@ -24,7 +24,7 @@ C → H  Hello {
        }
 H → C  HelloAck {
           proto_version, host_name, platform, displays: [DisplayInfo] (completo em `13-multimonitor.md` §3: posição, tamanho físico e lógico, escala, rotação, `shared`),
-          encode_caps: [...], permissions: Permissions, consent: Required|NotRequired,
+          encode_caps: [CodecCap] (codecs que o host tem encoder), permissions: Permissions, consent: Required|NotRequired,
           clock: t_host_ns  (+ eco de t_client_ns p/ estimar offset/RTT)
        }
 H → C  ConsentResult { granted, by_user?, permissions }        (se Required)
@@ -54,7 +54,7 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | Grupo | Mensagens |
 |---|---|
 | Sessão | `Hello`, `HelloAck`, `ConsentResult`, `Close{reason: CloseReason}` (valores abaixo), `Ping{t}`/`Pong{t,t_echo}` |
-| Vídeo | `StartVideo{display_id, wanted, priority}`, `CodecSelected{display_id, stream_id, ...}`, `RequestKeyframe{display}`, `PictureLoss{display, last_good_seq}`, `Nack{display, frame_seq, missing_frag_bitmap}`, `QualityPrefs{fps_max, mode: Auto|Text|Motion|LowBandwidth, chroma444}`, `StopVideo{display_id}`, `SetPriority{display_id, FOCUSED|VISIBLE}`, `VideoStopped{display_id, reason}`, `VideoStats{display_id, encoder, gpu, fps, bitrate, encode_us, ...}` (H→C, 1×/s, só para o painel de diagnóstico), `DisplaysChanged{displays}` (sem `SwitchDisplay`: trocar = Stop + Start) |
+| Vídeo | `StartVideo{display_id, wanted, priority}`, `CodecSelected{display_id, stream_id, ...}`, `RequestKeyframe{display}`, `PictureLoss{display, last_good_seq}`, `Nack{display, frame_seq, missing_frag_bitmap}`, `QualityPrefs{fps_max, mode: Auto|Text|Motion|LowBandwidth, chroma444, codec, bitrate_kbps}`, `SetVideoQuality{display_id, wanted: QualityPrefs}` (C→H, tag 30), `StopVideo{display_id}`, `SetPriority{display_id, FOCUSED|VISIBLE}`, `VideoStopped{display_id, reason}`, `VideoStats{display_id, encoder, gpu, fps, bitrate, encode_us, ..., est_kbps}` (H→C, 1×/s, só para o painel de diagnóstico), `DisplaysChanged{displays}` (sem `SwitchDisplay`: trocar = Stop + Start) |
 | Input | Teclado: ver `11-teclado.md` §3 (`KeyboardInfo`, `Key`, `KeyShortcut`, `KeyChar`, `KeyboardMode`, `ReleaseAll`), `MouseMove{display_id, x, y (u16 normalizado no monitor) | rel}`, `MouseButton{btn, down}`, `Scroll{dx, dy, precise}` (convenção abaixo), `Touch{id, phase, x, y, pressure}`, `Gamepad{...}` (futuro) |
 | Cursor | `CursorPos{display_id, x, y, visible}`, `CursorShapeRef{hash}` (forma completa no stream de cursor, §3.2) |
 | Clipboard | `ClipboardOffer{formats}`, `ClipboardData{format, bytes}` (texto/HTML/PNG; arquivos → transferência explícita) |
@@ -64,6 +64,13 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | Chat | `ChatMessage{text}` |
 
 Multi-monitor (`13-multimonitor.md` §3): **um stream de vídeo por monitor**, cada um com encoder, keyframes e `stream_id` próprios, respondido por um `CodecSelected` por `display_id`. Host recusa `StartVideo` acima do seu limite (`Error{TOO_MANY_STREAMS}`; padrão 2 com openh264). Parser: no máximo 16 `DisplayInfo` por mensagem, `name` ≤ 128 bytes.
+
+Codec e taxa escolhidos pelo usuário (seletor da sessão e Configurações):
+- `QualityPrefs.codec` (tag 4): `Unspecified` = automático. O host só atende se o controlador decodifica o codec (`Hello.decode_caps`) e ele tem encoder (`HelloAck.encode_caps`, que lista os codecs com encoder no host); senão fica no automático.
+- `QualityPrefs.bitrate_kbps` (tag 5): `0` = automática (o host ajusta pelo tamanho da imagem e pela rede); teto no parser de 1 Gbit/s (`limits::VIDEO_KBPS`).
+- Valem no `StartVideo.wanted` e no `SetVideoQuality{display_id, wanted}` (C→H, tag 30), que troca codec ou taxa de um monitor que já está saindo. Codec novo = encoder novo e outro `CodecSelected` (com outro `stream_id`); só a taxa = ajuste a quente, sem `CodecSelected`.
+- `VideoStats.est_kbps` (tag 13): banda que o QUIC do host estima para o caminho (janela de congestionamento ÷ RTT), em kbit/s; `0` = sem estimativa.
+- PyroWave (`Codec = 6`) é opcional e só entra quando escolhido à mão.
 
 **`CloseReason`** (`Close.reason`): `UNSPECIFIED = 0`, `BY_CONTROLLER = 1`, `BY_HOST = 2`, `CONSENT_DENIED = 3` (a pessoa no host recusou), `VERSION_MISMATCH = 4`, `PROTOCOL_ERROR = 5`, `CONSENT_TIMEOUT = 6` (ninguém respondeu ao pedido de acesso em 60 s), `NOT_ALLOWED = 7` (o host não aceita conexões deste peer, por configuração ou política). Com `CONSENT_DENIED`, `CONSENT_TIMEOUT` e `NOT_ALLOWED` a UI distingue "recusou", "não respondeu" e "não aceita conexões" (`12-levantamento-ux.md` §5.3).
 
