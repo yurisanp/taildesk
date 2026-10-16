@@ -102,43 +102,50 @@ fn filtrar(mut opcoes: Vec<Opcao>, variavel: &str) -> Vec<Opcao> {
 
 /// Encoders desta máquina, em ordem de preferência (ver o topo do módulo).
 pub fn opcoes_encoder() -> Vec<Opcao> {
-    #[allow(unused_mut)]
-    let mut opcoes = Vec::new();
-    #[cfg(target_os = "linux")]
-    {
-        use crate::linux::{gpu, nvenc, vaapi};
-        let nvidia = nvenc::gpus();
-        for g in gpu::gpus() {
-            if g.fabricante == gpu::NVIDIA {
-                // O VA-API da NVIDIA (nvidia-vaapi-driver) não codifica: só o NVENC.
-                if let Some((dev, nome, _)) = nvidia.iter().find(|(_, _, pci)| *pci == g.pci) {
-                    opcoes.push(Opcao {
-                        backend: "nvenc",
-                        gpu: Some(nome.clone()),
-                        onde: Onde::Nvidia(*dev),
-                    });
-                }
-            } else if vaapi::codifica_h264(&g.no).is_some() {
-                opcoes.push(Opcao {
-                    backend: "vaapi",
-                    gpu: Some(g.nome.clone()),
-                    onde: Onde::Va(g.no.clone()),
-                });
-            }
-        }
-        // NVENC de uma GPU sem nó de render visível (container, driver sem DRM).
-        for (dev, nome, _) in nvidia {
-            if !opcoes.iter().any(|o| o.onde == Onde::Nvidia(dev)) {
-                opcoes.push(Opcao {
-                    backend: "nvenc",
-                    gpu: Some(nome),
-                    onde: Onde::Nvidia(dev),
-                });
-            }
-        }
-    }
+    let mut opcoes = encoders_de_hardware();
     opcoes.push(openh264());
     filtrar(opcoes, "TAILDESK_ENCODER")
+}
+
+#[cfg(not(target_os = "linux"))]
+fn encoders_de_hardware() -> Vec<Opcao> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+fn encoders_de_hardware() -> Vec<Opcao> {
+    use crate::linux::{gpu, nvenc, vaapi};
+    let mut opcoes = Vec::new();
+    let nvidia = nvenc::gpus();
+    for g in gpu::gpus() {
+        if g.fabricante == gpu::NVIDIA {
+            // O VA-API da NVIDIA (nvidia-vaapi-driver) não codifica: só o NVENC.
+            if let Some((dev, nome, _)) = nvidia.iter().find(|(_, _, pci)| *pci == g.pci) {
+                opcoes.push(Opcao {
+                    backend: "nvenc",
+                    gpu: Some(nome.clone()),
+                    onde: Onde::Nvidia(*dev),
+                });
+            }
+        } else if vaapi::codifica_h264(&g.no).is_some() {
+            opcoes.push(Opcao {
+                backend: "vaapi",
+                gpu: Some(g.nome.clone()),
+                onde: Onde::Va(g.no.clone()),
+            });
+        }
+    }
+    // NVENC de uma GPU sem nó de render visível (container, driver sem DRM).
+    for (dev, nome, _) in nvidia {
+        if !opcoes.iter().any(|o| o.onde == Onde::Nvidia(dev)) {
+            opcoes.push(Opcao {
+                backend: "nvenc",
+                gpu: Some(nome),
+                onde: Onde::Nvidia(dev),
+            });
+        }
+    }
+    opcoes
 }
 
 /// Decoders desta máquina, em ordem de preferência.
