@@ -13,8 +13,10 @@ export component JanelaPedido inherits Window {
     // O que o host pode liberar (as caixas só aparecem para o que foi oferecido).
     in property <bool> oferece-controle;
     in property <bool> oferece-arquivos;
+    in property <bool> oferece-area;
     in-out property <bool> controlar: true;
     in-out property <bool> arquivos: true;
+    in-out property <bool> area: true;
     in-out property <bool> lembrar: false;
 
     callback permitir();
@@ -58,6 +60,10 @@ export component JanelaPedido inherits Window {
             if root.oferece-arquivos: CheckBox {
                 text: @tr("Trocar arquivos");
                 checked <=> root.arquivos;
+            }
+            if root.oferece-area: CheckBox {
+                text: @tr("Compartilhar a área de transferência (copiar e colar)");
+                checked <=> root.area;
             }
         }
         CheckBox {

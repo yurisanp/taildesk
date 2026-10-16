@@ -16,6 +16,7 @@ use std::fmt;
 use std::os::fd::OwnedFd;
 
 use ashpd::PortalError;
+use ashpd::desktop::clipboard::{Clipboard, RequestClipboardOptions, SetSelectionOptions};
 use ashpd::desktop::remote_desktop::{
     Axis, DeviceType, KeyState, NotifyKeyboardKeycodeOptions, NotifyKeyboardKeysymOptions,
     NotifyPointerAxisDiscreteOptions, NotifyPointerAxisOptions, NotifyPointerButtonOptions,
@@ -106,6 +107,8 @@ pub enum ErroPortal {
     MonitorDesconhecido(u32),
     /// A operação precisa de input, mas a sessão não tem.
     SemInput(SemInput),
+    /// A sessão não tem a área de transferência do portal.
+    SemArea,
     Portal(ashpd::Error),
 }
 
@@ -124,6 +127,9 @@ impl fmt::Display for ErroPortal {
             ),
             ErroPortal::SemInput(SemInput::NaoLiberado) => {
                 f.write_str("teclado e mouse não foram liberados no host")
+            }
+            ErroPortal::SemArea => {
+                f.write_str("o portal desta sessão não compartilha a área de transferência")
             }
             ErroPortal::Portal(e) => write!(f, "portal: {e}"),
         }
@@ -162,6 +168,9 @@ enum Tipo {
     Remota {
         rd: RemoteDesktop,
         sessao: Session<RemoteDesktop>,
+        /// Área de transferência da sessão (`org.freedesktop.portal.Clipboard`), se o portal tem
+        /// e a pessoa liberou.
+        area: Option<Clipboard>,
     },
     SoTela {
         sessao: Session<Screencast>,
@@ -237,6 +246,17 @@ impl SessaoPortal {
         fontes: SelectSourcesOptions,
     ) -> Result<SessaoPortal, ErroPortal> {
         let sessao = rd.create_session(CreateSessionOptions::default()).await?;
+        // A área de transferência se pede antes do `Start` e entra no mesmo diálogo.
+        let area = match Clipboard::new().await {
+            Ok(c) => match c.request(&sessao, RequestClipboardOptions::default()).await {
+                Ok(()) => Some(c),
+                Err(e) => {
+                    eprintln!("taildesk: portal sem área de transferência: {e}");
+                    None
+                }
+            },
+            Err(_) => None,
+        };
         rd.select_devices(
             &sessao,
             SelectDevicesOptions::default()
@@ -261,8 +281,9 @@ impl SessaoPortal {
         };
         let sem_input =
             (!dispositivos.teclado && !dispositivos.ponteiro).then_some(SemInput::NaoLiberado);
+        let area = area.filter(|_| escolha.is_clipboard_enabled());
         Ok(SessaoPortal {
-            tipo: Tipo::Remota { rd, sessao },
+            tipo: Tipo::Remota { rd, sessao, area },
             screencast,
             monitores,
             dispositivos,
@@ -441,13 +462,99 @@ impl SessaoPortal {
         Ok(())
     }
 
+    /// A sessão tem a área de transferência do portal.
+    pub fn tem_area(&self) -> bool {
+        self.area().is_some()
+    }
+
+    fn area(&self) -> Option<(&Clipboard, &Session<RemoteDesktop>)> {
+        match &self.tipo {
+            Tipo::Remota {
+                sessao,
+                area: Some(a),
+                ..
+            } => Some((a, sessao)),
+            _ => None,
+        }
+    }
+
+    fn area_ou_erro(&self) -> Result<(&Clipboard, &Session<RemoteDesktop>), ErroPortal> {
+        self.area().ok_or(ErroPortal::SemArea)
+    }
+
+    /// Tipos MIME de cada cópia feita por alguém no host (as da própria sessão não vêm).
+    pub async fn area_mudou(
+        &self,
+    ) -> Result<impl futures_util::Stream<Item = Vec<String>> + '_, ErroPortal> {
+        use futures_util::StreamExt;
+        let (a, sessao) = self.area_ou_erro()?;
+        let caminho = id_sessao(sessao);
+        Ok(a.receive_selection_owner_changed::<RemoteDesktop>()
+            .await?
+            .filter_map(move |(s, mudou)| {
+                let nossa = id_sessao(&s) == caminho && mudou.session_is_owner() != Some(true);
+                let tipos = mudou.mime_types().to_vec();
+                std::future::ready(nossa.then_some(tipos))
+            }))
+    }
+
+    /// Lê o tipo `mime` do que está copiado no host: o app que copiou escreve no fd devolvido
+    /// até fechar.
+    pub async fn area_ler(&self, mime: &str) -> Result<OwnedFd, ErroPortal> {
+        let (a, sessao) = self.area_ou_erro()?;
+        Ok(a.selection_read(sessao, mime).await?.into())
+    }
+
+    /// Põe na área de transferência do host uma oferta com estes tipos, sem o conteúdo: quando
+    /// alguém colar chega um pedido em [`SessaoPortal::area_pedidos`].
+    pub async fn area_oferecer(&self, mimes: &[&str]) -> Result<(), ErroPortal> {
+        let (a, sessao) = self.area_ou_erro()?;
+        a.set_selection(sessao, SetSelectionOptions::default().set_mime_types(mimes))
+            .await?;
+        Ok(())
+    }
+
+    /// Pedidos de colagem da nossa oferta: `(mime, serial)`. Responda com
+    /// [`SessaoPortal::area_escrever`] e [`SessaoPortal::area_escrita_feita`].
+    pub async fn area_pedidos(
+        &self,
+    ) -> Result<impl futures_util::Stream<Item = (String, u32)> + '_, ErroPortal> {
+        use futures_util::StreamExt;
+        let (a, sessao) = self.area_ou_erro()?;
+        let caminho = id_sessao(sessao);
+        Ok(a.receive_selection_transfer::<RemoteDesktop>()
+            .await?
+            .filter_map(move |(s, mime, serial)| {
+                std::future::ready((id_sessao(&s) == caminho).then_some((mime, serial)))
+            }))
+    }
+
+    /// Fd onde escrever o conteúdo do pedido `serial` (feche ao terminar).
+    pub async fn area_escrever(&self, serial: u32) -> Result<OwnedFd, ErroPortal> {
+        let (a, sessao) = self.area_ou_erro()?;
+        Ok(a.selection_write(sessao, serial).await?.into())
+    }
+
+    /// Termina o pedido `serial` (`ok = false` se não deu para escrever).
+    pub async fn area_escrita_feita(&self, serial: u32, ok: bool) -> Result<(), ErroPortal> {
+        let (a, sessao) = self.area_ou_erro()?;
+        a.selection_write_done(sessao, serial, ok).await?;
+        Ok(())
+    }
+
     fn remota(&self) -> Result<(&RemoteDesktop, &Session<RemoteDesktop>), ErroPortal> {
         match (&self.tipo, self.sem_input) {
             (_, Some(motivo)) => Err(ErroPortal::SemInput(motivo)),
-            (Tipo::Remota { rd, sessao }, None) => Ok((rd, sessao)),
+            (Tipo::Remota { rd, sessao, .. }, None) => Ok((rd, sessao)),
             (Tipo::SoTela { .. }, None) => Err(ErroPortal::SemInput(SemInput::SemRemoteDesktop)),
         }
     }
+}
+
+/// Caminho D-Bus da sessão, para separar os sinais da nossa dos de outras sessões do mesmo
+/// portal. O ashpd não expõe o caminho; o `Debug` dele é `Session("<caminho>")`.
+fn id_sessao<T: ashpd::desktop::SessionPortal>(s: &Session<T>) -> String {
+    format!("{s:?}")
 }
 
 /// Cursor separado do vídeo, como metadado de cada buffer do PipeWire

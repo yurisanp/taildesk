@@ -96,6 +96,11 @@ impl Ponte {
     pub async fn mensagem(&self, msg: Msg) {
         let _ = self.do_peer.send(msg).await;
     }
+
+    /// Fila das mensagens do peer, para quem as entrega de outra task (na ordem de chegada).
+    pub fn entrada(&self) -> mpsc::Sender<Msg> {
+        self.do_peer.clone()
+    }
 }
 
 /// Resposta para quem não tem área de transferência (sem backend neste sistema).
