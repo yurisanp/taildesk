@@ -3,6 +3,7 @@
 //!
 //! - Host no Linux: portal `Clipboard` da sessão RemoteDesktop ([`portal`]).
 //! - Controlador no Wayland: `wl_data_device` da janela da sessão ([`janela_wayland`]).
+//! - Windows (host e controlador): a área de transferência do Win32 (`windows`).
 //!
 //! Arquivos copiados ainda não passam (só texto, HTML e imagem PNG).
 
@@ -37,6 +38,7 @@ impl Compartilhado {
     }
 
     /// Alguém copiou aqui com estes MIME: o que anunciar ao peer.
+    #[cfg_attr(windows, allow(dead_code))]
     fn copiou(&self, mimes: Vec<String>) -> Copiado {
         let formatos = taildesk_platform::area::formatos(&mimes)
             .into_iter()
@@ -71,6 +73,7 @@ impl Compartilhado {
     }
 
     /// Um app daqui colou `mime` da oferta do peer: `seq` e formato.
+    #[cfg_attr(windows, allow(dead_code))]
     fn colar(&self, mime: &str) -> Option<(u32, ClipFormat)> {
         let f = taildesk_platform::area::formato_do_mime(mime)?;
         self.com(|e| {
@@ -81,6 +84,18 @@ impl Compartilhado {
         })
     }
 
+    /// `seq` da oferta do peer em vigor, se ela tem `f`.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn seq_da_oferta(&self, f: ClipFormat) -> Option<u32> {
+        self.com(|e| {
+            e.oferta
+                .as_ref()
+                .filter(|(_, fs)| fs.contains(&f))
+                .map(|(seq, _)| *seq)
+        })
+    }
+
+    #[cfg_attr(windows, allow(dead_code))]
     fn mime_para_ler(&self, f: ClipFormat) -> Option<String> {
         self.com(|e| taildesk_platform::area::mime_para_ler(f, &e.locais).map(str::to_owned))
     }
@@ -113,6 +128,116 @@ fn pedir(
 
 #[cfg(target_os = "linux")]
 pub use linux::{AreaPortal, janela_wayland, portal};
+
+#[cfg(windows)]
+pub use win::{AreaWin, windows};
+
+#[cfg(windows)]
+mod win {
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use taildesk_platform::area_windows::{AreaWindows, DaArea};
+    use taildesk_session::conexao::clipboard::Sistema;
+
+    use super::*;
+
+    /// Quanto um app que colou espera o peer (o Windows segura o app nesse tempo).
+    const COLAR_MAX: Duration = Duration::from_secs(10);
+
+    /// Área de transferência do Windows ligada à sessão.
+    #[derive(Debug)]
+    pub struct AreaWin {
+        area: Arc<AreaWindows>,
+        estado: Compartilhado,
+    }
+
+    /// Abre a área de transferência do Windows (a mesma no host e no controlador).
+    pub fn windows() -> std::io::Result<(AreaWin, mpsc::Receiver<DoSistema>)> {
+        let (tx, rx) = mpsc::channel(FILA);
+        let estado = Compartilhado::default();
+        let aviso = {
+            let tx = tx.clone();
+            move |a: DaArea| match a {
+                DaArea::Copiou(formatos) => {
+                    let formatos = formatos
+                        .into_iter()
+                        .filter(|f| suportado(*f))
+                        .map(|f| (f, 0))
+                        .collect();
+                    let _ = tx.try_send(DoSistema::Copiou(Copiado {
+                        formatos,
+                        arquivos: Vec::new(),
+                    }));
+                }
+            }
+        };
+        let pedir_peer = {
+            let estado = estado.clone();
+            move |f: ClipFormat| {
+                let seq = estado.seq_da_oferta(f)?;
+                let mut rx = pedir(&tx, seq, f)?;
+                // Na thread da área (o app que colou espera): sem runtime, com prazo.
+                let fim = Instant::now() + COLAR_MAX;
+                loop {
+                    match rx.try_recv() {
+                        Ok(d) => return d,
+                        Err(oneshot::error::TryRecvError::Closed) => return None,
+                        Err(oneshot::error::TryRecvError::Empty) if Instant::now() < fim => {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(oneshot::error::TryRecvError::Empty) => return None,
+                    }
+                }
+            }
+        };
+        let area = AreaWindows::abrir(aviso, pedir_peer)?;
+        Ok((
+            AreaWin {
+                area: Arc::new(area),
+                estado,
+            },
+            rx,
+        ))
+    }
+
+    impl Sistema for AreaWin {
+        fn oferecer(&mut self, seq: u32, copiado: &Copiado) {
+            self.estado.oferecer(seq, copiado);
+            let formatos = copiado
+                .formatos
+                .iter()
+                .map(|(f, _)| *f)
+                .filter(|f| suportado(*f))
+                .collect();
+            let _ = self.area.oferecer(formatos);
+        }
+
+        fn ler(
+            &mut self,
+            formato: ClipFormat,
+        ) -> impl Future<Output = Result<Vec<u8>, ClipErrorCode>> + Send + 'static {
+            let area = self.area.clone();
+            async move {
+                let bytes = tokio::task::spawn_blocking(move || area.ler(formato))
+                    .await
+                    .map_err(|_| ClipErrorCode::Unavailable)?
+                    .map_err(|e| {
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            ClipErrorCode::Gone
+                        } else {
+                            ClipErrorCode::Unavailable
+                        }
+                    })?;
+                if bytes.len() as u64 > taildesk_proto::control::limits::CLIP_TOTAL {
+                    return Err(ClipErrorCode::TooBig);
+                }
+                Ok(lido(formato, bytes))
+            }
+        }
+    }
+}
 
 #[cfg(target_os = "linux")]
 mod linux {

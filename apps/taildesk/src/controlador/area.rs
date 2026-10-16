@@ -102,7 +102,15 @@ fn ponte(janela: &JanelaSessao, saida: mpsc::Sender<Control>) -> Option<Ponte> {
     Some(Ponte::iniciar(area, rx, saida, true))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+fn ponte(_: &JanelaSessao, saida: mpsc::Sender<Control>) -> Option<Ponte> {
+    let (area, rx) = crate::area::windows()
+        .inspect_err(|e| eprintln!("taildesk: área de transferência indisponível: {e}"))
+        .ok()?;
+    Some(Ponte::iniciar(area, rx, saida, true))
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn ponte(_: &JanelaSessao, _: mpsc::Sender<Control>) -> Option<Ponte> {
     None
 }

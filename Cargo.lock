@@ -5339,6 +5339,7 @@ dependencies = [
  "futures-util",
  "keyring-core",
  "pipewire",
+ "png",
  "rfd",
  "rustix 1.1.5",
  "taildesk-keyboard",

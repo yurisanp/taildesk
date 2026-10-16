@@ -238,7 +238,9 @@ impl Maquina for MaquinaApp {
     type Midia = MidiaApp;
     #[cfg(target_os = "linux")]
     type Area = crate::area::AreaPortal;
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    type Area = crate::area::AreaWin;
+    #[cfg(not(any(windows, target_os = "linux")))]
     type Area = taildesk_session::conexao::clipboard::SemArea;
 
     fn descricao(&self) -> Descricao {
@@ -336,7 +338,19 @@ impl Maquina for MaquinaApp {
         crate::area::portal(portal)
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    async fn area(
+        &self,
+    ) -> Option<(
+        Self::Area,
+        tokio::sync::mpsc::Receiver<taildesk_session::conexao::clipboard::DoSistema>,
+    )> {
+        crate::area::windows()
+            .inspect_err(|e| eprintln!("taildesk: área de transferência indisponível: {e}"))
+            .ok()
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     async fn area(
         &self,
     ) -> Option<(

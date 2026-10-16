@@ -12,6 +12,8 @@ taildesk-keyboard.workspace = true
 taildesk-proto.workspace = true
 # Segredos no cofre do sistema (Secret Service no Linux, Credential Manager no Windows).
 keyring-core = "1"
+# PNG da área de transferência: o Windows guarda imagens em DIB (MIT OR Apache-2.0).
+png = "0.18"
 
 # Pergunta ao D-Bus se há bandeja (StatusNotifierWatcher). O Slint já traz o zbus para a bandeja.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -33,7 +35,7 @@ zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-cr
 
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = { version = "1", default-features = false }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_DataExchange", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 # Desktop Duplication (D3D11 + DXGI) é COM; o crate `windows` (MIT/Apache) cuida das interfaces.
 # Diálogo de abrir arquivos (IFileOpenDialog) para o painel de arquivos (MIT).
 rfd = { version = "0.15", default-features = false }
