@@ -25,6 +25,10 @@ futures-util = { version = "0.3", default-features = false }
 pipewire = "0.10"
 # Lê o layout do teclado (keymap XKB); carregado em tempo de execução, sem pacote -dev.
 xkbcommon-dl = "0.4"
+# Arrastar arquivos para a janela no Wayland (o winit não faz): conexão convidada no wl_display
+# da janela (MIT). `system` + `dlopen`: a mesma libwayland-client do winit, carregada em execução.
+wayland-client = { version = "0.31", features = ["system", "dlopen"] }
+rustix = { version = "1", features = ["event", "fs", "pipe"] }
 zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-crypto-rust"] }
 
 [target.'cfg(windows)'.dependencies]

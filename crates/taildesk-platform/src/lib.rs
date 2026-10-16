@@ -13,6 +13,7 @@ mod forma_cursor_dxgi;
 pub mod instancia;
 pub mod mouse;
 pub mod segredos;
+pub mod soltar;
 pub mod teclado;
 #[cfg(target_os = "linux")]
 pub mod wayland;

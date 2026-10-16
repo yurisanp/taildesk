@@ -1,6 +1,7 @@
 // Painel de arquivos da sessão (levantamento de UX §5.7): faixa de transferências e
 // "Navegar no host". O estado vem de `taildesk_files::panel`; a janela da sessão converte
-// para estas structs e trata os callbacks. Arrastar arquivos do SO é tratado pela janela.
+// para estas structs e trata os callbacks. Arrastar arquivos do SO é tratado pela janela
+// (`arrastando` só mostra o aviso de soltar).
 import { ListView } from "std-widgets.slint";
 import { Tema } from "tema.slint";
 import { BarraProgresso, Botao, Separador } from "componentes.slint";
@@ -247,6 +248,8 @@ export component PainelArquivos inherits Rectangle {
     in property <ErroArquivo> erro;
     // O host aceita arquivos nesta raiz ("Enviar para cá").
     in property <bool> pode-enviar-aqui;
+    // Arquivos do sistema sendo arrastados sobre a janela.
+    in property <bool> arrastando;
 
     callback cancelar(int);
     callback abrir-pasta(int);
@@ -413,6 +416,8 @@ export global ArquivosSessao {
     in property <bool> tem-erro;
     in property <ErroArquivo> erro;
     in property <bool> pode-enviar-aqui;
+    // Arquivos do sistema sendo arrastados sobre a janela.
+    in property <bool> arrastando;
 
     callback cancelar(int);
     callback abrir-pasta(int);
@@ -433,7 +438,7 @@ export component ArquivosNaSessao inherits Rectangle {
     // Altura da barra da sessão, onde o painel começa.
     in property <length> topo: 40px;
 
-    if ArquivosSessao.disponivel && !ArquivosSessao.aberto: Botao {
+    if ArquivosSessao.disponivel && !ArquivosSessao.aberto && !ArquivosSessao.arrastando: Botao {
         x: parent.width - self.width - 12px;
         y: root.topo + 8px;
         width: self.min-width;
@@ -476,6 +481,48 @@ export component ArquivosNaSessao inherits Rectangle {
             atualizar => { ArquivosSessao.atualizar(); }
             baixar(n) => { ArquivosSessao.baixar(n); }
             enviar-aqui => { ArquivosSessao.enviar-aqui(); }
+        }
+    }
+    // Aviso de soltar: o arquivo vai para a pasta de entrada do host.
+    if ArquivosSessao.disponivel && ArquivosSessao.arrastando: Rectangle {
+        x: 0;
+        y: root.topo;
+        width: parent.width;
+        height: parent.height - root.topo;
+        background: #00000080;
+        Rectangle {
+            x: 16px;
+            y: 16px;
+            width: parent.width - 32px;
+            height: parent.height - 32px;
+            border-radius: Tema.raio-grande;
+            border-width: 3px;
+            border-color: Tema.primaria;
+            // Caixa sólida: o texto não se mistura com o vídeo (ou o aviso de espera) por baixo.
+            Rectangle {
+                width: min(parent.width - 32px, 460px);
+                height: caixa.preferred-height;
+                background: Tema.superficie;
+                border-radius: Tema.raio-grande;
+                caixa := VerticalLayout {
+                    padding: 20px;
+                    spacing: 6px;
+                    Text {
+                        text: @tr("Solte para enviar ao host");
+                        font-size: Tema.fonte-titulo;
+                        font-weight: 600;
+                        color: Tema.texto;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: @tr("Os arquivos vão para Downloads/TailDesk do outro lado.");
+                        font-size: Tema.fonte;
+                        color: Tema.texto-2;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
         }
     }
 }

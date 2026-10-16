@@ -276,6 +276,9 @@ enum Captura {
     Dxgi(taildesk_platform::captura_dxgi::CapturaDxgi),
     #[cfg(target_os = "linux")]
     PipeWire(taildesk_platform::captura_pipewire::CapturaPipeWire),
+    #[cfg(test)]
+    // Só o Drop (parar a thread) importa.
+    Sintetica(#[allow(dead_code)] tests::Sintetica),
 }
 
 impl Captura {
@@ -285,6 +288,8 @@ impl Captura {
             Captura::Dxgi(c) => c.ativar(display_id, ativo),
             #[cfg(target_os = "linux")]
             Captura::PipeWire(c) => c.ativar(display_id, ativo),
+            #[cfg(test)]
+            Captura::Sintetica(_) => {}
         }
     }
 }
@@ -299,6 +304,9 @@ pub enum Fonte {
     Portal(Arc<taildesk_platform::wayland::SessaoPortal>),
     /// Sem captura (portal recusado, sistema sem suporte): todo `StartVideo` é recusado.
     Nenhuma,
+    /// Quadros e cursor gerados, para os testes no container.
+    #[cfg(test)]
+    Sintetica,
 }
 
 /// Vídeo de uma sessão do host.
@@ -383,6 +391,14 @@ impl MidiaApp {
                 Ok(Captura::PipeWire(c))
             }
             Fonte::Nenhuma => Err("captura de tela indisponível".into()),
+            #[cfg(test)]
+            Fonte::Sintetica => Ok(Captura::Sintetica(tests::Sintetica::iniciar(
+                self.ao_quadro(),
+                self.monitores
+                    .iter()
+                    .map(|m| (m.id, m.width, m.height))
+                    .collect(),
+            ))),
         }
     }
 
@@ -589,7 +605,191 @@ impl Drop for MidiaApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::time::Duration;
+
+    use taildesk_codec::DecoderOpenH264;
+    use taildesk_media::video::RecepcaoVideo;
+    use taildesk_platform::captura::{Cursor, Imagem, Rotacao};
+    use taildesk_proto::control::{Control, StopVideo};
     use taildesk_proto::cursor::limits;
+    use taildesk_transport::{Identity, Pin, client_endpoint, connect, server_endpoint};
+
+    use crate::video::{Recepcoes, ler_datagramas, travar};
+
+    /// Captura de mentira: quadros BGRx que mudam e um cursor 2×2, a cada 10 ms.
+    pub struct Sintetica {
+        parar: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Sintetica {
+        pub fn iniciar(mut cb: AoQuadro, monitores: Vec<(u32, u32, u32)>) -> Sintetica {
+            let parar = Arc::new(AtomicBool::new(false));
+            let p = parar.clone();
+            let thread = std::thread::spawn(move || {
+                let mut n = 0u32;
+                let forma = [255u8; 16];
+                while !p.load(Ordering::Relaxed) {
+                    for &(id, l, a) in &monitores {
+                        let dados: Vec<u8> =
+                            (0..l * a * 4).map(|i| (i / 4 + n * 3) as u8).collect();
+                        cb.quadro(&Quadro {
+                            display_id: id,
+                            imagem: Some(Imagem {
+                                largura: l,
+                                altura: a,
+                                stride: l as usize * 4,
+                                formato: FormatoPixel::Bgrx,
+                                rotacao: Rotacao::Nenhuma,
+                                dados: &dados,
+                            }),
+                            cursor: Some(Cursor {
+                                visivel: true,
+                                x: (n % l) as i32,
+                                y: 5,
+                                forma: Some(FormaCursor {
+                                    largura: 2,
+                                    altura: 2,
+                                    stride: 8,
+                                    hotspot_x: 0,
+                                    hotspot_y: 0,
+                                    formato: FormatoPixel::Bgra,
+                                    dados: &forma,
+                                }),
+                            }),
+                        });
+                    }
+                    n += 1;
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            });
+            Sintetica {
+                parar,
+                thread: Some(thread),
+            }
+        }
+    }
+
+    impl Drop for Sintetica {
+        fn drop(&mut self) {
+            self.parar.store(true, Ordering::Relaxed);
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
+    }
+
+    async fn proxima(rx: &mut mpsc::Receiver<Control>, quer: fn(&Msg) -> bool) -> Msg {
+        loop {
+            let c = tokio::time::timeout(Duration::from_secs(20), rx.recv())
+                .await
+                .expect("mensagem demorou")
+                .expect("canal fechou");
+            if let Some(m) = c.msg
+                && quer(&m)
+            {
+                return m;
+            }
+        }
+    }
+
+    /// Host do app (captura → openh264 → QUIC) até a recepção do controlador, em localhost.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn video_e_cursor_de_ponta_a_ponta() {
+        let id = Identity::generate().unwrap();
+        let server = server_endpoint((Ipv4Addr::LOCALHOST, 0).into(), &id).unwrap();
+        let addr = server.local_addr().unwrap();
+        let aceitar = tokio::spawn(async move { server.accept().await.unwrap().await.unwrap() });
+        let client = client_endpoint(addr).unwrap();
+        let controlador = connect(&client, addr, Pin::Sha256(id.fingerprint()))
+            .await
+            .unwrap();
+        let host = aceitar.await.unwrap();
+
+        let (saida, mut rx) = mpsc::channel(1024);
+        let monitor = DisplayInfo {
+            id: 3,
+            width: 160,
+            height: 96,
+            shared: true,
+            ..DisplayInfo::default()
+        };
+        let mut midia = MidiaApp::new(
+            CanalMidia { conn: host, saida },
+            Fonte::Sintetica,
+            vec![monitor],
+        );
+        midia
+            .mensagem(&Msg::StartVideo(StartVideo {
+                display_id: 3,
+                ..StartVideo::default()
+            }))
+            .await;
+        let Msg::CodecSelected(c) = proxima(&mut rx, |m| matches!(m, Msg::CodecSelected(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!((c.display_id, c.width, c.height), (3, 160, 96));
+
+        // Controlador: recepção pelo `stream_id` do `CodecSelected`, como a janela faz.
+        let decodificados = Arc::new(AtomicU64::new(0));
+        let recepcoes = Recepcoes::default();
+        let r = RecepcaoVideo::iniciar(
+            3,
+            c.stream_id as u8,
+            Box::new(DecoderOpenH264::novo().unwrap()),
+            Box::new({
+                let d = decodificados.clone();
+                move |display, q| {
+                    assert_eq!((display, q.largura, q.altura), (3, 160, 96));
+                    d.fetch_add(1, Ordering::Relaxed);
+                }
+            }),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        travar(&recepcoes).insert(c.stream_id as u8, (3, r));
+        let leitor = tokio::spawn(ler_datagramas(controlador.clone(), recepcoes.clone()));
+        for _ in 0..400 {
+            if decodificados.load(Ordering::Relaxed) >= 5 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(decodificados.load(Ordering::Relaxed) >= 5);
+
+        // Cursor: a forma no stream de cursor, antes do `CursorShapeRef`; a posição no controle.
+        let Msg::CursorShapeRef(r) =
+            proxima(&mut rx, |m| matches!(m, Msg::CursorShapeRef(_))).await
+        else {
+            unreachable!()
+        };
+        let mut uni = controlador.accept_uni().await.unwrap();
+        let mut cab = [0u8; 4 + ShapeHeader::LEN];
+        uni.read_exact(&mut cab).await.unwrap();
+        assert_eq!(cab[..4], STREAM_MAGIC);
+        let h = ShapeHeader::decode(cab[4..].try_into().unwrap()).unwrap();
+        assert_eq!((h.hash, h.width, h.height), (r.hash, 2, 2));
+        let Msg::CursorPos(p) = proxima(&mut rx, |m| matches!(m, Msg::CursorPos(_))).await else {
+            unreachable!()
+        };
+        assert!(p.visible && p.display_id == 3 && p.y == u32::from(normalizar(5, 96)));
+
+        // Parar confirma com `VideoStopped` e solta a captura.
+        midia
+            .mensagem(&Msg::StopVideo(StopVideo { display_id: 3 }))
+            .await;
+        let Msg::VideoStopped(v) = proxima(&mut rx, |m| matches!(m, Msg::VideoStopped(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(v.display_id, 3);
+        assert!(midia.captura.is_none());
+        drop(midia);
+        leitor.abort();
+    }
 
     #[test]
     fn cursor_normalizado_nos_cantos() {
