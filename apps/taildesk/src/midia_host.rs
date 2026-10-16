@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use taildesk_codec::{ConfigEncoder, OrdemRgb, QuadroRgb};
+use taildesk_codec::{CodecVideo, ConfigEncoder, OrdemRgb, QuadroRgb};
 use taildesk_media::video::{ConfigEnvio, EnvioVideo};
 use taildesk_platform::captura::{FormaCursor, FormatoPixel, Quadro};
 use taildesk_proto::control::{
@@ -35,6 +35,27 @@ const FPS_HARDWARE: f32 = 60.0;
 const INTERVALO_STATS: Duration = Duration::from_secs(1);
 /// Alvo inicial, antes do primeiro quadro dizer o tamanho real da captura.
 const BITRATE_BPS: u32 = 8_000_000;
+
+/// Codecs do `Hello.decode_caps` que o TailDesk sabe codificar (vazio = controlador antigo, só
+/// H.264).
+fn codecs_aceitos(caps: &[taildesk_proto::control::CodecCap]) -> Vec<CodecVideo> {
+    caps.iter()
+        .filter_map(|c| match Codec::try_from(c.codec).ok()? {
+            Codec::H264 => Some(CodecVideo::H264),
+            Codec::Hevc => Some(CodecVideo::Hevc),
+            Codec::Av1 => Some(CodecVideo::Av1),
+            _ => None,
+        })
+        .collect()
+}
+
+fn codec_proto(c: CodecVideo) -> Codec {
+    match c {
+        CodecVideo::H264 => Codec::H264,
+        CodecVideo::Hevc => Codec::Hevc,
+        CodecVideo::Av1 => Codec::Av1,
+    }
+}
 
 /// Alvo de taxa para o tamanho e o fps: 0,07 bit por pixel por quadro, entre 4 e 30 Mbit/s
 /// (1080p60 ≈ 8,7 Mbit/s; 2560x1600 a 60 fps ≈ 17 Mbit/s). A seleção adaptativa refina depois.
@@ -493,9 +514,11 @@ impl MidiaApp {
                 }
             }
         }
-        // Hardware primeiro (NVENC, VA-API), openh264 por último; o probe codifica um quadro.
-        let encoder = tokio::task::spawn_blocking(|| {
-            for opcao in taildesk_codec::opcoes_encoder() {
+        // O melhor codec que o controlador decodifica, hardware primeiro (NVENC, VA-API) e o
+        // openh264 por último; o probe codifica um quadro.
+        let aceitos = codecs_aceitos(&self.canal.decode_caps);
+        let encoder = tokio::task::spawn_blocking(move || {
+            for opcao in taildesk_codec::candidatos_encoder(&aceitos) {
                 let fps = if opcao.hardware() {
                     FPS_HARDWARE
                 } else {
@@ -508,7 +531,8 @@ impl MidiaApp {
                 match opcao.abrir_encoder(config) {
                     Ok(enc) => return Ok((enc, fps)),
                     Err(e) => eprintln!(
-                        "taildesk: encoder {} ({}) indisponível: {e}",
+                        "taildesk: encoder {} {} ({}) indisponível: {e}",
+                        taildesk_codec::nome_codec(opcao.codec),
                         opcao.backend,
                         opcao.gpu.as_deref().unwrap_or("CPU")
                     ),
@@ -520,11 +544,14 @@ impl MidiaApp {
         .map_err(|e| e.to_string())
         .and_then(|r| r);
         let mut fps = FPS_SOFTWARE;
+        let mut codec = CodecVideo::H264;
         let envio = encoder.and_then(|(enc, f)| {
             fps = f;
             let (nome, gpu) = (enc.nome(), enc.gpu().unwrap_or_default().to_string());
+            codec = enc.codec();
             eprintln!(
-                "taildesk: vídeo do monitor {id}: {nome} ({})",
+                "taildesk: vídeo do monitor {id}: {} em {nome} ({})",
+                taildesk_codec::nome_codec(codec),
                 if gpu.is_empty() { "CPU" } else { &gpu }
             );
             let stream_id = self.proximo_stream;
@@ -562,7 +589,7 @@ impl MidiaApp {
             .enviar(Msg::CodecSelected(CodecSelected {
                 display_id: id,
                 stream_id: stream_id.into(),
-                codec: Codec::H264.into(),
+                codec: codec_proto(codec).into(),
                 profile: 0,
                 chroma444: false,
                 width: m.width,
@@ -753,7 +780,11 @@ mod tests {
             ..DisplayInfo::default()
         };
         let mut midia = MidiaApp::new(
-            CanalMidia { conn: host, saida },
+            CanalMidia {
+                conn: host,
+                saida,
+                decode_caps: Vec::new(),
+            },
             Fonte::Sintetica,
             vec![monitor],
         );

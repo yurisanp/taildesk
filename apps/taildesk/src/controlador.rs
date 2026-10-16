@@ -14,13 +14,13 @@ use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::{
     CloseRequestResponse, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel,
 };
-use taildesk_codec::QuadroYuv;
+use taildesk_codec::{CodecVideo, QuadroYuv};
 use taildesk_keyboard::{Controller, Hid, KeyMsg, Keymap, Level, Mode, Mods, Translation};
 use taildesk_media::video::RecepcaoVideo;
 use taildesk_overlay::{Overlay, SystemOverlay};
 use taildesk_proto::control::{
-    AbsPos, Button, CodecSelected, Control, Feature, Hello, KeyboardInfo, MouseButton, MouseMove,
-    Msg, Platform, RequestKeyframe, Scroll, mouse_move,
+    AbsPos, Button, Codec, CodecCap, CodecSelected, Control, Feature, Hello, KeyboardInfo,
+    MouseButton, MouseMove, Msg, Platform, RequestKeyframe, Scroll, mouse_move,
 };
 use taildesk_session::conexao::PORTA;
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
@@ -152,7 +152,12 @@ impl SessaoUi {
         };
         let display = c.display_id;
         let mut falhas = Vec::new();
-        let decoder = taildesk_codec::abrir_decoder(&mut falhas);
+        let codec = match Codec::try_from(c.codec) {
+            Ok(Codec::Hevc) => CodecVideo::Hevc,
+            Ok(Codec::Av1) => CodecVideo::Av1,
+            _ => CodecVideo::H264,
+        };
+        let decoder = taildesk_codec::abrir_decoder(codec, &mut falhas);
         for (opcao, e) in falhas {
             eprintln!(
                 "taildesk: decoder {} ({}) indisponível: {e}",
@@ -745,6 +750,21 @@ async fn rodar(
         .as_ref()
         .and_then(|n| config::ler().hosts.get(n).copied());
     let pin = conhecido.map_or(Pin::FirstContact, Pin::Sha256);
+    // H.264 sempre; HEVC e AV1 quando há decoder de hardware (abre decoders para testar).
+    let decode_caps = tokio::task::spawn_blocking(taildesk_codec::codecs_para_decodificar)
+        .await
+        .unwrap_or_else(|_| vec![CodecVideo::H264])
+        .into_iter()
+        .map(|c| CodecCap {
+            codec: match c {
+                CodecVideo::H264 => Codec::H264,
+                CodecVideo::Hevc => Codec::Hevc,
+                CodecVideo::Av1 => Codec::Av1,
+            }
+            .into(),
+            ..CodecCap::default()
+        })
+        .collect();
     let hello = Hello {
         app_version: env!("CARGO_PKG_VERSION").into(),
         platform: Some(Platform {
@@ -753,6 +773,7 @@ async fn rodar(
             device_model: String::new(),
         }),
         features: vec![Feature::Files.into(), Feature::MultiDisplay.into()],
+        decode_caps,
         keyboard: Some(teclado),
         ..Hello::default()
     };

@@ -15,9 +15,22 @@ mod h264;
 pub mod linux;
 mod openh264;
 mod selecao;
+#[cfg(windows)]
+pub mod windows;
 
 pub use crate::openh264::{DecoderOpenH264, EncoderOpenH264};
-pub use crate::selecao::{Opcao, abrir_decoder, abrir_encoder, opcoes_decoder, opcoes_encoder};
+pub use crate::selecao::{
+    Opcao, abrir_decoder, candidatos_encoder, codecs_para_decodificar, nome_codec, opcoes_decoder,
+    opcoes_encoder,
+};
+
+/// Codec de vídeo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CodecVideo {
+    H264,
+    Hevc,
+    Av1,
+}
 
 /// Ordem dos bytes de cada pixel da imagem capturada (4 bytes por pixel, o 4º ignorado).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +149,11 @@ pub trait VideoEncoder: Send {
     /// GPU que codifica (`None` = CPU).
     fn gpu(&self) -> Option<&str> {
         None
+    }
+
+    /// Codec que sai.
+    fn codec(&self) -> CodecVideo {
+        CodecVideo::H264
     }
 
     /// Codifica `quadro` e escreve o access unit (Annex-B) em `saida`, que é limpo antes.

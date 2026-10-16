@@ -1,4 +1,4 @@
-//! Decoder H.264 no NVDEC (GPUs NVIDIA), pelo `libnvcuvid.so.1` do driver.
+//! Decoder H.264, HEVC ou AV1 no NVDEC (GPUs NVIDIA), pelo `libnvcuvid.so.1` do driver.
 //!
 //! O parser do próprio NVDEC lê o Annex-B, cria o decoder no primeiro SPS e entrega cada quadro
 //! sem atraso (`ulMaxDisplayDelay = 0`). O quadro decodificado (NV12 na GPU) é copiado para a
@@ -9,7 +9,50 @@ use std::sync::OnceLock;
 
 use super::cuda::{Contexto, CuDevice, Cuda};
 use super::sys::nvcuvid::*;
-use crate::{ErroCodec, Faixa, FormatoYuv, Matriz, PlanoYuv, QuadroYuv, VideoDecoder};
+use crate::{CodecVideo, ErroCodec, Faixa, FormatoYuv, Matriz, PlanoYuv, QuadroYuv, VideoDecoder};
+
+fn tipo_cuvid(c: CodecVideo) -> cudaVideoCodec {
+    match c {
+        CodecVideo::H264 => cudaVideoCodec_H264,
+        CodecVideo::Hevc => cudaVideoCodec_HEVC,
+        CodecVideo::Av1 => cudaVideoCodec_AV1,
+    }
+}
+
+/// Codecs (8 bits, 4:2:0) que o NVDEC da GPU `dev` decodifica, perguntado uma vez por GPU.
+pub fn codecs(dev: CuDevice) -> Vec<CodecVideo> {
+    static CACHE: std::sync::Mutex<Vec<(CuDevice, Vec<CodecVideo>)>> =
+        std::sync::Mutex::new(Vec::new());
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, c)) = cache.iter().find(|(d, _)| *d == dev) {
+        return c.clone();
+    }
+    let consultar = || -> Option<Vec<CodecVideo>> {
+        let lib = lib()?;
+        let ctx = Contexto::novo(Cuda::carregar()?, dev).ok()?;
+        ctx.com(|| {
+            [CodecVideo::H264, CodecVideo::Hevc, CodecVideo::Av1]
+                .into_iter()
+                .filter(|&c| {
+                    // SAFETY: estrutura POD do cuviddec.h, zerada; o contexto está atual.
+                    unsafe {
+                        let mut caps: CUVIDDECODECAPS = std::mem::zeroed();
+                        caps.eCodecType = tipo_cuvid(c);
+                        caps.eChromaFormat = cudaVideoChromaFormat_420;
+                        caps.nBitDepthMinus8 = 0;
+                        lib.cuvidGetDecoderCaps(&mut caps) == 0 && caps.bIsSupported != 0
+                    }
+                })
+                .collect()
+        })
+        .ok()
+    };
+    let c = consultar().unwrap_or_default();
+    cache.push((dev, c.clone()));
+    c
+}
 
 fn lib() -> Option<&'static LibNvcuvid> {
     static LIB: OnceLock<Option<LibNvcuvid>> = OnceLock::new();
@@ -43,6 +86,7 @@ pub fn gpus() -> Vec<(CuDevice, String, String)> {
 /// O que os callbacks do parser mexem (o parser recebe um ponteiro para isto).
 struct Estado {
     lib: &'static LibNvcuvid,
+    codec: cudaVideoCodec,
     decoder: CUvideodecoder,
     /// Tamanho do quadro (área de exibição) e altura da superfície do decoder.
     largura: u32,
@@ -70,7 +114,7 @@ impl Estado {
 unsafe extern "C" fn sequencia(dados: *mut c_void, formato: *mut CUVIDEOFORMAT) -> c_int {
     // SAFETY: o parser chama com o `Estado` que registramos e um formato válido.
     let (e, f) = unsafe { (&mut *dados.cast::<Estado>(), &*formato) };
-    if f.codec != cudaVideoCodec_H264
+    if f.codec != e.codec
         || f.chroma_format != cudaVideoChromaFormat_420
         || f.bit_depth_luma_minus8 != 0
     {
@@ -179,13 +223,14 @@ unsafe extern "C" fn exibir(dados: *mut c_void, info: *mut CUVIDPARSERDISPINFO) 
     }
 }
 
-/// Decoder H.264 no NVDEC de uma GPU.
+/// Decoder no NVDEC de uma GPU.
 pub struct DecoderNvdec {
     lib: &'static LibNvcuvid,
     ctx: Box<Contexto>,
     parser: CUvideoparser,
     estado: Box<Estado>,
     gpu: String,
+    codec: CodecVideo,
 }
 
 // SAFETY: parser, decoder e contexto são handles do driver usados por uma thread de cada vez
@@ -196,17 +241,19 @@ impl std::fmt::Debug for DecoderNvdec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DecoderNvdec")
             .field("gpu", &self.gpu)
+            .field("codec", &self.codec)
             .finish_non_exhaustive()
     }
 }
 
 impl DecoderNvdec {
-    pub fn novo(dev: CuDevice, gpu: String) -> Result<Self, ErroCodec> {
+    pub fn novo(dev: CuDevice, gpu: String, codec: CodecVideo) -> Result<Self, ErroCodec> {
         let cuda = Cuda::carregar().ok_or_else(|| erro("sem libcuda"))?;
         let lib = lib().ok_or_else(|| erro("sem libnvcuvid"))?;
         let ctx = Box::new(Contexto::novo(cuda, dev).map_err(erro)?);
         let mut estado = Box::new(Estado {
             lib,
+            codec: tipo_cuvid(codec),
             decoder: std::ptr::null_mut(),
             largura: 0,
             altura: 0,
@@ -221,7 +268,7 @@ impl DecoderNvdec {
         // junto do parser até `drop`, e os callbacks têm as assinaturas do header.
         let parser = unsafe {
             let mut p: CUVIDPARSERPARAMS = std::mem::zeroed();
-            p.CodecType = cudaVideoCodec_H264;
+            p.CodecType = tipo_cuvid(codec);
             p.ulMaxNumDecodeSurfaces = 1;
             p.ulMaxDisplayDelay = 0;
             p.pUserData = (&mut *estado as *mut Estado).cast();
@@ -241,6 +288,7 @@ impl DecoderNvdec {
             parser,
             estado,
             gpu,
+            codec,
         })
     }
 }
@@ -331,7 +379,7 @@ mod tests {
             eprintln!("sem NVDEC: pulando");
             return;
         };
-        let mut dec = DecoderNvdec::novo(dev, nome).unwrap();
+        let mut dec = DecoderNvdec::novo(dev, nome, CodecVideo::H264).unwrap();
         let mut enc = EncoderOpenH264::novo(ConfigEncoder {
             bitrate_bps: 4_000_000,
             fps_max: 30.0,
