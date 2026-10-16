@@ -175,13 +175,29 @@ export component JanelaSessao inherits Window {
                     accept
                 }
             }
-            if !root.ao-vivo || !root.tem-video: Text {
-                text: root.ao-vivo ? @tr("Esperando o vídeo do monitor…") : root.etapa;
-                color: #e9ebef;
-                font-size: 18px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                wrap: word-wrap;
+            // Sessão encerrada: o último quadro fica bem escuro por baixo do aviso, para não
+            // parecer que o vídeo só congelou.
+            if root.terminou && root.tem-video: Rectangle {
+                background: #000000d9;
+            }
+            if !root.ao-vivo || !root.tem-video: VerticalLayout {
+                alignment: center;
+                spacing: 10px;
+                padding: 24px;
+                if root.terminou: Text {
+                    text: @tr("Sessão encerrada");
+                    color: #ffffff;
+                    font-size: 26px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: root.ao-vivo ? @tr("Esperando o vídeo do monitor…") : root.etapa;
+                    color: #e9ebef;
+                    font-size: 18px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
             }
             if root.diagnostico-aberto && root.ao-vivo: PainelDiagnostico {
                 linhas: root.diagnostico;

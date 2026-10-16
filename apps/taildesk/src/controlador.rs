@@ -91,7 +91,7 @@ fn texto_fim(r: EndReason, host: &str) -> String {
         EndReason::NotAllowed => format!("{host} não aceita conexões deste computador."),
         EndReason::VersionMismatch => format!("{host} usa outra versão do TailDesk."),
         EndReason::ByHost => format!("{host} encerrou a sessão."),
-        EndReason::ByUser => "Sessão encerrada.".into(),
+        EndReason::ByUser => "Você encerrou a sessão.".into(),
         EndReason::ProtocolError => format!("{host} mandou algo inesperado; sessão encerrada."),
         EndReason::Lost => format!("A conexão com {host} caiu."),
     }
