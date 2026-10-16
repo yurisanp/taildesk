@@ -70,6 +70,11 @@ fn ativar_decoder(codec: CodecVideo) -> Result<IMFTransform, ErroCodec> {
             &mut n,
         )
         .map_err(|e| erro("MFTEnumEx", e))?;
+        // Sem decoder registrado o MF devolve zero itens e, às vezes, a lista nula.
+        if lista.is_null() || n == 0 {
+            windows::Win32::System::Com::CoTaskMemFree(Some(lista.cast()));
+            return Err(erro("MFTEnumEx", format!("sem decoder para {codec:?}")));
+        }
         let ativadores = std::slice::from_raw_parts_mut(lista, n as usize);
         let mut r = Err(erro("MFTEnumEx", format!("sem decoder para {codec:?}")));
         for a in ativadores.iter_mut() {
