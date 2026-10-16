@@ -28,34 +28,49 @@ impl I420 {
 
     /// Converte `q` (que precisa caber nos buffers: chame [`I420::preparar`] antes).
     pub fn converter(&mut self, q: &QuadroRgb<'_>) {
-        let (r, g, b) = match q.ordem {
-            OrdemRgb::Bgrx => (2, 1, 0),
-            OrdemRgb::Rgbx => (0, 1, 2),
-        };
+        // Índices constantes por ordem: o laço interno vetoriza.
+        match q.ordem {
+            OrdemRgb::Bgrx => self.converter_em::<2, 1, 0>(q),
+            OrdemRgb::Rgbx => self.converter_em::<0, 1, 2>(q),
+        }
+    }
+
+    fn converter_em<const R: usize, const G: usize, const B: usize>(&mut self, q: &QuadroRgb<'_>) {
         let l = self.largura as usize;
         let meia = l / 2;
-        for by in 0..self.altura as usize / 2 {
-            let l0 = &q.dados[2 * by * q.stride..];
-            let l1 = &q.dados[(2 * by + 1) * q.stride..];
-            let (y0, resto) = self.y[2 * by * l..].split_at_mut(l);
-            let y1 = &mut resto[..l];
-            for bx in 0..meia {
-                let mut soma = [0i32; 3];
-                for (linha, ys) in [(l0, &mut *y0), (l1, &mut *y1)] {
-                    for dx in 0..2 {
-                        let x = 2 * bx + dx;
-                        let p = &linha[x * 4..x * 4 + 4];
-                        let (pr, pg, pb) = (i32::from(p[r]), i32::from(p[g]), i32::from(p[b]));
-                        ys[x] = luma(pr, pg, pb);
-                        soma[0] += pr;
-                        soma[1] += pg;
-                        soma[2] += pb;
-                    }
-                }
-                let [sr, sg, sb] = soma.map(|s| (s + 2) >> 2);
-                let (u, v) = croma(sr, sg, sb);
-                self.u[by * meia + bx] = u;
-                self.v[by * meia + bx] = v;
+        let linhas_y = self.y.chunks_exact_mut(2 * l);
+        let linhas_uv = self
+            .u
+            .chunks_exact_mut(meia)
+            .zip(self.v.chunks_exact_mut(meia));
+        for (by, (ys, (us, vs))) in linhas_y.zip(linhas_uv).enumerate() {
+            let l0 = &q.dados[2 * by * q.stride..][..l * 4];
+            let l1 = &q.dados[(2 * by + 1) * q.stride..][..l * 4];
+            let (y0, y1) = ys.split_at_mut(l);
+            let pares = l0
+                .chunks_exact(8)
+                .zip(l1.chunks_exact(8))
+                .zip(y0.chunks_exact_mut(2).zip(y1.chunks_exact_mut(2)))
+                .zip(us.iter_mut().zip(vs.iter_mut()));
+            for (((a, b), (ya, yb)), (u, v)) in pares {
+                let px = |p: &[u8], i: usize| {
+                    (
+                        i32::from(p[i * 4 + R]),
+                        i32::from(p[i * 4 + G]),
+                        i32::from(p[i * 4 + B]),
+                    )
+                };
+                let (p0, p1, p2, p3) = (px(a, 0), px(a, 1), px(b, 0), px(b, 1));
+                ya[0] = luma(p0.0, p0.1, p0.2);
+                ya[1] = luma(p1.0, p1.1, p1.2);
+                yb[0] = luma(p2.0, p2.1, p2.2);
+                yb[1] = luma(p3.0, p3.1, p3.2);
+                let media = |s: i32| (s + 2) >> 2;
+                (*u, *v) = croma(
+                    media(p0.0 + p1.0 + p2.0 + p3.0),
+                    media(p0.1 + p1.1 + p2.1 + p3.1),
+                    media(p0.2 + p1.2 + p2.2 + p3.2),
+                );
             }
         }
     }
