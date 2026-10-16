@@ -20,19 +20,25 @@ C → H  Hello {
           proto_version: 1, app_version, platform {os, arch, device_model},
           decode_caps: [CodecCap{codec, profile, max_w, max_h, chroma444, hw, gpu_output}],
           display_prefs {fit, scale_factor, max_fps}, features: [clipboard, files, audio, multi_display, ...],
-          clock: t_client_ns
+          clock: t_client_ns, keyboard, password  (senha de acesso salva; vazia = pedir acesso)
        }
 H → C  HelloAck {
           proto_version, host_name, platform, displays: [DisplayInfo] (completo em `13-multimonitor.md` §3: posição, tamanho físico e lógico, escala, rotação, `shared`),
           encode_caps: [CodecCap] (codecs que o host tem encoder), permissions: Permissions, consent: Required|NotRequired,
-          clock: t_host_ns  (+ eco de t_client_ns p/ estimar offset/RTT)
+          clock: t_host_ns  (+ eco de t_client_ns p/ estimar offset/RTT), keyboard,
+          password_enabled  (o host aceita senha de acesso)
        }
 H → C  ConsentResult { granted, by_user?, permissions }        (se Required)
 C → H  StartVideo { display_id, wanted: QualityPrefs, priority }   (um por monitor; vários podem estar ativos)
 H → C  CodecSelected { display_id, codec, profile, chroma, w, h, fps_target, bitrate_kbps, color: ColorInfo, stream_id }
 ...    (vídeo começa por datagrama; primeiro frame é keyframe/refresh completo)
 ```
-A identidade do controlador **não** vem do `Hello` — vem do `Overlay::identify(remote_addr)` no host (whois/NodeInfo). O `Hello` só traz preferências.
+A identidade do controlador **não** vem do `Hello` — vem do `Overlay::identify(remote_addr)` no host (whois/NodeInfo). O `Hello` só traz preferências e, opcionalmente, a senha.
+
+**Senha de acesso** (fase 4):
+- `Hello.password` (tag 9, ≤ 128 bytes, `limits::PASSWORD_LEN`): certa, entra sem o diálogo de consentimento; errada, `Close(BAD_PASSWORD)`; vazia, segue o pedido de acesso normal. Vai só dentro do QUIC com o certificado do host conferido; o host guarda só o hash (argon2). O `Debug` do `Hello` mostra `***` no lugar dela.
+- `HelloAck.password_enabled` (tag 11): o host aceita senha, então o controlador pode oferecer o campo enquanto espera o consentimento.
+- Senhas erradas demais do mesmo peer: `Close(TOO_MANY_ATTEMPTS)` e o host não confere por um tempo.
 
 ## 3. Mensagens de controle (protobuf, `oneof`)
 
@@ -57,7 +63,7 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | Vídeo | `StartVideo{display_id, wanted, priority}`, `CodecSelected{display_id, stream_id, ...}`, `RequestKeyframe{display}`, `PictureLoss{display, last_good_seq}`, `Nack{display, frame_seq, missing_frag_bitmap}`, `QualityPrefs{fps_max, mode: Auto|Text|Motion|LowBandwidth, chroma444, codec, bitrate_kbps}`, `SetVideoQuality{display_id, wanted: QualityPrefs}` (C→H, tag 30), `StopVideo{display_id}`, `SetPriority{display_id, FOCUSED|VISIBLE}`, `VideoStopped{display_id, reason}`, `VideoStats{display_id, encoder, gpu, fps, bitrate, encode_us, ..., est_kbps}` (H→C, 1×/s, só para o painel de diagnóstico), `DisplaysChanged{displays}` (sem `SwitchDisplay`: trocar = Stop + Start) |
 | Input | Teclado: ver `11-teclado.md` §3 (`KeyboardInfo`, `Key`, `KeyShortcut`, `KeyChar`, `KeyboardMode`, `ReleaseAll`), `MouseMove{display_id, x, y (u16 normalizado no monitor) | rel}`, `MouseButton{btn, down}`, `Scroll{dx, dy, precise}` (convenção abaixo), `Touch{id, phase, x, y, pressure}`, `Gamepad{...}` (futuro) |
 | Cursor | `CursorPos{display_id, x, y, visible}`, `CursorShapeRef{hash}` (forma completa no stream de cursor, §3.2) |
-| Clipboard | `ClipboardOffer{formats}`, `ClipboardData{format, bytes}` (texto/HTML/PNG; arquivos → transferência explícita) |
+| Clipboard | `ClipboardOffer`, `ClipboardRequest`, `ClipboardData`, `ClipboardError` (tags 70–73; detalhes em §3.3) |
 | Arquivos (80–89) | `FsRootsRequest`, `FsRoots`, `FsList`, `FsListing`, `FileOffer`, `FileRequest`, `FileAccept`, `FileCancel`, `FileDone`, `FileError` (detalhe em §3.1) |
 | QoS | `ReceiverReport{display, recv_kbps, loss_pct, jitter_ms, decode_ms, render_ms, queue_frames, audio_loss_pct, audio_jitter_ms, audio_buffer_ms, concealed_ms}` (a cada 250 ms) |
 | Áudio (`15-audio.md` §6.5) | `StartAudio{stream_id, prefs: AudioPrefs{profile: AUTO|VOICE|MUSIC, max_kbps, channels}}`, `AudioSelected{stream_id, codec=OPUS, sample_rate, channels, frame_ms_x10, bitrate_kbps, redundancy, inband_fec}`, `AudioConfig{stream_id, bitrate_kbps, frame_ms_x10, redundancy}` (troca a quente), `StopAudio{stream_id}`, `AudioStopped{stream_id, reason: BY_CONTROLLER|BY_HOST|NO_PERMISSION|DEVICE_ERROR}` |
@@ -72,7 +78,7 @@ Codec e taxa escolhidos pelo usuário (seletor da sessão e Configurações):
 - `VideoStats.est_kbps` (tag 13): banda que o QUIC do host estima para o caminho (janela de congestionamento ÷ RTT), em kbit/s; `0` = sem estimativa.
 - PyroWave (`Codec = 6`) é opcional e só entra quando escolhido à mão.
 
-**`CloseReason`** (`Close.reason`): `UNSPECIFIED = 0`, `BY_CONTROLLER = 1`, `BY_HOST = 2`, `CONSENT_DENIED = 3` (a pessoa no host recusou), `VERSION_MISMATCH = 4`, `PROTOCOL_ERROR = 5`, `CONSENT_TIMEOUT = 6` (ninguém respondeu ao pedido de acesso em 60 s), `NOT_ALLOWED = 7` (o host não aceita conexões deste peer, por configuração ou política). Com `CONSENT_DENIED`, `CONSENT_TIMEOUT` e `NOT_ALLOWED` a UI distingue "recusou", "não respondeu" e "não aceita conexões" (`12-levantamento-ux.md` §5.3).
+**`CloseReason`** (`Close.reason`): `UNSPECIFIED = 0`, `BY_CONTROLLER = 1`, `BY_HOST = 2`, `CONSENT_DENIED = 3` (a pessoa no host recusou), `VERSION_MISMATCH = 4`, `PROTOCOL_ERROR = 5`, `CONSENT_TIMEOUT = 6` (ninguém respondeu ao pedido de acesso em 60 s), `NOT_ALLOWED = 7` (o host não aceita conexões deste peer, por configuração ou política), `BAD_PASSWORD = 8` (senha de acesso errada, ou o host não tem mais senha), `TOO_MANY_ATTEMPTS = 9` (senhas erradas demais deste peer; o host não confere por um tempo). Com `CONSENT_DENIED`, `CONSENT_TIMEOUT` e `NOT_ALLOWED` a UI distingue "recusou", "não respondeu" e "não aceita conexões" (`12-levantamento-ux.md` §5.3).
 
 **`Scroll`**: valores positivos são **para baixo e para a direita**, como no libinput. Com `precise = false`, `dx`/`dy` contam **dentes da roda**; com `precise = true`, são **pixels lógicos** (touchpad). `dx = dy = 0` encerra o gesto do touchpad.
 
@@ -80,7 +86,7 @@ Regras: campos novos sempre opcionais; `proto_version` maior só quando quebrar;
 
 ### 3.1 Arquivos (tags 80–89, fase 3)
 
-Caminhos são relativos a uma raiz (`root`), com `/` como separador, e quem recebe sempre os passa por `taildesk_files::resolve_in_root`. A **raiz 0** (`files::INBOX_ROOT`) é a pasta de entrada de quem recebe (`~/Downloads/TailDesk`).
+Caminhos são relativos a uma raiz (`root`), com `/` como separador, e quem recebe sempre os passa por `taildesk_files::resolve_in_root`. A **raiz 0** (`files::INBOX_ROOT`) é a pasta de entrada de quem recebe (`~/Downloads/TailDesk`). A raiz **`files::CLIPBOARD_ROOT` = `u32::MAX`** (só leitura, nunca aparece em `FsRoots`) são os arquivos copiados na área de transferência de quem envia, aceita em `FileRequest` e `FsList` com caminho `"<índice em ClipboardOffer.files>/<nome>[/...]"` da oferta em vigor (§3.3).
 
 | Tag | Mensagem | Sentido | Campos |
 |---|---|---|---|
@@ -111,6 +117,23 @@ Stream QUIC uni do host para o controlador:
 - Em seguida, `width × height × 4` bytes de pixels **RGBA8 sRGB, sem pré-multiplicação**.
 - A forma é sempre enviada **antes** do `CursorShapeRef{hash}` que a referencia.
 - Cache LRU: **64** formas no host e **128** no controlador.
+
+### 3.3 Área de transferência (tags 70–73, fase 4)
+
+Quem copia manda uma `ClipboardOffer` com os formatos (e, para arquivos, a lista). O outro lado põe a oferta na área de transferência do sistema sem o conteúdo e só pede o formato (`ClipboardRequest`) quando alguém cola. O conteúdo volta em pedaços de `ClipboardData`, entre as outras mensagens de controle, para um PNG grande não segurar o mouse. Sem `Permissions.clipboard` nada disso é atendido.
+
+| Tag | Mensagem | Campos |
+|---|---|---|
+| 70 | `ClipboardOffer` | `seq`, `formats: [ClipFormat]`, `sizes` (na ordem de `formats`, 0 = desconhecido), `files: [ClipFile{name, size, dir}]` (com `FILES`, só o primeiro nível). `formats` vazio = ficou vazia. Só sai quando a área de transferência muda por alguém daquele lado, nunca pela oferta do peer |
+| 71 | `ClipboardRequest` | `seq, format`: alguém colou |
+| 72 | `ClipboardData` | `seq, format, offset, total, data`: `data` vai em `offset` de `total` bytes; o último pedaço é o que chega a `total`; conteúdo vazio = um pedaço só com `total = 0` |
+| 73 | `ClipboardError` | `seq, format, code: ClipErrorCode` |
+
+- **`ClipFormat`**: `UNSPECIFIED = 0`, `TEXT = 1` (UTF-8, quebras `\n`), `HTML = 2` (fragmento UTF-8, sem o cabeçalho "HTML Format" do Windows), `PNG = 3`, `FILES = 4` (lista em `ClipboardOffer.files`; o conteúdo vem pelos streams de arquivos).
+- **`ClipErrorCode`**: `UNSPECIFIED = 0`, `GONE = 1` (a oferta `seq` já foi trocada, ou nunca existiu), `DENIED = 2` (sem `Permissions.clipboard`), `TOO_BIG = 3` (passa de `CLIP_TOTAL`), `UNAVAILABLE = 4` (o sistema não entregou o formato, por exemplo porque o app que copiou fechou).
+- **`seq`**: cada lado numera as próprias ofertas; pedido de uma oferta que já foi trocada recebe `ClipboardError(GONE)`.
+- **Arquivos colados**: vêm pelos streams de arquivos (§3.1) com `FileRequest`/`FsList` na raiz `CLIPBOARD_ROOT` (`u32::MAX`), caminho `"<índice>/<nome>[/...]"`, onde o índice é a posição em `ClipboardOffer.files` da oferta em vigor.
+- **Limites** (`taildesk_proto::control::limits`): `CLIP_FORMATS = 8` formatos (e `sizes`) por oferta; `CLIP_FILES = 256` itens em `files` (o resto não vai); `CLIP_CHUNK = 32 KiB` por `ClipboardData`; `CLIP_TOTAL = 64 MiB` por formato.
 
 ## 4. Header de datagrama de mídia (binário, little-endian, 16 bytes)
 
