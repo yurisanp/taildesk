@@ -19,16 +19,16 @@ use taildesk_keyboard::{Controller, Hid, KeyMsg, Keymap, Level, Mode, Mods, Tran
 use taildesk_media::video::RecepcaoVideo;
 use taildesk_overlay::{Overlay, SystemOverlay};
 use taildesk_proto::control::{
-    AbsPos, Button, Codec, CodecCap, CodecSelected, Control, Feature, Hello, KeyboardInfo,
-    MouseButton, MouseMove, Msg, Platform, QualityPrefs, RequestKeyframe, Scroll, SetVideoQuality,
-    mouse_move,
+    AbsPos, Button, Codec, CodecCap, CodecSelected, Control, ErrorCode, Feature, Hello,
+    KeyboardInfo, MouseButton, MouseMove, Msg, Platform, QualityPrefs, RequestKeyframe, Scroll,
+    SetVideoQuality, mouse_move,
 };
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
 use taildesk_session::conexao::{PORTA, clipboard};
 use taildesk_session::{ControllerState, CursorControlador, EndReason, UmPorVez, atalho};
 use taildesk_transport::{Pin, client_endpoint};
 use taildesk_tsapi::LocalApi;
-use taildesk_ui::{AbaMonitor, JanelaSessao, LinhaDiag, NivelQualidade, OpcaoCodec};
+use taildesk_ui::{AbaMonitor, JanelaMonitor, JanelaSessao, LinhaDiag, NivelQualidade, OpcaoCodec};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::preferencias::{self, CODECS, TAXAS_KBPS};
@@ -161,11 +161,18 @@ struct SessaoUi {
     local: Option<(u32, u16, u16)>,
     botoes: u8,
     painel: arquivos::Painel,
-    /// Recepção e decode do monitor ativo (a task dos datagramas entrega aqui).
+    /// Recepção e decode de cada monitor recebido (a task dos datagramas entrega aqui).
     recepcoes: Recepcoes,
-    tela: Tela,
-    /// Monitor do vídeo que a janela mostra agora.
-    video_display: Option<u32>,
+    /// Imagem de cada monitor recebido (`display_id` → tela), mostrada na janela da sessão
+    /// ou na janela do destacado.
+    telas: HashMap<u32, Tela>,
+    /// Monitor que a janela da sessão mostra agora.
+    mostrado: Option<u32>,
+    /// Abas destacadas em janela própria (`display_id` → janela).
+    janelas: HashMap<u32, JanelaMonitor>,
+    /// Último quadro de cada monitor, para a janela que passa a mostrá-lo não ficar preta até
+    /// o próximo (com a tela parada, pode demorar).
+    ultimas: HashMap<u32, Image>,
     contadores: Arc<Contadores>,
     diagnostico: Diagnostico,
     /// Codecs que este computador decodifica e que o host codifica (do `HelloAck`).
@@ -257,10 +264,10 @@ impl SessaoUi {
             }
         };
         self.diagnostico.video(c);
-        let (caixa, id) = (self.tela.caixa(), self.id);
+        let (caixa, id) = (self.telas.entry(display).or_default().caixa(), self.id);
         let ao_quadro = Box::new(move |_: u32, q: &QuadroYuv<'_>| {
             if caixa.guardar(q) {
-                na_sessao(id, SessaoUi::mostrar_quadro);
+                na_sessao(id, move |s| s.mostrar_quadro(display));
             }
         });
         let saida = self.saida.clone();
@@ -283,21 +290,23 @@ impl SessaoUi {
             }
             Err(e) => eprintln!("taildesk: vídeo: {e}"),
         }
-        if self.video_display != Some(display) {
-            // Outro monitor: não deixa o quadro do anterior na tela.
-            self.janela.set_tem_video(false);
-            self.video_display = Some(display);
-        }
     }
 
     fn parar_video(&self, display: u32) {
         travar(&self.recepcoes).retain(|_, (d, _)| *d != display);
     }
 
-    /// Chamado pelo decode (pela fila da interface) quando há quadro novo.
-    fn mostrar_quadro(&mut self) {
-        if let Some(img) = self.tela.proxima_imagem() {
-            self.contadores.exibidos.fetch_add(1, Ordering::Relaxed);
+    /// Chamado pelo decode (pela fila da interface) quando há quadro novo do monitor `display`.
+    fn mostrar_quadro(&mut self, display: u32) {
+        let Some(img) = self.telas.get_mut(&display).and_then(Tela::proxima_imagem) else {
+            return;
+        };
+        self.contadores.exibidos.fetch_add(1, Ordering::Relaxed);
+        self.ultimas.insert(display, img.clone());
+        if let Some(j) = self.janelas.get(&display) {
+            j.set_quadro(img);
+            j.set_tem_video(true);
+        } else if self.monitores.ativo() == Some(display) {
             self.janela.set_quadro(img);
             self.janela.set_tem_video(true);
         }
@@ -372,7 +381,12 @@ impl SessaoUi {
         if let Some(&t) = taxa.and_then(|i| TAXAS_KBPS.get(i)) {
             self.qualidade.bitrate_kbps = t;
         }
-        if let Some(display_id) = self.video_display {
+        let recebidos = self
+            .monitores
+            .ativo()
+            .into_iter()
+            .chain(self.monitores.destacados().iter().copied());
+        for display_id in recebidos.collect::<Vec<_>>() {
             self.enviar(Msg::SetVideoQuality(SetVideoQuality {
                 display_id,
                 wanted: Some(self.qualidade),
@@ -505,7 +519,9 @@ impl SessaoUi {
         m
     }
 
-    fn abas(&self) {
+    /// Faixa de abas e janelas dos destacados conforme o estado dos monitores.
+    fn abas(&mut self) {
+        self.sincronizar_janelas();
         let abas: Vec<AbaMonitor> = if self.monitores.mostrar_abas() {
             self.monitores
                 .abas()
@@ -520,6 +536,7 @@ impl SessaoUi {
                     .into(),
                     ativa: a.ativa,
                     liberada: a.liberado,
+                    destacada: a.destacada,
                 })
                 .collect()
         } else {
@@ -528,25 +545,139 @@ impl SessaoUi {
         self.janela.set_abas(ModelRc::new(VecModel::from(abas)));
     }
 
-    /// Redesenha o cursor do host em cima do vídeo.
+    /// Abre a janela de cada destacado novo, fecha a dos que voltaram para as abas e põe na
+    /// janela da sessão o último quadro do monitor que ela passou a mostrar.
+    fn sincronizar_janelas(&mut self) {
+        let destacados = self.monitores.destacados().to_vec();
+        let sairam: Vec<u32> = self
+            .janelas
+            .keys()
+            .copied()
+            .filter(|d| !destacados.contains(d))
+            .collect();
+        for d in sairam {
+            if let Some(j) = self.janelas.remove(&d) {
+                let _ = j.hide();
+            }
+        }
+        for d in destacados {
+            if !self.janelas.contains_key(&d) {
+                self.abrir_janela(d);
+            }
+        }
+        let ativo = self.monitores.ativo();
+        // Monitor que nenhuma janela mostra não guarda imagem.
+        let monitores = &self.monitores;
+        let visto = |d: &u32| Some(*d) == ativo || monitores.destacado(*d);
+        self.telas.retain(|d, _| visto(d));
+        self.ultimas.retain(|d, _| visto(d));
+        if self.mostrado != ativo {
+            self.mostrado = ativo;
+            match ativo.and_then(|d| self.ultimas.get(&d)) {
+                Some(img) => {
+                    self.janela.set_quadro(img.clone());
+                    self.janela.set_tem_video(true);
+                }
+                None => self.janela.set_tem_video(false),
+            }
+        }
+    }
+
+    /// Janela própria do monitor `display` (aba destacada).
+    fn abrir_janela(&mut self, display: u32) {
+        let j = match JanelaMonitor::new() {
+            Ok(j) => j,
+            Err(e) => {
+                self.janela
+                    .set_toast(format!("Não foi possível abrir a janela do monitor: {e}").into());
+                let mut out = Vec::new();
+                self.monitores.recolocar(display, &mut out);
+                self.enviar_todas(out);
+                return;
+            }
+        };
+        let numero = self
+            .monitores
+            .abas()
+            .iter()
+            .find(|a| a.display_id == display)
+            .map(|a| format!("Monitor {} · {}", a.numero, a.rotulo))
+            .unwrap_or_default();
+        j.set_host(self.host.as_str().into());
+        j.set_monitor(numero.into());
+        j.set_ao_vivo(self.ao_vivo());
+        if let Some(img) = self.ultimas.get(&display) {
+            j.set_quadro(img.clone());
+            j.set_tem_video(true);
+        }
+        let id = self.id;
+        let voltar = move || {
+            na_sessao_ja(id, |s| {
+                let mut out = Vec::new();
+                if s.monitores.recolocar(display, &mut out) {
+                    s.enviar_todas(out);
+                    s.abas();
+                    s.desenhar_cursor();
+                }
+            });
+        };
+        j.on_voltar(voltar);
+        j.window().on_close_requested(move || {
+            voltar();
+            CloseRequestResponse::HideWindow
+        });
+        let fraca = j.as_weak();
+        j.on_mudar_tela_cheia(move |cheia| {
+            if let Some(j) = fraca.upgrade() {
+                j.window().set_fullscreen(cheia);
+            }
+        });
+        j.on_mouse_moveu(move |x, y| {
+            na_sessao_ja(id, |s| s.mouse_moveu(Some(display), x, y));
+        });
+        j.on_mouse_botao(move |b, down, x, y| {
+            na_sessao_ja(id, |s| s.mouse_botao(Some(display), b, down, x, y));
+        });
+        j.on_mouse_rolou(move |dx, dy| {
+            na_sessao_ja(id, |s| s.mouse_rolou(dx, dy));
+        });
+        j.window()
+            .on_winit_window_event(move |_, ev| teclado_da_janela(id, ev));
+        if let Err(e) = j.show() {
+            eprintln!("taildesk: janela do monitor: {e}");
+        }
+        self.janelas.insert(display, j);
+    }
+
+    /// Redesenha o cursor do host em cima do vídeo da janela que mostra o monitor dele.
     fn desenhar_cursor(&mut self) {
         let local = if self.controla() { self.local } else { None };
-        let Some(d) = self.cursor.desenho(local) else {
+        let desenho = self.cursor.desenho(local);
+        let alvo = desenho.as_ref().map(|d| d.display_id);
+        let no_principal = alvo.is_some() && alvo == self.monitores.ativo();
+        if !no_principal {
             self.janela.set_cursor_visivel(false);
-            return;
-        };
-        let Some(m) = self.monitores.monitor_ativo() else {
-            self.janela.set_cursor_visivel(false);
-            return;
-        };
-        if d.display_id != m.id {
-            self.janela.set_cursor_visivel(false);
-            return;
         }
-        let (aw, ah) = (
-            self.janela.get_area_largura(),
-            self.janela.get_area_altura(),
-        );
+        for (&d, j) in &self.janelas {
+            if Some(d) != alvo {
+                j.set_cursor_visivel(false);
+            }
+        }
+        let Some(d) = desenho else { return };
+        let Some(m) = self.monitores.monitor(d.display_id).cloned() else {
+            return;
+        };
+        let area = if no_principal {
+            (
+                self.janela.get_area_largura(),
+                self.janela.get_area_altura(),
+            )
+        } else if let Some(j) = self.janelas.get(&m.id) {
+            (j.get_area_largura(), j.get_area_altura())
+        } else {
+            return;
+        };
+        let (aw, ah) = area;
         let (iw, ih) = (m.width.max(1) as f32, m.height.max(1) as f32);
         let escala = (aw / iw).min(ah / ih);
         let (ox, oy) = ((aw - iw * escala) / 2.0, (ah - ih * escala) / 2.0);
@@ -571,10 +702,17 @@ impl SessaoUi {
             }
             None => (0.0, 0.0, seta()),
         };
-        self.janela.set_cursor(imagem);
-        self.janela.set_cursor_x(px - hx);
-        self.janela.set_cursor_y(py - hy);
-        self.janela.set_cursor_visivel(true);
+        if no_principal {
+            self.janela.set_cursor(imagem);
+            self.janela.set_cursor_x(px - hx);
+            self.janela.set_cursor_y(py - hy);
+            self.janela.set_cursor_visivel(true);
+        } else if let Some(j) = self.janelas.get(&m.id) {
+            j.set_cursor(imagem);
+            j.set_cursor_x(px - hx);
+            j.set_cursor_y(py - hy);
+            j.set_cursor_visivel(true);
+        }
     }
 
     fn evento(&mut self, ev: EventoControlador) {
@@ -594,6 +732,9 @@ impl SessaoUi {
                     }
                     ControllerState::Live { permissions } => {
                         self.janela.set_ao_vivo(true);
+                        for j in self.janelas.values() {
+                            j.set_ao_vivo(true);
+                        }
                         self.janela.set_pede_senha(false);
                         if permissions.clipboard
                             && let Some(saida) = self.saida.clone()
@@ -609,6 +750,10 @@ impl SessaoUi {
                     ControllerState::Ended(r) => {
                         self.janela.set_ao_vivo(false);
                         self.janela.set_terminou(true);
+                        for j in self.janelas.values() {
+                            j.set_ao_vivo(false);
+                            j.set_terminou(true);
+                        }
                         self.janela.set_etapa(texto_fim(r, &self.host).into());
                         self.fim_senha(r);
                         self.saida = None;
@@ -684,6 +829,19 @@ impl SessaoUi {
                     self.parar_video(v.display_id);
                     self.monitores.on_video_stopped(&v, &mut out);
                 }
+                Msg::Error(e) if e.code == ErrorCode::TooManyStreams as i32 => {
+                    // Monitor a mais numa janela própria: volta a ser aba.
+                    if let Some(d) = e.display_id.filter(|&d| self.monitores.destacado(d)) {
+                        self.monitores.recolocar(d, &mut out);
+                        self.janela.set_toast(
+                            format!(
+                                "{} não consegue mandar mais monitores ao mesmo tempo.",
+                                self.host
+                            )
+                            .into(),
+                        );
+                    }
+                }
                 _ => {}
             },
         }
@@ -732,12 +890,22 @@ impl SessaoUi {
         }
     }
 
-    fn mouse_moveu(&mut self, x: f32, y: f32) {
-        let area = (
-            self.janela.get_area_largura(),
-            self.janela.get_area_altura(),
-        );
-        let ponto = self.monitores.ponto(area, (x, y), self.botoes != 0);
+    /// Mouse sobre o vídeo da janela da sessão (`onde = None`) ou da janela do destacado.
+    fn mouse_moveu(&mut self, onde: Option<u32>, x: f32, y: f32) {
+        let prender = self.botoes != 0;
+        let ponto = match onde {
+            None => {
+                let area = (
+                    self.janela.get_area_largura(),
+                    self.janela.get_area_altura(),
+                );
+                self.monitores.ponto(area, (x, y), prender)
+            }
+            Some(d) => self.janelas.get(&d).and_then(|j| {
+                let area = (j.get_area_largura(), j.get_area_altura());
+                self.monitores.ponto_destacado(d, area, (x, y), prender)
+            }),
+        };
         self.local = ponto;
         if let Some((display_id, x, y)) = ponto
             && self.controla()
@@ -753,7 +921,14 @@ impl SessaoUi {
         self.desenhar_cursor();
     }
 
-    fn mouse_botao(&mut self, b: PointerEventButton, down: bool, x: f32, y: f32) {
+    fn mouse_botao(
+        &mut self,
+        onde: Option<u32>,
+        b: PointerEventButton,
+        down: bool,
+        x: f32,
+        y: f32,
+    ) {
         let botao = match b {
             PointerEventButton::Left => Button::Left,
             PointerEventButton::Right => Button::Right,
@@ -768,7 +943,7 @@ impl SessaoUi {
         } else {
             self.botoes &= !bit;
         }
-        self.mouse_moveu(x, y);
+        self.mouse_moveu(onde, x, y);
         if self.controla() && (self.local.is_some() || !down) {
             self.enviar(Msg::MouseButton(MouseButton {
                 button: botao.into(),
@@ -786,6 +961,34 @@ impl SessaoUi {
                 precise: true,
             }));
         }
+    }
+}
+
+/// Teclado pelo código físico, antes do Slint (Tab, Alt e atalhos vão para o host), na janela
+/// da sessão e nas dos destacados. Perder o foco solta as teclas.
+fn teclado_da_janela(id: IdLocal, ev: &winit::event::WindowEvent) -> EventResult {
+    match ev {
+        winit::event::WindowEvent::KeyboardInput {
+            event,
+            is_synthetic: false,
+            ..
+        } => {
+            let Some(hid) = hid_de(event.physical_key) else {
+                return EventResult::Propagate;
+            };
+            let down = event.state.is_pressed();
+            let consumiu = na_sessao_ja(id, |s| s.tecla(hid, down)).unwrap_or(false);
+            if consumiu {
+                EventResult::PreventDefault
+            } else {
+                EventResult::Propagate
+            }
+        }
+        winit::event::WindowEvent::Focused(false) => {
+            na_sessao_ja(id, SessaoUi::foco_perdido);
+            EventResult::Propagate
+        }
+        _ => EventResult::Propagate,
     }
 }
 
@@ -898,6 +1101,19 @@ impl Controlador {
             fechar(id);
             CloseRequestResponse::HideWindow
         });
+        janela.on_destacar_aba(move |i| {
+            na_sessao_ja(id, |s| {
+                let abas = s.monitores.abas();
+                if let Some(a) = abas.get(i as usize) {
+                    let mut out = Vec::new();
+                    if s.monitores.destacar(a.display_id, &mut out) {
+                        s.enviar_todas(out);
+                        s.abas();
+                        s.desenhar_cursor();
+                    }
+                }
+            });
+        });
         janela.on_trocar_aba(move |i| {
             na_sessao_ja(id, |s| {
                 let abas = s.monitores.abas();
@@ -906,15 +1122,16 @@ impl Controlador {
                     if s.monitores.trocar(a.display_id, &mut out) {
                         s.enviar_todas(out);
                         s.abas();
+                        s.desenhar_cursor();
                     }
                 }
             });
         });
         janela.on_mouse_moveu(move |x, y| {
-            na_sessao_ja(id, |s| s.mouse_moveu(x, y));
+            na_sessao_ja(id, |s| s.mouse_moveu(None, x, y));
         });
         janela.on_mouse_botao(move |b, down, x, y| {
-            na_sessao_ja(id, |s| s.mouse_botao(b, down, x, y));
+            na_sessao_ja(id, |s| s.mouse_botao(None, b, down, x, y));
         });
         janela.on_mouse_rolou(move |dx, dy| {
             na_sessao_ja(id, |s| s.mouse_rolou(dx, dy));
@@ -930,26 +1147,8 @@ impl Controlador {
         janela
             .window()
             .on_winit_window_event(move |_, ev| match ev {
-                winit::event::WindowEvent::KeyboardInput {
-                    event,
-                    is_synthetic: false,
-                    ..
-                } => {
-                    let Some(hid) = hid_de(event.physical_key) else {
-                        return EventResult::Propagate;
-                    };
-                    let down = event.state.is_pressed();
-                    let consumiu = na_sessao_ja(id, |s| s.tecla(hid, down)).unwrap_or(false);
-                    if consumiu {
-                        EventResult::PreventDefault
-                    } else {
-                        EventResult::Propagate
-                    }
-                }
-                winit::event::WindowEvent::Focused(false) => {
-                    na_sessao_ja(id, SessaoUi::foco_perdido);
-                    EventResult::Propagate
-                }
+                winit::event::WindowEvent::KeyboardInput { .. }
+                | winit::event::WindowEvent::Focused(false) => teclado_da_janela(id, ev),
                 // Arrastar arquivos do sistema (Windows e X11; o Wayland vem por `ligar_soltar`).
                 winit::event::WindowEvent::HoveredFile(_) => {
                     na_sessao_ja(id, |s| s.painel.arrastando(&s.janela, true));
@@ -1008,8 +1207,10 @@ impl Controlador {
                 botoes: 0,
                 painel: arquivos::Painel::new(id, rt.clone()),
                 recepcoes: recepcoes.clone(),
-                tela: Tela::default(),
-                video_display: None,
+                telas: HashMap::new(),
+                mostrado: None,
+                janelas: HashMap::new(),
+                ultimas: HashMap::new(),
                 contadores: contadores.clone(),
                 diagnostico: Diagnostico::default(),
                 decodifica: Vec::new(),
@@ -1052,6 +1253,9 @@ fn fechar(id: IdLocal) {
             s.foco_perdido();
             if let Some(f) = s.fechar.take() {
                 let _ = f.send(());
+            }
+            for j in s.janelas.values() {
+                let _ = j.hide();
             }
             let _ = s.janela.hide();
         }

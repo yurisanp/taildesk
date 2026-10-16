@@ -26,8 +26,10 @@ use taildesk_session::{AcaoForma, CursorHost};
 use taildesk_transport::SaidaQuic;
 use tokio::sync::mpsc;
 
-/// Streams de vídeo ao mesmo tempo (`ErrorCode::TooManyStreams`).
-const MAX_FLUXOS: usize = 2;
+/// Streams de vídeo ao mesmo tempo (`ErrorCode::TooManyStreams`): até 4 com encoder de hardware,
+/// mas só 2 em software (openh264), que já pesa em 1440p (`13-multimonitor.md` §5).
+const MAX_FLUXOS: usize = 4;
+const MAX_FLUXOS_SOFTWARE: usize = 2;
 /// openh264 em software: 30 fps com folga em 1080p.
 const FPS_SOFTWARE: f32 = 30.0;
 /// NVENC e VA-API codificam 1080p em menos de 10 ms.
@@ -727,8 +729,12 @@ impl MidiaApp {
         let pedido = codec_video(prefs.codec);
         let taxa_fixa = taxa_pedida(&prefs);
         let bitrate_bps = taxa_fixa.unwrap_or(BITRATE_BPS);
+        let so_hardware = self.compartilhado.fluxos().len() >= MAX_FLUXOS_SOFTWARE;
         let encoder = tokio::task::spawn_blocking(move || {
             for opcao in candidatos(&aceitos, pedido) {
+                if so_hardware && !opcao.hardware() {
+                    continue;
+                }
                 let fps = if opcao.hardware() {
                     FPS_HARDWARE
                 } else {
@@ -795,6 +801,13 @@ impl MidiaApp {
         });
         let (stream_id, fluxo) = match envio {
             Ok(v) => v,
+            Err(e) if so_hardware => {
+                // Em software já saem 2 monitores; sem hardware livre, não cabe mais um.
+                eprintln!("taildesk: encoder: {e}");
+                self.erro(ErrorCode::TooManyStreams, id, String::new())
+                    .await;
+                return false;
+            }
             Err(e) => {
                 eprintln!("taildesk: encoder: {e}");
                 self.parou(id, VideoStopReason::EncoderError).await;

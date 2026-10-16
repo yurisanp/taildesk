@@ -12,6 +12,8 @@ export struct AbaMonitor {
     ativa: bool,
     // `false`: o host não liberou este monitor (Wayland).
     liberada: bool,
+    // Aberto numa janela própria (clicar traz de volta).
+    destacada: bool,
 }
 
 // Uma linha do painel de diagnóstico; `titulo` = cabeçalho de seção (sem valor).
@@ -398,6 +400,8 @@ export component JanelaSessao inherits Window {
     callback desconectar();
     callback entrar-com-senha(string, bool);
     callback trocar-aba(int);
+    // "Abrir em janela" (`13-multimonitor.md` §2.2).
+    callback destacar-aba(int);
     callback mouse-moveu(length, length);
     callback mouse-botao(PointerEventButton, bool, length, length);
     callback mouse-rolou(length, length);
@@ -426,20 +430,36 @@ export component JanelaSessao inherits Window {
                     vertical-alignment: center;
                 }
                 for aba[i] in root.abas: Rectangle {
-                    width: rotulo.preferred-width + 20px;
+                    width: linha.preferred-width + 20px;
                     border-radius: Tema.raio;
                     background: aba.ativa ? Tema.superficie-2 : transparent;
-                    rotulo := Text {
-                        text: aba.texto;
-                        font-size: Tema.fonte-pequena;
-                        color: aba.liberada ? Tema.texto : Tema.offline;
-                        font-italic: !aba.liberada;
-                        vertical-alignment: center;
-                        horizontal-alignment: center;
-                    }
                     TouchArea {
                         mouse-cursor: pointer;
                         clicked => { root.trocar-aba(i); }
+                    }
+                    linha := HorizontalLayout {
+                        x: 10px;
+                        spacing: 6px;
+                        Text {
+                            text: aba.texto;
+                            font-size: Tema.fonte-pequena;
+                            color: aba.liberada ? Tema.texto : Tema.offline;
+                            font-italic: !aba.liberada || aba.destacada;
+                            vertical-alignment: center;
+                        }
+                        // Abrir em janela própria; num destacado, só marca onde ele está.
+                        if aba.liberada: Text {
+                            text: "⧉";
+                            font-size: Tema.fonte-pequena;
+                            color: aba.destacada ? Tema.online : Tema.texto-2;
+                            vertical-alignment: center;
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    if !aba.destacada { root.destacar-aba(i); } else { root.trocar-aba(i); }
+                                }
+                            }
+                        }
                     }
                 }
                 Rectangle { }
@@ -588,4 +608,131 @@ export component JanelaSessao inherits Window {
     }
     // Painel de arquivos (fase 3), por cima do vídeo.
     ArquivosNaSessao { width: parent.width; height: parent.height; }
+}
+
+// Um monitor do host numa janela própria (aba destacada, `13-multimonitor.md` §2.2): só o vídeo,
+// o cursor e uma barra fina com tela cheia e "voltar para abas". Fechar a janela devolve a aba.
+export component JanelaMonitor inherits Window {
+    in property <string> host;
+    in property <string> monitor;
+    in property <bool> ao-vivo;
+    in property <bool> terminou;
+    in property <image> quadro;
+    in property <bool> tem-video;
+    in property <image> cursor;
+    in property <bool> cursor-visivel;
+    in property <length> cursor-x;
+    in property <length> cursor-y;
+    in-out property <bool> tela-cheia: false;
+    out property <length> area-largura: video.width;
+    out property <length> area-altura: video.height;
+
+    callback voltar();
+    callback mudar-tela-cheia(bool);
+    callback mouse-moveu(length, length);
+    callback mouse-botao(PointerEventButton, bool, length, length);
+    callback mouse-rolou(length, length);
+
+    title: root.host + " · " + root.monitor + " · TailDesk";
+    icon: @image-url("icones/taildesk-64.png");
+    preferred-width: 1280px;
+    preferred-height: 760px;
+    background: black;
+
+    VerticalLayout {
+        if !root.tela-cheia: Rectangle {
+            height: 36px;
+            background: Tema.superficie;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 8px;
+                spacing: 8px;
+                Text {
+                    text: root.host + " · " + root.monitor;
+                    font-size: Tema.fonte-pequena;
+                    color: Tema.texto;
+                    vertical-alignment: center;
+                }
+                Rectangle { }
+                Botao {
+                    y: 2px;
+                    altura: 32px;
+                    texto: @tr("Tela cheia");
+                    discreto: true;
+                    clicado => {
+                        root.tela-cheia = true;
+                        root.mudar-tela-cheia(true);
+                    }
+                }
+                Botao {
+                    y: 2px;
+                    altura: 32px;
+                    texto: @tr("Voltar para abas");
+                    discreto: true;
+                    clicado => { root.voltar(); }
+                }
+            }
+        }
+        video := Rectangle {
+            background: black;
+            Image {
+                width: 100%;
+                height: 100%;
+                source: root.quadro;
+                image-fit: contain;
+                visible: root.tem-video;
+            }
+            if root.cursor-visivel && root.ao-vivo: Image {
+                x: root.cursor-x;
+                y: root.cursor-y;
+                source: root.cursor;
+            }
+            TouchArea {
+                mouse-cursor: root.ao-vivo ? MouseCursor.none : MouseCursor.default;
+                moved => { root.mouse-moveu(self.mouse-x, self.mouse-y); }
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down {
+                        root.mouse-botao(e.button, true, self.mouse-x, self.mouse-y);
+                    } else if e.kind == PointerEventKind.up {
+                        root.mouse-botao(e.button, false, self.mouse-x, self.mouse-y);
+                    } else if e.kind == PointerEventKind.move && !self.pressed {
+                        root.mouse-moveu(self.mouse-x, self.mouse-y);
+                    }
+                }
+                scroll-event(e) => {
+                    root.mouse-rolou(e.delta-x, e.delta-y);
+                    accept
+                }
+            }
+            // Em tela cheia, o mouse na borda de cima mostra o botão de sair.
+            if root.tela-cheia: borda := TouchArea {
+                y: 0;
+                height: sair.visible ? sair.height + 16px : 6px;
+                Rectangle {
+                    background: borda.has-hover ? #000000a0 : transparent;
+                }
+                sair := Botao {
+                    visible: borda.has-hover;
+                    x: (parent.width - self.width) / 2;
+                    y: 8px;
+                    altura: 32px;
+                    texto: @tr("Sair da tela cheia");
+                    clicado => {
+                        root.tela-cheia = false;
+                        root.mudar-tela-cheia(false);
+                    }
+                }
+            }
+            if root.terminou && root.tem-video: Rectangle {
+                background: #000000d9;
+            }
+            if !root.tem-video || root.terminou: Text {
+                text: root.terminou ? @tr("Sessão encerrada") : @tr("Esperando o vídeo do monitor…");
+                color: #e9ebef;
+                font-size: 18px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
 }

@@ -1,8 +1,12 @@
-//! Monitores no controlador, modo **um por vez** (`13-multimonitor.md` §2.1, `12-levantamento-ux.md`
-//! §5.6.1): abas, atalhos, "seguir o mouse" e o mapeamento do mouse local para o monitor.
+//! Monitores no controlador (`13-multimonitor.md` §2.1–§2.2, `12-levantamento-ux.md` §5.6.1):
+//! abas, atalhos, "seguir o mouse", abas destacadas em janela própria e o mapeamento do mouse
+//! local para o monitor.
 //!
-//! No fio só há um stream ativo: trocar é `StopVideo` do anterior + `StartVideo` do novo (o host
-//! começa com keyframe). Monitores fora da seleção do portal (Wayland) viram aba "não liberado".
+//! A janela da sessão mostra um monitor por vez: trocar é `StopVideo` do anterior + `StartVideo`
+//! do novo (o host começa com keyframe). Uma aba **destacada** abre numa janela própria com o seu
+//! stream, ao mesmo tempo que o da janela da sessão; destacar o monitor que a sessão mostra não
+//! reinicia o vídeo, só muda a janela. Clicar na aba de um destacado o traz de volta.
+//! Monitores fora da seleção do portal (Wayland) viram aba "não liberado".
 
 use taildesk_keyboard::{Hid, Mods};
 use taildesk_proto::control::{
@@ -21,6 +25,8 @@ pub struct Aba {
     /// `false` = o host não liberou (Wayland): aba cinza com "Pedir acesso".
     pub liberado: bool,
     pub ativa: bool,
+    /// Aberto numa janela própria.
+    pub destacada: bool,
 }
 
 /// Ação de um atalho da sessão.
@@ -52,6 +58,8 @@ pub struct UmPorVez {
     /// Na ordem das abas: esquerda → direita, depois de cima para baixo, no layout do host.
     monitores: Vec<DisplayInfo>,
     ativo: Option<u32>,
+    /// Monitores em janela própria, na ordem em que foram destacados.
+    destacados: Vec<u32>,
     /// "Seguir o mouse" (desligado por padrão).
     pub seguir_mouse: bool,
 }
@@ -92,6 +100,7 @@ impl UmPorVez {
                     principal: m.primary,
                     liberado: m.shared,
                     ativa: self.ativo == Some(m.id),
+                    destacada: self.destacados.contains(&m.id),
                 }
             })
             .collect()
@@ -105,6 +114,17 @@ impl UmPorVez {
         // Espelhados (mesmo retângulo) aparecem uma vez só.
         lista.dedup_by(|b, a| (a.x, a.y, a.width, a.height) == (b.x, b.y, b.width, b.height));
         self.monitores = lista;
+        // Destacado que sumiu fecha a janela; o que deixou de ser liberado para o vídeo também.
+        let monitores = &self.monitores;
+        self.destacados
+            .retain(|&d| match monitores.iter().find(|m| m.id == d) {
+                Some(m) if m.shared => true,
+                Some(_) => {
+                    out.push(Msg::StopVideo(StopVideo { display_id: d }));
+                    false
+                }
+                None => false,
+            });
         let ativo_ok = self
             .ativo
             .is_some_and(|a| self.monitores.iter().any(|m| m.id == a && m.shared));
@@ -122,7 +142,11 @@ impl UmPorVez {
     }
 
     fn padrao(&self) -> Option<u32> {
-        let liberados = || self.monitores.iter().filter(|m| m.shared);
+        let liberados = || {
+            self.monitores
+                .iter()
+                .filter(|m| m.shared && !self.destacados.contains(&m.id))
+        };
         liberados()
             .find(|m| m.primary)
             .or_else(|| liberados().next())
@@ -138,7 +162,8 @@ impl UmPorVez {
         }));
     }
 
-    /// Troca para o monitor `id`. `false` se já é o ativo, não existe ou não foi liberado.
+    /// Troca para o monitor `id`. `false` se já é o ativo, não existe ou não foi liberado. Um
+    /// destacado volta para a janela da sessão com o vídeo que já recebia.
     pub fn trocar(&mut self, id: u32, out: &mut Vec<Msg>) -> bool {
         if self.ativo == Some(id) || !self.monitores.iter().any(|m| m.id == id && m.shared) {
             return false;
@@ -146,7 +171,66 @@ impl UmPorVez {
         if let Some(antigo) = self.ativo {
             out.push(Msg::StopVideo(StopVideo { display_id: antigo }));
         }
-        self.iniciar(id, out);
+        if let Some(i) = self.destacados.iter().position(|&d| d == id) {
+            self.destacados.remove(i);
+            self.ativo = Some(id);
+        } else {
+            self.iniciar(id, out);
+        }
+        true
+    }
+
+    pub fn destacados(&self) -> &[u32] {
+        &self.destacados
+    }
+
+    pub fn destacado(&self, id: u32) -> bool {
+        self.destacados.contains(&id)
+    }
+
+    pub fn monitor(&self, id: u32) -> Option<&DisplayInfo> {
+        self.monitores.iter().find(|m| m.id == id)
+    }
+
+    /// Abre o monitor `id` numa janela própria. Se é o que a sessão mostra, a sessão passa para
+    /// outro liberado (ou fica sem monitor) e o vídeo continua sem reiniciar. `false` se não
+    /// existe, não foi liberado ou já está destacado.
+    pub fn destacar(&mut self, id: u32, out: &mut Vec<Msg>) -> bool {
+        if self.destacado(id) || !self.monitores.iter().any(|m| m.id == id && m.shared) {
+            return false;
+        }
+        self.destacados.push(id);
+        if self.ativo == Some(id) {
+            self.ativo = None;
+            if let Some(novo) = self.padrao() {
+                self.iniciar(novo, out);
+            }
+        } else {
+            self.iniciar_destacado(id, out);
+        }
+        true
+    }
+
+    fn iniciar_destacado(&self, id: u32, out: &mut Vec<Msg>) {
+        out.push(Msg::StartVideo(StartVideo {
+            display_id: id,
+            wanted: None,
+            priority: Priority::Visible as i32,
+        }));
+    }
+
+    /// A janela do destacado `id` fechou: volta a ser aba. Se a sessão estava sem monitor, ele
+    /// vira o mostrado (o vídeo segue); senão o vídeo dele para.
+    pub fn recolocar(&mut self, id: u32, out: &mut Vec<Msg>) -> bool {
+        let Some(i) = self.destacados.iter().position(|&d| d == id) else {
+            return false;
+        };
+        self.destacados.remove(i);
+        if self.ativo.is_none() {
+            self.ativo = Some(id);
+        } else {
+            out.push(Msg::StopVideo(StopVideo { display_id: id }));
+        }
         true
     }
 
@@ -176,11 +260,22 @@ impl UmPorVez {
 
     /// Com "seguir o mouse", a aba acompanha o cursor do host quando ele muda de monitor.
     pub fn on_cursor(&mut self, pos: &CursorPos, out: &mut Vec<Msg>) -> bool {
-        self.seguir_mouse && pos.visible && self.trocar(pos.display_id, out)
+        // O cursor num destacado já está à vista na janela dele.
+        self.seguir_mouse
+            && pos.visible
+            && !self.destacado(pos.display_id)
+            && self.trocar(pos.display_id, out)
     }
 
     /// O host parou o vídeo (monitor removido, portal fechou): volta para o principal.
     pub fn on_video_stopped(&mut self, v: &VideoStopped, out: &mut Vec<Msg>) {
+        if let Some(i) = self.destacados.iter().position(|&d| d == v.display_id) {
+            self.destacados.remove(i);
+            if let Some(m) = self.monitores.iter_mut().find(|m| m.id == v.display_id) {
+                m.shared = false;
+            }
+            return;
+        }
         if self.ativo != Some(v.display_id) {
             return;
         }
@@ -204,6 +299,21 @@ impl UmPorVez {
         prender: bool,
     ) -> Option<(u32, u16, u16)> {
         let m = self.monitor_ativo()?;
+        ponto_contido(area, (m.width, m.height), local, prender).map(|(x, y)| (m.id, x, y))
+    }
+
+    /// [`Self::ponto`] na janela do destacado `id`.
+    pub fn ponto_destacado(
+        &self,
+        id: u32,
+        area: (f32, f32),
+        local: (f32, f32),
+        prender: bool,
+    ) -> Option<(u32, u16, u16)> {
+        if !self.destacado(id) {
+            return None;
+        }
+        let m = self.monitor(id)?;
         ponto_contido(area, (m.width, m.height), local, prender).map(|(x, y)| (m.id, x, y))
     }
 }
@@ -378,6 +488,103 @@ mod tests {
         let mut u = UmPorVez::new();
         u.atualizar(&[mon(1, 0, true, true)], &mut out);
         assert!(!u.mostrar_abas());
+    }
+
+    fn visivel(id: u32) -> Msg {
+        Msg::StartVideo(StartVideo {
+            display_id: id,
+            wanted: None,
+            priority: Priority::Visible as i32,
+        })
+    }
+
+    #[test]
+    fn destacar_outro_monitor_abre_mais_um_stream() {
+        let (mut u, _) = tres();
+        let mut out = Vec::new();
+        assert!(u.destacar(5, &mut out));
+        assert_eq!(out, [visivel(5)]);
+        assert_eq!(u.ativo(), Some(7));
+        assert!(u.abas()[0].destacada);
+        assert!(!u.destacar(5, &mut out), "já destacado");
+        assert!(!u.destacar(3, &mut out), "não liberado");
+        // Fechar a janela para o stream dele.
+        out.clear();
+        assert!(u.recolocar(5, &mut out));
+        assert_eq!(out, [stop(5)]);
+        assert!(!u.recolocar(5, &mut out));
+    }
+
+    #[test]
+    fn destacar_o_monitor_mostrado_nao_reinicia_o_video() {
+        let (mut u, _) = tres();
+        let mut out = Vec::new();
+        assert!(u.destacar(7, &mut out));
+        // A sessão passa para o outro liberado; o 7 segue com o mesmo stream.
+        assert_eq!(out, [start(5)]);
+        assert_eq!(u.ativo(), Some(5));
+        // Os dois destacados: a sessão fica sem monitor.
+        out.clear();
+        assert!(u.destacar(5, &mut out));
+        assert!(out.is_empty());
+        assert_eq!(u.ativo(), None);
+        // Fechar a janela do 5 o devolve à sessão, sem mexer no vídeo.
+        assert!(u.recolocar(5, &mut out));
+        assert!(out.is_empty());
+        assert_eq!(u.ativo(), Some(5));
+        // Clicar na aba do 7 (destacado) o traz de volta: só para o 5.
+        assert!(u.trocar(7, &mut out));
+        assert_eq!(out, [stop(5)]);
+        assert_eq!(u.ativo(), Some(7));
+        assert!(u.destacados().is_empty());
+    }
+
+    #[test]
+    fn destacado_que_some_fecha() {
+        let (mut u, _) = tres();
+        let mut out = Vec::new();
+        u.destacar(5, &mut out);
+        out.clear();
+        u.atualizar(
+            &[mon(7, 1920, true, true), mon(3, 3840, false, false)],
+            &mut out,
+        );
+        assert!(out.is_empty());
+        assert!(u.destacados().is_empty());
+
+        let (mut u, _) = tres();
+        u.destacar(5, &mut out);
+        out.clear();
+        u.on_video_stopped(
+            &VideoStopped {
+                display_id: 5,
+                reason: 2,
+            },
+            &mut out,
+        );
+        assert!(out.is_empty());
+        assert!(u.destacados().is_empty());
+        assert_eq!(u.ativo(), Some(7));
+        // Seguir o mouse não puxa um destacado para a sessão.
+        let (mut u, _) = tres();
+        u.destacar(5, &mut out);
+        u.seguir_mouse = true;
+        out.clear();
+        let pos = CursorPos {
+            display_id: 5,
+            x: 1,
+            y: 1,
+            visible: true,
+        };
+        assert!(!u.on_cursor(&pos, &mut out));
+        assert_eq!(
+            u.ponto_destacado(5, (1920.0, 1080.0), (960.0, 540.0), false),
+            Some((5, 32768, 32768))
+        );
+        assert_eq!(
+            u.ponto_destacado(7, (1920.0, 1080.0), (960.0, 540.0), false),
+            None
+        );
     }
 
     #[test]
