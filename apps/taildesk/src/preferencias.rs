@@ -104,20 +104,25 @@ fn video_local() -> String {
     TEXTO
         .get_or_init(|| {
             let lista = |opcoes: &dyn Fn(CodecVideo) -> Vec<taildesk_codec::Opcao>| {
-                let partes: Vec<String> = [CodecVideo::H264, CodecVideo::Hevc, CodecVideo::Av1]
-                    .into_iter()
-                    .filter_map(|c| {
-                        let mut backends: Vec<&str> = Vec::new();
-                        for o in opcoes(c) {
-                            let b = nome_backend(o.backend);
-                            if !backends.contains(&b) {
-                                backends.push(b);
-                            }
+                let partes: Vec<String> = [
+                    CodecVideo::H264,
+                    CodecVideo::Hevc,
+                    CodecVideo::Av1,
+                    CodecVideo::PyroWave,
+                ]
+                .into_iter()
+                .filter_map(|c| {
+                    let mut backends: Vec<&str> = Vec::new();
+                    for o in opcoes(c) {
+                        let b = nome_backend(o.backend);
+                        if !backends.contains(&b) {
+                            backends.push(b);
                         }
-                        (!backends.is_empty())
-                            .then(|| format!("{} ({})", nome_codec(c), backends.join(", ")))
-                    })
-                    .collect();
+                    }
+                    (!backends.is_empty())
+                        .then(|| format!("{} ({})", nome_codec(c), backends.join(", ")))
+                })
+                .collect();
                 if partes.is_empty() {
                     "nada".to_string()
                 } else {
