@@ -157,12 +157,15 @@ impl Diagnostico {
             },
         ));
         if let Some(v) = &self.video {
+            // O tamanho real vem do host (a captura no Wayland com escala é maior que a tela
+            // lógica do `CodecSelected`).
+            let (w, h) = match &self.host {
+                Some(h) if h.width > 0 => (h.width, h.height),
+                _ => (v.width, v.height),
+            };
             l.push(linha(
                 "Imagem",
-                format!(
-                    "{}×{} · H.264 · até {} fps",
-                    v.width, v.height, v.fps_target
-                ),
+                format!("{w}×{h} · H.264 · até {} fps", v.fps_target),
             ));
         }
         let exibidos = (a.exibidos - b.exibidos) as f64 / s;

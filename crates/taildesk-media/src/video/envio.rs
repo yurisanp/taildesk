@@ -42,6 +42,16 @@ pub struct EstatisticasEnvio {
     pub erros: AtomicU64,
     /// Soma dos tempos de conversão + encode, em µs.
     pub encode_us: AtomicU64,
+    /// Tamanho do último quadro codificado: largura nos 32 bits altos, altura nos baixos.
+    pub tamanho: AtomicU64,
+}
+
+impl EstatisticasEnvio {
+    /// (largura, altura) do último quadro codificado; (0, 0) antes do primeiro.
+    pub fn tamanho(&self) -> (u32, u32) {
+        let t = self.tamanho.load(Ordering::Relaxed);
+        ((t >> 32) as u32, t as u32)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -228,6 +238,10 @@ fn laco(
         }
         chave = false;
         e.quadros.fetch_add(1, Ordering::Relaxed);
+        e.tamanho.store(
+            u64::from(largura) << 32 | u64::from(altura),
+            Ordering::Relaxed,
+        );
         e.chaves.fetch_add(u64::from(e_chave), Ordering::Relaxed);
         e.bytes.fetch_add(au.len() as u64, Ordering::Relaxed);
         e.datagramas.fetch_add(n, Ordering::Relaxed);

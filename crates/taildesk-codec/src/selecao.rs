@@ -1,8 +1,9 @@
 //! Escolha do backend de vídeo: hardware sempre que possível, com probe e fallback.
 //!
-//! [`opcoes_encoder`] lista o que dá para usar nesta máquina, em ordem de preferência: primeiro a
-//! GPU ligada às telas (onde a imagem já está e que costuma ser a integrada, que gasta menos),
-//! depois as outras, e o openh264 por último. [`abrir_encoder`] tenta cada opção até uma abrir e
+//! [`opcoes_encoder`] lista o que dá para usar nesta máquina, em ordem de preferência: NVENC
+//! primeiro (num i7-12700H com Iris Xe e RTX 3060, na bateria, 1080p sai em 7 ms no NVENC e em
+//! 22 ms no VA-API da Iris Xe), depois o VA-API da GPU ligada às telas, as outras GPUs e o
+//! openh264 por último. [`abrir_encoder`] tenta cada opção até uma abrir e
 //! codificar o quadro de teste. Os decoders seguem outra ordem (ver [`opcoes_decoder`]).
 //!
 //! `TAILDESK_ENCODER` e `TAILDESK_DECODER` (ex.: `vaapi`, `nvenc,openh264`) restringem e
@@ -145,6 +146,8 @@ fn encoders_de_hardware() -> Vec<Opcao> {
             });
         }
     }
+    // NVENC antes do VA-API (ver o topo do módulo); `sort_by_key` é estável.
+    opcoes.sort_by_key(|o| o.backend != "nvenc");
     opcoes
 }
 

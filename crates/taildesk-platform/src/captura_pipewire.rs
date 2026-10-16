@@ -405,7 +405,9 @@ fn formatos_aceitos() -> Vec<u8> {
             Fraction,
             spa::utils::Fraction { num: 60, denom: 1 },
             spa::utils::Fraction { num: 0, denom: 1 },
-            spa::utils::Fraction { num: 240, denom: 1 }
+            // Tela de 240 Hz entregaria 240 quadros/s (16 MB cada em 2560x1600) para o envio
+            // copiar e jogar fora: o encode não passa de 60 fps.
+            spa::utils::Fraction { num: 60, denom: 1 }
         ),
     );
     spa::pod::serialize::PodSerializer::serialize(

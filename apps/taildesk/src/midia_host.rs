@@ -33,8 +33,15 @@ const FPS_SOFTWARE: f32 = 30.0;
 const FPS_HARDWARE: f32 = 60.0;
 /// Intervalo do `VideoStats` para o painel de diagnóstico do controlador.
 const INTERVALO_STATS: Duration = Duration::from_secs(1);
-/// Alvo inicial; a seleção adaptativa ajusta depois.
+/// Alvo inicial, antes do primeiro quadro dizer o tamanho real da captura.
 const BITRATE_BPS: u32 = 8_000_000;
+
+/// Alvo de taxa para o tamanho e o fps: 0,07 bit por pixel por quadro, entre 4 e 30 Mbit/s
+/// (1080p60 ≈ 8,7 Mbit/s; 2560x1600 a 60 fps ≈ 17 Mbit/s). A seleção adaptativa refina depois.
+fn taxa_para(largura: u32, altura: u32, fps: f32) -> u32 {
+    let bps = f64::from(largura) * f64::from(altura) * f64::from(fps) * 0.07;
+    bps.clamp(4e6, 30e6) as u32
+}
 /// Eventos de cursor esperando a task (posição descartável; forma é rara).
 const FILA_CURSOR: usize = 64;
 
@@ -65,6 +72,7 @@ struct Fluxo {
     encoder: &'static str,
     gpu: String,
     bitrate_bps: u32,
+    fps: f32,
     anterior: (Instant, Amostra),
 }
 
@@ -86,6 +94,15 @@ impl Fluxo {
         let (antes, b) = std::mem::replace(&mut self.anterior, (agora, a));
         let segundos = agora.duration_since(antes).as_secs_f64().max(1e-3);
         let quadros = a.quadros - b.quadros;
+        // O tamanho físico só se sabe pela captura (no Wayland com escala, maior que o lógico).
+        let (largura, altura) = self.envio.estatisticas().tamanho();
+        if largura > 0 {
+            let alvo = taxa_para(largura, altura, self.fps);
+            if alvo.abs_diff(self.bitrate_bps) > self.bitrate_bps / 10 {
+                self.envio.ajustar_bitrate(alvo);
+                self.bitrate_bps = alvo;
+            }
+        }
         VideoStats {
             display_id,
             encoder: self.encoder.into(),
@@ -101,6 +118,8 @@ impl Fluxo {
             skipped: (a.pulados - b.pulados).try_into().unwrap_or(u32::MAX),
             keyframes: (a.chaves - b.chaves).try_into().unwrap_or(u32::MAX),
             loss_ppm: 0,
+            width: largura,
+            height: altura,
         }
     }
 }
@@ -524,6 +543,7 @@ impl MidiaApp {
                     encoder: nome,
                     gpu,
                     bitrate_bps: BITRATE_BPS,
+                    fps,
                 };
                 (stream_id, fluxo)
             })
