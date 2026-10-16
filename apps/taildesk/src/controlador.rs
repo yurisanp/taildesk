@@ -607,6 +607,20 @@ impl Controlador {
                     na_sessao_ja(id, SessaoUi::foco_perdido);
                     EventResult::Propagate
                 }
+                // Arrastar arquivos do sistema (Windows e X11; o Wayland vem por `ligar_soltar`).
+                winit::event::WindowEvent::HoveredFile(_) => {
+                    na_sessao_ja(id, |s| s.painel.arrastando(&s.janela, true));
+                    EventResult::Propagate
+                }
+                winit::event::WindowEvent::HoveredFileCancelled => {
+                    na_sessao_ja(id, |s| s.painel.arrastando(&s.janela, false));
+                    EventResult::Propagate
+                }
+                winit::event::WindowEvent::DroppedFile(p) => {
+                    let p = p.clone();
+                    na_sessao_ja(id, |s| s.painel.soltou(&s.janela, vec![p]));
+                    EventResult::Propagate
+                }
                 _ => EventResult::Propagate,
             });
         if let Err(e) = janela.show() {
@@ -652,6 +666,7 @@ impl Controlador {
                 video_display: None,
             },
         );
+        arquivos::ligar_soltar(id, 50);
         rt.spawn(rodar(id, nome, ip, info, recepcoes, fechar_rx));
     }
 }
