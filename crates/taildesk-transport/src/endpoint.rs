@@ -10,7 +10,7 @@ use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use crate::tls::{self, Identity, Pin};
 
 /// Buffers de datagrama grandes o bastante para um degrau de 100 ms a 200 Mbit/s (2,5 MB).
-const DATAGRAM_BUFFER: usize = 8 * 1024 * 1024;
+pub(crate) const DATAGRAM_BUFFER: usize = 8 * 1024 * 1024;
 
 fn transport_config() -> Arc<quinn::TransportConfig> {
     let mut t = quinn::TransportConfig::default();
@@ -23,7 +23,11 @@ fn transport_config() -> Arc<quinn::TransportConfig> {
     ))
     .keep_alive_interval(Some(Duration::from_secs(3)))
     .datagram_receive_buffer_size(Some(DATAGRAM_BUFFER))
-    .datagram_send_buffer_size(DATAGRAM_BUFFER);
+    .datagram_send_buffer_size(DATAGRAM_BUFFER)
+    // BBR mede a banda pela taxa de entrega em vez de reagir só à perda: no Wi-Fi e no DERP
+    // não derruba a janela a cada pacote perdido, e a taxa de pacing dele é a estimativa que o
+    // controle de taxa do vídeo usa (`07-protocolo.md` §5).
+    .congestion_controller_factory(Arc::new(quinn::congestion::BbrConfig::default()));
     Arc::new(t)
 }
 

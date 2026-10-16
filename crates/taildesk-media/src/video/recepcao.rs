@@ -5,6 +5,7 @@
 //! quadro e pede um quadro-chave (H.264 não pula deltas). Os planos decodificados vão para o
 //! callback na thread de decode, que repassa ao render (latest-wins do lado de lá).
 
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
@@ -12,7 +13,10 @@ use std::time::{Duration, Instant};
 
 use taildesk_codec::{QuadroYuv, VideoDecoder};
 
+use taildesk_proto::control::ReceiverReport;
+
 use super::fragmentos::{Remontador, Remontagem};
+use super::medidor::Medidor;
 
 /// Quadros na fila do decode antes de descartar.
 const FILA: usize = 4;
@@ -42,9 +46,21 @@ impl Limitador {
     }
 }
 
+/// Fila e tempo do decode, para o `ReceiverReport`.
+#[derive(Debug, Default)]
+struct Decode {
+    na_fila: AtomicU32,
+    quadros: AtomicU64,
+    us: AtomicU64,
+}
+
 /// Recepção de vídeo de um monitor; parar = soltar.
 pub struct RecepcaoVideo {
     remontador: Remontador,
+    medidor: Medidor,
+    decode: Arc<Decode>,
+    /// `quadros` e `us` do decode no último relatório.
+    decode_antes: (u64, u64),
     fila: Option<SyncSender<Vec<u8>>>,
     devolvidos: Receiver<Vec<u8>>,
     chave: Arc<Limitador>,
@@ -74,13 +90,21 @@ impl RecepcaoVideo {
             pedir: pedir_chave,
             ultimo: Mutex::new(None),
         });
+        let decode = Arc::new(Decode::default());
         let thread = std::thread::Builder::new()
             .name(format!("taildesk-decode-{display_id}"))
             .spawn({
                 let chave = chave.clone();
+                let decode = decode.clone();
                 move || {
                     for au in entrada {
+                        let t = Instant::now();
                         let r = decoder.decodificar(&au, &mut |q| ao_quadro(display_id, q));
+                        decode
+                            .us
+                            .fetch_add(t.elapsed().as_micros() as u64, Ordering::Relaxed);
+                        decode.quadros.fetch_add(1, Ordering::Relaxed);
+                        decode.na_fila.fetch_sub(1, Ordering::Relaxed);
                         if r.is_err() {
                             chave.pedir();
                         }
@@ -90,6 +114,9 @@ impl RecepcaoVideo {
             })?;
         Ok(RecepcaoVideo {
             remontador: Remontador::novo(stream_id),
+            medidor: Medidor::novo(Instant::now()),
+            decode,
+            decode_antes: (0, 0),
             fila: Some(fila),
             devolvidos,
             chave,
@@ -99,6 +126,7 @@ impl RecepcaoVideo {
 
     /// Um datagrama de vídeo deste stream (os de outros streams são ignorados).
     pub fn receber(&mut self, datagrama: &[u8]) {
+        self.medidor.datagrama(datagrama, Instant::now());
         match self.remontador.receber(datagrama) {
             Remontagem::Completo { .. } => {}
             Remontagem::PedirChave => return self.chave.pedir(),
@@ -108,13 +136,34 @@ impl RecepcaoVideo {
         let mut au = self.devolvidos.try_recv().unwrap_or_default();
         au.clear();
         au.extend_from_slice(self.remontador.quadro());
+        self.decode.na_fila.fetch_add(1, Ordering::Relaxed);
         match fila.try_send(au) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
+                self.decode.na_fila.fetch_sub(1, Ordering::Relaxed);
                 self.remontador.esperar_chave();
                 self.chave.pedir();
             }
-            Err(TrySendError::Disconnected(_)) => self.fila = None,
+            Err(TrySendError::Disconnected(_)) => {
+                self.decode.na_fila.fetch_sub(1, Ordering::Relaxed);
+                self.fila = None;
+            }
+        }
+    }
+
+    /// `ReceiverReport` do intervalo desde o anterior (o controlador manda a cada 250 ms).
+    pub fn relatorio(&mut self, display_id: u32, agora: Instant) -> ReceiverReport {
+        let quadros = self.decode.quadros.load(Ordering::Relaxed);
+        let us = self.decode.us.load(Ordering::Relaxed);
+        let (q0, us0) = std::mem::replace(&mut self.decode_antes, (quadros, us));
+        ReceiverReport {
+            decode_us: (us - us0)
+                .checked_div(quadros - q0)
+                .unwrap_or(0)
+                .try_into()
+                .unwrap_or(u32::MAX),
+            queue_frames: self.decode.na_fila.load(Ordering::Relaxed),
+            ..self.medidor.relatorio(display_id, agora)
         }
     }
 }

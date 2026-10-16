@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use taildesk_codec::{CodecVideo, ConfigEncoder, Opcao, OrdemRgb, QuadroRgb};
+use taildesk_media::taxa::{ControleTaxa, Relato, Sinais};
 use taildesk_media::video::{ConfigEnvio, EnvioVideo};
 use taildesk_platform::captura::{FormaCursor, FormatoPixel, Quadro};
 use taildesk_proto::control::{
@@ -33,6 +34,11 @@ const FPS_SOFTWARE: f32 = 30.0;
 const FPS_HARDWARE: f32 = 60.0;
 /// Intervalo do `VideoStats` para o painel de diagnóstico do controlador.
 const INTERVALO_STATS: Duration = Duration::from_secs(1);
+/// Laço rápido do controle de taxa (`taildesk_media::taxa`).
+const INTERVALO_TAXA: Duration = Duration::from_millis(100);
+/// Subidas de taxa espaçadas: o openh264 recria o encoder (e manda um quadro-chave) a cada
+/// mudança. Cortes valem na hora.
+const INTERVALO_SUBIDA: Duration = Duration::from_secs(2);
 /// Alvo inicial, antes do primeiro quadro dizer o tamanho real da captura.
 const BITRATE_BPS: u32 = 8_000_000;
 
@@ -154,11 +160,15 @@ struct Fluxo {
     encoder: &'static str,
     gpu: String,
     codec: CodecVideo,
+    /// Alvo atual do encoder: o teto vezes o fator do controle de taxa.
     bitrate_bps: u32,
-    /// Taxa escolhida pelo usuário: o ajuste pelo tamanho da imagem não mexe nela.
+    /// Teto: a taxa do tamanho da imagem, ou a que o usuário fixou.
+    teto_bps: u32,
+    /// Taxa escolhida pelo usuário: o ajuste pelo tamanho da imagem não mexe no teto.
     taxa_fixa: bool,
     fps: f32,
     anterior: (Instant, Amostra),
+    ultima_subida: Option<Instant>,
 }
 
 impl Fluxo {
@@ -173,21 +183,46 @@ impl Fluxo {
         }
     }
 
+    /// Teto pelo tamanho físico, que só se sabe pela captura (no Wayland com escala, maior que o
+    /// lógico).
+    fn atualizar_teto(&mut self) {
+        let (largura, altura) = self.envio.estatisticas().tamanho();
+        if largura > 0 && !self.taxa_fixa {
+            self.teto_bps = taxa_para(largura, altura, self.fps);
+        }
+    }
+
+    /// Alvo novo pelo fator do controle de taxa. Mudança menor que 10 % não vale um ajuste.
+    fn aplicar(&mut self, fator: f64, agora: Instant) {
+        let piso = ControleTaxa::PISO_BPS as u32;
+        let alvo = ((f64::from(self.teto_bps) * fator) as u32)
+            .max(piso.min(self.teto_bps))
+            .min(self.teto_bps);
+        let atual = self.bitrate_bps;
+        let longe = alvo.abs_diff(atual) > atual / 10 || (alvo == self.teto_bps && alvo != atual);
+        if !longe {
+            return;
+        }
+        if alvo > atual {
+            if self
+                .ultima_subida
+                .is_some_and(|t| agora.duration_since(t) < INTERVALO_SUBIDA)
+            {
+                return;
+            }
+            self.ultima_subida = Some(agora);
+        }
+        self.envio.ajustar_bitrate(alvo);
+        self.bitrate_bps = alvo;
+    }
+
     /// Estatísticas desde a última chamada.
     fn stats(&mut self, display_id: u32) -> VideoStats {
         let (agora, a) = (Instant::now(), self.amostra());
         let (antes, b) = std::mem::replace(&mut self.anterior, (agora, a));
         let segundos = agora.duration_since(antes).as_secs_f64().max(1e-3);
         let quadros = a.quadros - b.quadros;
-        // O tamanho físico só se sabe pela captura (no Wayland com escala, maior que o lógico).
         let (largura, altura) = self.envio.estatisticas().tamanho();
-        if largura > 0 && !self.taxa_fixa {
-            let alvo = taxa_para(largura, altura, self.fps);
-            if alvo.abs_diff(self.bitrate_bps) > self.bitrate_bps / 10 {
-                self.envio.ajustar_bitrate(alvo);
-                self.bitrate_bps = alvo;
-            }
-        }
         VideoStats {
             display_id,
             encoder: self.encoder.into(),
@@ -216,6 +251,8 @@ struct Compartilhado {
     /// Vídeo de cada monitor pedido (`display_id` → fluxo).
     fluxos: Mutex<HashMap<u32, Fluxo>>,
     cursor: mpsc::Sender<CursorCapturado>,
+    /// Último `ReceiverReport` do controlador e quando chegou.
+    relato: Mutex<Option<(Instant, Relato)>>,
 }
 
 impl Compartilhado {
@@ -373,7 +410,7 @@ async fn stats(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
         let agora = caminho(&canal.conn);
         let loss_ppm = perda.medir(agora.0 - antes.0, agora.1 - antes.1);
         antes = agora;
-        let est_kbps = estimar_kbps(canal.conn.stats().path.cwnd, canal.conn.rtt());
+        let est_kbps = (banda_bps(&canal.conn) / 1000).min(u64::from(u32::MAX)) as u32;
         let msgs: Vec<VideoStats> = compartilhado
             .fluxos()
             .iter_mut()
@@ -423,6 +460,57 @@ impl Perda {
 fn estimar_kbps(cwnd: u64, rtt: Duration) -> u32 {
     let us = rtt.as_micros().max(100) as u64;
     (cwnd.saturating_mul(8_000) / us).min(u64::from(u32::MAX)) as u32
+}
+
+/// Banda do caminho em bit/s: a taxa de pacing do BBR, ou a janela ÷ RTT sem ela.
+fn banda_bps(conn: &quinn::Connection) -> u64 {
+    let m = conn.congestion_state().metrics();
+    m.pacing_rate
+        .unwrap_or_else(|| u64::from(estimar_kbps(m.congestion_window, conn.rtt())) * 1000)
+}
+
+/// Laço rápido do controle de taxa: a cada [`INTERVALO_TAXA`], o fator de
+/// [`ControleTaxa`] vezes o teto de cada monitor vira o alvo do encoder.
+async fn controle_taxa(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
+    let mut t = tokio::time::interval(INTERVALO_TAXA);
+    t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut controle = ControleTaxa::default();
+    let mut motivo = controle.motivo();
+    loop {
+        t.tick().await;
+        let agora = Instant::now();
+        let relato = *compartilhado
+            .relato
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (teto_bps, monitores) = {
+            let mut f = compartilhado.fluxos();
+            f.values_mut().for_each(Fluxo::atualizar_teto);
+            (
+                f.values().map(|f| u64::from(f.teto_bps)).sum::<u64>(),
+                f.len() as u32,
+            )
+        };
+        let fator = controle.passo(&Sinais {
+            agora,
+            rtt: canal.conn.rtt(),
+            banda_bps: Some(banda_bps(&canal.conn)),
+            relato,
+            teto_bps,
+            monitores,
+        });
+        if controle.motivo() != motivo {
+            motivo = controle.motivo();
+            eprintln!(
+                "taildesk: taxa do vídeo em {:.0} % do teto ({})",
+                fator * 100.0,
+                motivo.texto()
+            );
+        }
+        for f in compartilhado.fluxos().values_mut() {
+            f.aplicar(fator, agora);
+        }
+    }
 }
 
 /// Captura de todos os monitores, com pausa por monitor.
@@ -477,6 +565,7 @@ pub struct MidiaApp {
     pedidos: HashMap<u32, QualityPrefs>,
     tarefa_cursor: tokio::task::JoinHandle<()>,
     tarefa_stats: tokio::task::JoinHandle<()>,
+    tarefa_taxa: tokio::task::JoinHandle<()>,
 }
 
 impl MidiaApp {
@@ -486,8 +575,10 @@ impl MidiaApp {
         let compartilhado = Arc::new(Compartilhado {
             fluxos: Mutex::new(HashMap::new()),
             cursor: tx,
+            relato: Mutex::new(None),
         });
         let tarefa_stats = tokio::spawn(stats(canal.clone(), compartilhado.clone()));
+        let tarefa_taxa = tokio::spawn(controle_taxa(canal.clone(), compartilhado.clone()));
         MidiaApp {
             canal,
             fonte,
@@ -499,6 +590,7 @@ impl MidiaApp {
             pedidos: HashMap::new(),
             tarefa_cursor,
             tarefa_stats,
+            tarefa_taxa,
         }
     }
 
@@ -682,6 +774,9 @@ impl MidiaApp {
                 Box::new(SaidaQuic(self.canal.conn.clone())),
             )
             .map(|e| {
+                // O envio passa a saber a taxa (o tamanho máximo da fila depende dela); igual à
+                // do encoder, não muda nada nele.
+                e.ajustar_bitrate(bitrate_bps);
                 let fluxo = Fluxo {
                     anterior: (Instant::now(), Amostra::default()),
                     envio: e,
@@ -689,8 +784,10 @@ impl MidiaApp {
                     gpu,
                     codec,
                     bitrate_bps,
+                    teto_bps: bitrate_bps,
                     taxa_fixa: taxa_fixa.is_some(),
                     fps,
+                    ultima_subida: None,
                 };
                 (stream_id, fluxo)
             })
@@ -774,6 +871,8 @@ impl MidiaApp {
                 }
             };
             f.taxa_fixa = taxa_pedida(&prefs).is_some();
+            // O teto muda na hora; o próximo passo do controle de taxa aplica o fator.
+            f.teto_bps = alvo;
             f.envio.ajustar_bitrate(alvo);
             f.bitrate_bps = alvo;
         }
@@ -818,6 +917,19 @@ impl Midia for MidiaApp {
             Msg::SetVideoQuality(q) => self.qualidade(q).await,
             Msg::RequestKeyframe(r) => self.pedir_chave(r.display_id),
             Msg::PictureLoss(p) => self.pedir_chave(p.display_id),
+            Msg::ReceiverReport(r) => {
+                *self
+                    .compartilhado
+                    .relato
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some((
+                    Instant::now(),
+                    Relato {
+                        loss_ppm: r.loss_ppm,
+                        owd_trend_us: r.owd_trend_us,
+                    },
+                ));
+            }
             // Um stream por vez no controlador por enquanto: prioridade não muda nada.
             _ => {}
         }
@@ -831,6 +943,7 @@ impl Drop for MidiaApp {
         self.compartilhado.fluxos().clear();
         self.tarefa_cursor.abort();
         self.tarefa_stats.abort();
+        self.tarefa_taxa.abort();
     }
 }
 

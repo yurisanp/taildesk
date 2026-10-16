@@ -87,7 +87,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 100, 101, 102, 103, 104"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104"
     )]
     pub msg: Option<Msg>,
 }
@@ -194,6 +194,10 @@ pub enum Msg {
     FileDone(FileDone),
     #[prost(message, tag = "89")]
     FileError(FileError),
+
+    // QoS (`14-selecao-adaptativa.md` §3.3)
+    #[prost(message, tag = "90")]
+    ReceiverReport(ReceiverReport),
 
     // Áudio (reservado: o host não captura nem envia nada sem `Permissions.audio` e um
     // `StartAudio` aceito, `15-audio.md` §6.4)
@@ -559,6 +563,36 @@ pub struct VideoStats {
     /// em kbit/s; `0` = sem estimativa. Com o vídeo limitando o envio, fica perto do que sai.
     #[prost(uint32, tag = "13")]
     pub est_kbps: u32,
+}
+
+/// C→H, a cada 250 ms por monitor recebido: o que chegou ao controlador. O host usa junto com o
+/// RTT e a banda do QUIC para ajustar a taxa (`14-selecao-adaptativa.md` §3.3).
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct ReceiverReport {
+    #[prost(uint32, tag = "1")]
+    pub display_id: u32,
+    /// Taxa de vídeo que chegou no intervalo.
+    #[prost(uint32, tag = "2")]
+    pub recv_kbps: u32,
+    /// Fragmentos que não chegaram no intervalo, em partes por milhão (≤ 1 000 000).
+    #[prost(uint32, tag = "3")]
+    pub loss_ppm: u32,
+    /// Variação entre chegadas de quadros (RFC 3550 §6.4.1), em µs.
+    #[prost(uint32, tag = "4")]
+    pub jitter_us: u32,
+    /// Média do decode por quadro no intervalo, em µs.
+    #[prost(uint32, tag = "5")]
+    pub decode_us: u32,
+    /// Quadros esperando o decoder agora.
+    #[prost(uint32, tag = "6")]
+    pub queue_frames: u32,
+    /// Atraso de ida acima do menor dos últimos 10 s, em µs: cresce quando uma fila enche no
+    /// caminho, antes da perda. Os relógios não precisam bater; só a diferença conta.
+    #[prost(uint32, tag = "7")]
+    pub owd_trend_us: u32,
+    /// Quadros que chegaram completos no intervalo.
+    #[prost(uint32, tag = "8")]
+    pub frames: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Message)]
@@ -1491,6 +1525,7 @@ impl Control {
                 at_most("encoder", m.encoder.len(), limits::CODEC_NAME_LEN)?;
                 at_most("gpu", m.gpu.len(), limits::SHORT_TEXT_LEN)
             }
+            Msg::ReceiverReport(m) => at_most("loss_ppm", m.loss_ppm as usize, 1_000_000),
             Msg::Nack(m) => at_most(
                 "missing_frag_bitmap",
                 m.missing_frag_bitmap.len(),
@@ -1804,6 +1839,16 @@ mod tests {
                 width: 2560,
                 height: 1600,
                 est_kbps: 48_000,
+            }),
+            Msg::ReceiverReport(ReceiverReport {
+                display_id: 1,
+                recv_kbps: 7800,
+                loss_ppm: 2500,
+                jitter_us: 1800,
+                decode_us: 2100,
+                queue_frames: 1,
+                owd_trend_us: 12_000,
+                frames: 15,
             }),
             Msg::CodecSelected(CodecSelected {
                 display_id: 1,
@@ -2158,6 +2203,18 @@ mod tests {
         assert!(Control::from(stats("vaapi", &gpu)).validate().is_ok());
         assert_eq!(invalida(stats(&"e".repeat(33), "")).field, "encoder");
         assert_eq!(invalida(stats("nvenc", &format!("{gpu}x"))).field, "gpu");
+    }
+
+    #[test]
+    fn perda_do_relatorio_ate_um_milhao() {
+        let r = |loss_ppm| {
+            Msg::ReceiverReport(ReceiverReport {
+                loss_ppm,
+                ..Default::default()
+            })
+        };
+        assert!(Control::from(r(1_000_000)).validate().is_ok());
+        assert_eq!(invalida(r(1_000_001)).field, "loss_ppm");
     }
 
     #[test]

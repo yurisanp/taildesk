@@ -17,4 +17,8 @@ impl SaidaDatagramas for SaidaQuic {
         // O quinn pede `Bytes` próprio: uma cópia pequena por datagrama.
         let _ = self.0.send_datagram(Bytes::copy_from_slice(datagrama));
     }
+
+    fn na_fila(&self) -> usize {
+        crate::endpoint::DATAGRAM_BUFFER.saturating_sub(self.0.datagram_send_buffer_space())
+    }
 }

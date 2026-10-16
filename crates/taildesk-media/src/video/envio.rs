@@ -19,6 +19,17 @@ pub trait SaidaDatagramas: Send {
     /// `max_datagram_size()` atual; `None` = o peer não aceita datagramas.
     fn max_datagrama(&self) -> Option<usize>;
     fn enviar(&mut self, datagrama: &[u8]);
+    /// Bytes enviados que ainda esperam a vez de sair (a fila de datagramas do quinn).
+    fn na_fila(&self) -> usize {
+        0
+    }
+}
+
+/// Fila que faz o envio pular o próximo quadro: 100 ms na taxa atual, no mínimo 64 KiB. Sem
+/// isso, numa rede mais lenta que o encoder, a fila do quinn cresce e a imagem chega segundos
+/// atrasada; pulando antes do encode, a cadeia de referências não quebra.
+fn fila_maxima(bps: u32) -> usize {
+    (bps as usize / 8 / 10).max(64 * 1024)
 }
 
 /// Parâmetros do envio de um monitor.
@@ -40,6 +51,8 @@ pub struct EstatisticasEnvio {
     pub bytes: AtomicU64,
     pub datagramas: AtomicU64,
     pub erros: AtomicU64,
+    /// Dos pulados, os que a fila de envio cheia segurou.
+    pub fila_cheia: AtomicU64,
     /// Soma dos tempos de conversão + encode, em µs.
     pub encode_us: AtomicU64,
     /// Tamanho do último quadro codificado: largura nos 32 bits altos, altura nos baixos.
@@ -170,6 +183,7 @@ fn laco(
     let mut imagem = Vec::new();
     let mut au = Vec::new();
     let mut chave = true;
+    let mut bps = 0u32;
     loop {
         let (largura, altura, ordem) = {
             let mut p = c.travar();
@@ -192,13 +206,19 @@ fn laco(
             std::mem::swap(&mut p.buf, &mut imagem);
             p.novo = false;
             chave |= std::mem::take(&mut p.chave);
-            if let Some(bps) = p.bitrate.take() {
-                encoder.ajustar_bitrate(bps);
+            if let Some(b) = p.bitrate.take() {
+                encoder.ajustar_bitrate(b);
+                bps = b;
             }
             (p.largura, p.altura, p.ordem.unwrap_or(OrdemRgb::Bgrx))
         };
         let t = Instant::now();
         proximo = (proximo + intervalo).max(t);
+        if !chave && saida.na_fila() > fila_maxima(bps) {
+            e.pulados.fetch_add(1, Ordering::Relaxed);
+            e.fila_cheia.fetch_add(1, Ordering::Relaxed);
+            continue;
+        }
         let q = QuadroRgb {
             largura,
             altura,
