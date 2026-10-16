@@ -156,24 +156,24 @@ fn encoders_de_hardware() -> Vec<Opcao> {
 /// direto do decoder para a textura do wgpu.
 pub fn opcoes_decoder() -> Vec<Opcao> {
     let mut opcoes = vec![openh264()];
-    #[cfg(target_os = "linux")]
-    {
-        use crate::linux::{gpu, nvdec};
-        let mut nvidia = nvdec::gpus();
-        for g in gpu::gpus()
-            .into_iter()
-            .filter(|g| g.fabricante == gpu::NVIDIA)
-        {
-            if let Some(i) = nvidia.iter().position(|(_, _, pci)| *pci == g.pci) {
-                let (dev, nome, _) = nvidia.remove(i);
-                opcoes.push(Opcao {
-                    backend: "nvdec",
-                    gpu: Some(nome),
-                    onde: Onde::Nvidia(dev),
-                });
-            }
-        }
-        for (dev, nome, _) in nvidia {
+    opcoes.extend(decoders_de_hardware());
+    filtrar(opcoes, "TAILDESK_DECODER")
+}
+
+#[cfg(not(target_os = "linux"))]
+fn decoders_de_hardware() -> Vec<Opcao> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+fn decoders_de_hardware() -> Vec<Opcao> {
+    use crate::linux::{gpu, nvdec};
+    let mut nvidia = nvdec::gpus();
+    let mut opcoes = Vec::new();
+    // GPUs na ordem de preferência (a ligada às telas primeiro), depois as sem nó de render.
+    for g in gpu::gpus().iter().filter(|g| g.fabricante == gpu::NVIDIA) {
+        if let Some(i) = nvidia.iter().position(|(_, _, pci)| *pci == g.pci) {
+            let (dev, nome, _) = nvidia.remove(i);
             opcoes.push(Opcao {
                 backend: "nvdec",
                 gpu: Some(nome),
@@ -181,7 +181,12 @@ pub fn opcoes_decoder() -> Vec<Opcao> {
             });
         }
     }
-    filtrar(opcoes, "TAILDESK_DECODER")
+    opcoes.extend(nvidia.into_iter().map(|(dev, nome, _)| Opcao {
+        backend: "nvdec",
+        gpu: Some(nome),
+        onde: Onde::Nvidia(dev),
+    }));
+    opcoes
 }
 
 /// Abre o primeiro encoder que funcionar. Os que falharam vão para `falhas` (backend e erro),
