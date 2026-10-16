@@ -367,8 +367,13 @@ impl SessaoUi {
             ));
             l.push(linha(
                 "Banda estimada",
-                if m.banda_kbps > 0 {
+                if qualidade::banda_medida(&m) {
                     format!("{} Mbit/s", num(f64::from(m.banda_kbps) / 1000.0))
+                } else if m.banda_kbps > 0 {
+                    format!(
+                        "mais de {} Mbit/s (o vídeo usa pouco)",
+                        num(f64::from(m.banda_kbps) / 1000.0)
+                    )
                 } else {
                     "—".into()
                 },
@@ -396,7 +401,9 @@ impl SessaoUi {
                     h.encoder,
                     num(f64::from(m.video_kbps) / 1000.0),
                     num(m.fps_exibidos),
-                    if self.qualidade.bitrate_kbps > 0 {
+                    if m.fps_enviados < 1.0 {
+                        " (tela parada)"
+                    } else if self.qualidade.bitrate_kbps > 0 {
                         " (taxa fixa)"
                     } else {
                         ""

@@ -213,7 +213,11 @@ fn laco(
                 continue;
             }
             Err(_) => {
+                // O encoder pode ter avançado as referências sem o quadro sair: o próximo
+                // tem de ser chave, ou o controlador decodifica em cima de um quadro que não
+                // recebeu.
                 e.erros.fetch_add(1, Ordering::Relaxed);
+                chave = true;
                 continue;
             }
         };

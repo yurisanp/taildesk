@@ -108,13 +108,25 @@ fn pct(ppm: u32) -> String {
     format!("{:.1}", f64::from(ppm) / 10_000.0).replace('.', ",")
 }
 
-/// Classe de rede pela banda estimada (ou, sem ela, pela taxa do vídeo, que é um piso), RTT,
-/// perda e caminho; via relay o teto é a Média (§2, modificadores).
+/// A banda do host sai da janela de congestionamento do QUIC, que só cresce quando há o que
+/// mandar: com a tela parada (ou um vídeo bem abaixo dela) ela é só um piso da capacidade, não
+/// uma medida. Só é medida quando o vídeo ocupa pelo menos metade dela.
+pub fn banda_medida(m: &Medida) -> bool {
+    m.banda_kbps > 0 && u64::from(m.video_kbps) * 2 >= u64::from(m.banda_kbps)
+}
+
+/// Classe de rede pela banda, RTT, perda e caminho; via relay o teto é a Média (§2,
+/// modificadores). Sem banda medida ([`banda_medida`]) a rede não está limitando nada, e a
+/// classe sai só do RTT, da perda e do caminho.
 pub fn classe(m: &Medida) -> Option<NetClass> {
     if !m.com_host {
         return None;
     }
-    let kbps = m.banda_kbps.max(m.video_kbps);
+    let kbps = if banda_medida(m) {
+        m.banda_kbps.max(m.video_kbps)
+    } else {
+        u32::MAX
+    };
     let path = caminho(m.rota.as_ref());
     let c = AdaptConfig::default().classify(kbps, m.rtt, m.perda_ppm, path);
     Some(if path == PathKind::Relayed {
@@ -337,16 +349,43 @@ mod tests {
     }
 
     #[test]
-    fn sem_estimativa_usa_a_taxa_do_video_como_piso() {
+    fn tela_parada_nao_derruba_a_qualidade() {
+        // Sem vídeo saindo, a janela do QUIC não cresce: 4 Mbit/s não é a capacidade da rede.
         let a = avaliar(&Medida {
             rtt: Duration::from_millis(20),
-            banda_kbps: 0,
-            video_kbps: 9_000,
+            banda_kbps: 4_000,
+            video_kbps: 0,
             rota: rota(PathKind::DirectWan),
+            fps_enviados: 0.0,
+            fps_exibidos: 0.0,
             ..lan()
         });
-        assert_eq!(a.classe, Some(NetClass::Medium));
+        assert_eq!(a.classe, Some(NetClass::Fast));
         assert_eq!(a.nivel, Nivel::Excelente);
+        // Sem estimativa nenhuma, idem.
+        let a = avaliar(&Medida {
+            banda_kbps: 0,
+            video_kbps: 0,
+            ..lan()
+        });
+        assert_eq!(a.classe, Some(NetClass::Lan));
+    }
+
+    #[test]
+    fn video_ocupando_a_banda_mede_a_rede() {
+        // O vídeo usa quase toda a janela: aí sim a banda é a da rede.
+        let m = Medida {
+            rtt: Duration::from_millis(20),
+            banda_kbps: 5_000,
+            video_kbps: 4_500,
+            rota: rota(PathKind::DirectWan),
+            ..lan()
+        };
+        assert!(banda_medida(&m));
+        let a = avaliar(&m);
+        assert_eq!(a.classe, Some(NetClass::Slow));
+        assert_eq!(a.nivel, Nivel::Regular);
+        assert!(!banda_medida(&lan()));
     }
 
     #[test]

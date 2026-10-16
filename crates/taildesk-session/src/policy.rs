@@ -48,11 +48,14 @@ impl HostSettings {
                 .any(|t| t.node_stable_id == peer.node_stable_id)
     }
 
-    /// "Lembrar deste dispositivo": acrescenta (ou renomeia) na lista.
+    /// "Lembrar deste dispositivo": acrescenta (ou renomeia) na lista e desliga "Pedir permissão
+    /// sempre", que vem ligado e faria a lista ser ignorada: quem marca "Lembrar" quer que este
+    /// dispositivo entre sem perguntar da próxima vez.
     pub fn remember(&mut self, peer: &PeerIdentity) {
         if peer.node_stable_id.is_empty() {
             return;
         }
+        self.ask_always = false;
         match self
             .trusted
             .iter_mut()
@@ -179,6 +182,16 @@ mod tests {
         s.ask_always = false;
         s.forget("n1");
         assert!(matches!(decide(&s, &peer("n1"), &ALL), Decision::Ask(_)));
+    }
+
+    #[test]
+    fn lembrar_vale_mesmo_com_o_padrao() {
+        let mut s = HostSettings::default();
+        assert!(s.ask_always);
+        s.remember(&peer("n1"));
+        assert!(!s.ask_always);
+        assert!(matches!(decide(&s, &peer("n1"), &ALL), Decision::Allow(_)));
+        assert!(matches!(decide(&s, &peer("n2"), &ALL), Decision::Ask(_)));
     }
 
     #[test]
