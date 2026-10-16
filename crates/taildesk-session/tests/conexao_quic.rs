@@ -114,6 +114,7 @@ struct MaquinaFalsa(Registro);
 impl Maquina for MaquinaFalsa {
     type Entrada = EntradaFalsa;
     type Midia = MidiaFalsa;
+    type Area = taildesk_session::conexao::clipboard::SemArea;
 
     fn descricao(&self) -> Descricao {
         Descricao {
@@ -129,6 +130,15 @@ impl Maquina for MaquinaFalsa {
 
     async fn midia(&self, canal: CanalMidia) -> MidiaFalsa {
         MidiaFalsa(self.0.clone(), canal)
+    }
+
+    async fn area(
+        &self,
+    ) -> Option<(
+        Self::Area,
+        tokio::sync::mpsc::Receiver<taildesk_session::conexao::clipboard::DoSistema>,
+    )> {
+        None
     }
 }
 

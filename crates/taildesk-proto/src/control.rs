@@ -10,7 +10,7 @@
 //! | 40–49    | Mouse                                                    |
 //! | 50–59    | Teclado (`11-teclado.md` §3, fase 2)                     |
 //! | 60–69    | Cursor                                                   |
-//! | 70–79    | Clipboard (fase 4)                                       |
+//! | 70–79    | Área de transferência (fase 4)                           |
 //! | 80–89    | Arquivos (fase 3)                                        |
 //! | 90–99    | QoS e seleção adaptativa (`14-selecao-adaptativa.md` §4) |
 //! | 100–109  | Áudio (`15-audio.md` §6.5; reservado, sem implementação) |
@@ -66,6 +66,14 @@ pub mod limits {
     pub const FS_ROOTS: usize = 64;
     /// Nome de exibição de uma raiz.
     pub const FS_ROOT_NAME_LEN: usize = 128;
+    /// Formatos numa `ClipboardOffer`.
+    pub const CLIP_FORMATS: usize = 8;
+    /// Arquivos e pastas copiados listados numa `ClipboardOffer` (o resto não vai).
+    pub const CLIP_FILES: usize = 256;
+    /// Bytes de um pedaço de `ClipboardData` (cabe folgado num frame de controle).
+    pub const CLIP_CHUNK: usize = 32 * 1024;
+    /// Maior conteúdo de um formato (uma captura de tela 4K em PNG passa com folga).
+    pub const CLIP_TOTAL: u64 = 64 * 1024 * 1024;
     // Caminhos, nomes e itens por página: `crate::files::limits`.
 }
 
@@ -77,7 +85,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 100, 101, 102, 103, 104"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 100, 101, 102, 103, 104"
     )]
     pub msg: Option<Msg>,
 }
@@ -152,6 +160,16 @@ pub enum Msg {
     CursorPos(CursorPos),
     #[prost(message, tag = "61")]
     CursorShapeRef(CursorShapeRef),
+
+    // Área de transferência (fase 4): oferta com os formatos, conteúdo só sob pedido
+    #[prost(message, tag = "70")]
+    ClipboardOffer(ClipboardOffer),
+    #[prost(message, tag = "71")]
+    ClipboardRequest(ClipboardRequest),
+    #[prost(message, tag = "72")]
+    ClipboardData(ClipboardData),
+    #[prost(message, tag = "73")]
+    ClipboardError(ClipboardError),
 
     // Arquivos (`10-plano-windows-linux.md` §3; bytes nos streams uni, `crate::files`)
     #[prost(message, tag = "80")]
@@ -715,6 +733,83 @@ pub struct CursorShapeRef {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Área de transferência
+//
+// Quem copia manda uma `ClipboardOffer` com os formatos (e, para arquivos, a lista); o outro
+// lado põe a oferta na área de transferência do sistema sem o conteúdo, e só quando alguém cola
+// pede o formato (`ClipboardRequest`). O conteúdo volta em pedaços de até
+// `limits::CLIP_CHUNK` (`ClipboardData`), entre as outras mensagens de controle, para um PNG
+// grande não segurar o mouse. Cada oferta tem um `seq` próprio de quem oferece; pedido de uma
+// oferta que já foi trocada recebe `ClipboardError(GONE)`. Sem `Permissions.clipboard` nada
+// disso é atendido. Arquivos colados vêm pelos streams de arquivos (`FileRequest` na raiz
+// `crate::files::CLIPBOARD_ROOT`).
+
+/// A área de transferência de quem manda mudou (por alguém de lá, nunca pela oferta do peer).
+/// `formats` vazio = ficou vazia.
+#[derive(Clone, PartialEq, Message)]
+pub struct ClipboardOffer {
+    #[prost(uint32, tag = "1")]
+    pub seq: u32,
+    #[prost(enumeration = "ClipFormat", repeated, tag = "2")]
+    pub formats: Vec<i32>,
+    /// Tamanho de cada formato na ordem de `formats`, quando se sabe (0 = desconhecido).
+    #[prost(uint64, repeated, tag = "3")]
+    pub sizes: Vec<u64>,
+    /// Com `ClipFormat::Files`: o que foi copiado (só o primeiro nível).
+    #[prost(message, repeated, tag = "4")]
+    pub files: Vec<ClipFile>,
+}
+
+/// Um arquivo ou pasta copiado. O índice na lista é o caminho dele na raiz da área de
+/// transferência (`"<índice>/<nome>"`).
+#[derive(Clone, PartialEq, Message)]
+pub struct ClipFile {
+    #[prost(string, tag = "1")]
+    pub name: String,
+    /// Bytes (de uma pasta: 0).
+    #[prost(uint64, tag = "2")]
+    pub size: u64,
+    #[prost(bool, tag = "3")]
+    pub dir: bool,
+}
+
+/// Alguém colou: manda o conteúdo de `format` da oferta `seq`.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct ClipboardRequest {
+    #[prost(uint32, tag = "1")]
+    pub seq: u32,
+    #[prost(enumeration = "ClipFormat", tag = "2")]
+    pub format: i32,
+}
+
+/// Um pedaço do conteúdo: `data` vai em `offset` de um total de `total` bytes; o último é o
+/// que chega a `total`. Conteúdo vazio = um pedaço só com `total` = 0.
+#[derive(Clone, PartialEq, Message)]
+pub struct ClipboardData {
+    #[prost(uint32, tag = "1")]
+    pub seq: u32,
+    #[prost(enumeration = "ClipFormat", tag = "2")]
+    pub format: i32,
+    #[prost(uint64, tag = "3")]
+    pub offset: u64,
+    #[prost(uint64, tag = "4")]
+    pub total: u64,
+    #[prost(bytes = "vec", tag = "5")]
+    pub data: Vec<u8>,
+}
+
+/// O pedido não pode ser atendido.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct ClipboardError {
+    #[prost(uint32, tag = "1")]
+    pub seq: u32,
+    #[prost(enumeration = "ClipFormat", tag = "2")]
+    pub format: i32,
+    #[prost(enumeration = "ClipErrorCode", tag = "3")]
+    pub code: i32,
+}
+
+// ---------------------------------------------------------------------------------------------
 // Arquivos
 //
 // Caminhos são relativos a uma raiz (`root`), com `/` como separador, e quem recebe sempre os
@@ -1071,6 +1166,35 @@ pub enum AudioStopReason {
     DeviceError = 4,
 }
 
+/// Formato da área de transferência.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum ClipFormat {
+    Unspecified = 0,
+    /// Texto em UTF-8, quebras de linha `\n`.
+    Text = 1,
+    /// Fragmento HTML em UTF-8 (sem o cabeçalho "HTML Format" do Windows).
+    Html = 2,
+    /// Imagem em PNG.
+    Png = 3,
+    /// Arquivos e pastas (`ClipboardOffer.files`); o conteúdo vem pelos streams de arquivos.
+    Files = 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum ClipErrorCode {
+    Unspecified = 0,
+    /// A oferta `seq` já foi trocada por outra (ou nunca existiu).
+    Gone = 1,
+    /// Sem `Permissions.clipboard`.
+    Denied = 2,
+    /// Passa de `limits::CLIP_TOTAL`.
+    TooBig = 3,
+    /// O sistema não entregou o formato (o app que copiou fechou, por exemplo).
+    Unavailable = 4,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
 #[repr(i32)]
 pub enum FsAccess {
@@ -1146,6 +1270,14 @@ fn at_most(field: &'static str, value: usize, max: usize) -> Result<(), InvalidM
             value: value as u64,
             max: max as u64,
         })
+    } else {
+        Ok(())
+    }
+}
+
+fn at_most_u64(field: &'static str, value: u64, max: u64) -> Result<(), InvalidMessage> {
+    if value > max {
+        Err(InvalidMessage { field, value, max })
     } else {
         Ok(())
     }
@@ -1259,11 +1391,26 @@ impl Control {
             return Ok(());
         };
         match msg {
+            Msg::ClipboardOffer(m) => {
+                at_most("formats", m.formats.len(), limits::CLIP_FORMATS)?;
+                at_most("sizes", m.sizes.len(), limits::CLIP_FORMATS)?;
+                at_most("files", m.files.len(), limits::CLIP_FILES)?;
+                for f in &m.files {
+                    at_most("file.name", f.name.len(), files::NAME_LEN)?;
+                }
+                Ok(())
+            }
+            Msg::ClipboardData(m) => {
+                at_most("data", m.data.len(), limits::CLIP_CHUNK)?;
+                at_most_u64("total", m.total, limits::CLIP_TOTAL)?;
+                let fim = m.offset.saturating_add(m.data.len() as u64);
+                at_most_u64("offset", fim, m.total)
+            }
             Msg::FsRoots(m) => {
                 at_most("roots", m.roots.len(), limits::FS_ROOTS)?;
                 for r in &m.roots {
                     at_most("root.name", r.name.len(), limits::FS_ROOT_NAME_LEN)?;
-                    if r.id == crate::files::INBOX_ROOT {
+                    if r.id == crate::files::INBOX_ROOT || r.id == crate::files::CLIPBOARD_ROOT {
                         return Err(InvalidMessage {
                             field: "root.id",
                             value: 0,
@@ -1371,6 +1518,8 @@ impl Control {
             | Msg::CursorShapeRef(_)
             | Msg::KeyboardMode(_)
             | Msg::ReleaseAll(_)
+            | Msg::ClipboardRequest(_)
+            | Msg::ClipboardError(_)
             | Msg::FsRootsRequest(_)
             | Msg::FileCancel(_)
             | Msg::FileError(_) => Ok(()),
@@ -1715,6 +1864,39 @@ mod tests {
                 stream_id: 0xF0,
                 reason: AudioStopReason::ByController.into(),
             }),
+            Msg::ClipboardOffer(ClipboardOffer {
+                seq: 7,
+                formats: vec![ClipFormat::Text.into(), ClipFormat::Files.into()],
+                sizes: vec![12, 0],
+                files: vec![
+                    ClipFile {
+                        name: "relatório.pdf".into(),
+                        size: 1_048_576,
+                        dir: false,
+                    },
+                    ClipFile {
+                        name: "Fotos".into(),
+                        size: 0,
+                        dir: true,
+                    },
+                ],
+            }),
+            Msg::ClipboardRequest(ClipboardRequest {
+                seq: 7,
+                format: ClipFormat::Png.into(),
+            }),
+            Msg::ClipboardData(ClipboardData {
+                seq: 7,
+                format: ClipFormat::Text.into(),
+                offset: 4,
+                total: 12,
+                data: b"mundo".to_vec(),
+            }),
+            Msg::ClipboardError(ClipboardError {
+                seq: 6,
+                format: ClipFormat::Html.into(),
+                code: ClipErrorCode::Gone.into(),
+            }),
             Msg::FsRootsRequest(FsRootsRequest {}),
             Msg::FsRoots(FsRoots {
                 roots: vec![FsRoot {
@@ -1838,6 +2020,46 @@ mod tests {
             Err(FrameError::Invalid(e)) => e,
             outro => panic!("esperava InvalidMessage, veio {outro:?}"),
         }
+    }
+
+    #[test]
+    fn limites_da_area_de_transferencia() {
+        let pedaco = |offset: u64, n: usize, total: u64| {
+            Msg::ClipboardData(ClipboardData {
+                seq: 1,
+                format: ClipFormat::Png.into(),
+                offset,
+                total,
+                data: vec![0; n],
+            })
+        };
+        let n = limits::CLIP_CHUNK;
+        assert!(
+            Control::from(pedaco(0, n, limits::CLIP_TOTAL))
+                .validate()
+                .is_ok()
+        );
+        assert_eq!(invalida(pedaco(0, n + 1, limits::CLIP_TOTAL)).field, "data");
+        assert_eq!(
+            invalida(pedaco(0, 1, limits::CLIP_TOTAL + 1)).field,
+            "total"
+        );
+        // O pedaço passa do total anunciado.
+        assert_eq!(invalida(pedaco(10, 5, 12)).field, "offset");
+        let muitos = (0..=limits::CLIP_FILES)
+            .map(|_| ClipFile {
+                name: "a".into(),
+                size: 1,
+                dir: false,
+            })
+            .collect();
+        let e = invalida(Msg::ClipboardOffer(ClipboardOffer {
+            seq: 1,
+            formats: vec![ClipFormat::Files.into()],
+            sizes: vec![],
+            files: muitos,
+        }));
+        assert_eq!(e.field, "files");
     }
 
     #[test]

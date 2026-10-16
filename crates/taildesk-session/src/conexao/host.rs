@@ -25,6 +25,7 @@ use taildesk_proto::control::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+use super::clipboard::{DoSistema, Ponte, Sistema, sem_sistema};
 use super::{ESPERA_HELLO, FimLeitura, Leitor, StreamUni, classificar, controle, encerrar};
 use crate::host::{ConsentAnswer, ConsentPrompt, HelloReply, HostSession, HostState};
 use crate::policy::HostSettings;
@@ -109,6 +110,7 @@ pub struct Descricao {
 pub trait Maquina: Send + Sync + 'static {
     type Entrada: Entrada;
     type Midia: Midia;
+    type Area: Sistema;
     fn descricao(&self) -> Descricao;
     /// Mouse e teclado para uma sessão com controle. `None` = indisponível (portal recusado,
     /// por exemplo): a sessão segue só vendo.
@@ -116,6 +118,10 @@ pub trait Maquina: Send + Sync + 'static {
     /// Vídeo para uma sessão ao vivo (ver é sempre permitido). Chamado depois de
     /// [`Maquina::entrada`], então pode reaproveitar o que ela abriu (a sessão do portal).
     fn midia(&self, canal: CanalMidia) -> impl Future<Output = Self::Midia> + Send;
+    /// Área de transferência para uma sessão com `Permissions.clipboard`, chamada depois de
+    /// [`Maquina::midia`] (no Wayland é da mesma sessão do portal). `None` = sem suporte: os
+    /// pedidos do controlador voltam `UNAVAILABLE`.
+    fn area(&self) -> impl Future<Output = Option<(Self::Area, mpsc::Receiver<DoSistema>)>> + Send;
 }
 
 /// Configuração do host para todas as sessões.
@@ -487,6 +493,15 @@ async fn ao_vivo<M: Maquina>(
         })
     };
 
+    let area = if permissoes.clipboard {
+        maquina
+            .area()
+            .await
+            .map(|(s, rx)| Ponte::iniciar(s, rx, saida.clone(), true))
+    } else {
+        None
+    };
+
     let (cmd_tx, mut cmd_rx) = mpsc::channel(8);
     let _ = eventos
         .send(EventoHost::AoVivo {
@@ -537,6 +552,26 @@ async fn ao_vivo<M: Maquina>(
                     | Msg::FileDone(_)
                     | Msg::FileCancel(_)
                     | Msg::FileError(_) => arquivos.handle(msg).await,
+                    Msg::ClipboardOffer(_)
+                    | Msg::ClipboardRequest(_)
+                    | Msg::ClipboardData(_)
+                    | Msg::ClipboardError(_) => match &area {
+                        Some(a) => a.mensagem(msg).await,
+                        None => {
+                            // Sem permissão a resposta é `DENIED`; com ela e sem suporte aqui,
+                            // `UNAVAILABLE`.
+                            let r = if permissoes.clipboard {
+                                sem_sistema(&msg)
+                            } else {
+                                crate::clipboard::AreaTransferencia::default()
+                                    .receber(&msg, false)
+                                    .1
+                            };
+                            if let Some(r) = r {
+                                let _ = saida.send(controle(r)).await;
+                            }
+                        }
+                    },
                     Msg::StartVideo(_)
                     | Msg::StopVideo(_)
                     | Msg::SetPriority(_)
@@ -563,6 +598,7 @@ async fn ao_vivo<M: Maquina>(
         }
     };
     teclado.soltar_tudo().await;
+    drop(area);
     drop(midia);
     aceitar.abort();
     repassar.abort();
