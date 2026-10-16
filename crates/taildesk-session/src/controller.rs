@@ -44,6 +44,10 @@ pub enum EndReason {
     ProtocolError,
     /// A conexão caiu (rede, host desligado ou o app do host fechou).
     Lost,
+    /// A senha de acesso não confere (ou o host não usa mais senha).
+    BadPassword,
+    /// Senhas erradas demais: o host não confere por alguns minutos.
+    TooManyAttempts,
 }
 
 fn end_reason(reason: i32) -> EndReason {
@@ -54,6 +58,8 @@ fn end_reason(reason: i32) -> EndReason {
         Ok(CloseReason::VersionMismatch) => EndReason::VersionMismatch,
         Ok(CloseReason::ByController) => EndReason::ByUser,
         Ok(CloseReason::ProtocolError) => EndReason::ProtocolError,
+        Ok(CloseReason::BadPassword) => EndReason::BadPassword,
+        Ok(CloseReason::TooManyAttempts) => EndReason::TooManyAttempts,
         Ok(CloseReason::ByHost | CloseReason::Unspecified) | Err(_) => EndReason::ByHost,
     }
 }

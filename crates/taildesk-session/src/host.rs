@@ -8,7 +8,7 @@ use taildesk_proto::control::{
     Close, CloseReason, Consent, ConsentResult, Hello, Msg, PROTO_VERSION, Permissions,
 };
 
-use crate::policy::{Decision, HostSettings, clamp, decide};
+use crate::policy::{Decision, HostSettings, clamp, decide, offer};
 
 /// Quanto o diálogo espera antes de recusar sozinho (`12-levantamento-ux.md` §5.3).
 pub const CONSENT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -180,7 +180,11 @@ impl HostSession {
         if hello.proto_version != PROTO_VERSION {
             return HelloReply::Close(self.close(CloseReason::VersionMismatch));
         }
-        match decide(settings, &self.peer, &hello.features) {
+        let decisao = decide(settings, &self.peer, &hello.features);
+        if !hello.password.is_empty() && decisao != Decision::Refuse {
+            return self.com_senha(hello, settings, now);
+        }
+        match decisao {
             Decision::Refuse => HelloReply::Close(self.close(CloseReason::NotAllowed)),
             Decision::Allow(permissions) => {
                 self.state = HostState::Live {
@@ -204,6 +208,32 @@ impl HostSession {
                 })
             }
         }
+    }
+
+    /// `Hello` com senha: certa entra sem o diálogo, errada fecha (e conta para o bloqueio).
+    fn com_senha(&mut self, hello: &Hello, settings: &HostSettings, now: Instant) -> HelloReply {
+        let node = self.peer.node_stable_id.clone();
+        if crate::senha::tentativas(|t| t.bloqueado(&node, now)) {
+            return HelloReply::Close(self.close(CloseReason::TooManyAttempts));
+        }
+        let certa = settings
+            .password_hash
+            .as_deref()
+            .is_some_and(|h| crate::senha::confere(h, &hello.password));
+        if !certa {
+            crate::senha::tentativas(|t| t.errou(&node, now));
+            return HelloReply::Close(self.close(CloseReason::BadPassword));
+        }
+        crate::senha::tentativas(|t| t.acertou(&node));
+        let permissions = offer(settings, &hello.features);
+        self.state = HostState::Live {
+            permissions,
+            control_paused: false,
+        };
+        HelloReply::Ack(AckFields {
+            consent: Consent::NotRequired,
+            permissions,
+        })
     }
 
     /// Resposta do diálogo. Devolve o que mandar ao controlador: `ConsentResult` e, se
@@ -447,6 +477,88 @@ mod tests {
         );
         assert!(matches!(out.last(), Some(Msg::Close(_))));
         assert!(!settings.is_trusted(&peer()));
+    }
+
+    fn com_senha(node: &str, senha: &str) -> (HostSession, Hello) {
+        let p = PeerIdentity {
+            node_stable_id: node.into(),
+            ..peer()
+        };
+        let h = Hello {
+            password: senha.into(),
+            ..hello(&[Feature::Files])
+        };
+        (HostSession::new(p), h)
+    }
+
+    fn motivo(r: HelloReply) -> Option<CloseReason> {
+        match r {
+            HelloReply::Close(c) => Some(c.reason()),
+            HelloReply::Ack(_) => None,
+        }
+    }
+
+    #[test]
+    fn senha_certa_entra_sem_dialogo() {
+        let mut settings = HostSettings {
+            password_hash: Some(crate::senha::gerar_hash("senha do yuri").unwrap()),
+            ..HostSettings::default()
+        };
+        // "Pedir sempre" ligado e dispositivo desconhecido: a senha basta.
+        let (mut s, h) = com_senha("senha-ok", "senha do yuri");
+        let r = s.on_hello(&h, &settings, Instant::now());
+        let HelloReply::Ack(c) = r else { panic!() };
+        assert_eq!(c.consent, Consent::NotRequired);
+        assert!(c.permissions.files && c.permissions.control);
+        assert!(s.admits(&key()));
+
+        let (mut s, h) = com_senha("senha-errada", "outra senha");
+        assert_eq!(
+            motivo(s.on_hello(&h, &settings, Instant::now())),
+            Some(CloseReason::BadPassword)
+        );
+        // Sem senha no Hello: o diálogo de sempre.
+        let mut s = HostSession::new(peer());
+        assert!(motivo(s.on_hello(&hello(&[]), &settings, Instant::now())).is_none());
+        assert!(s.prompt().is_some());
+        // "Aceitar conexões" desligado vale mesmo com a senha certa.
+        settings.accept_connections = false;
+        let (mut s, h) = com_senha("senha-ok", "senha do yuri");
+        assert_eq!(
+            motivo(s.on_hello(&h, &settings, Instant::now())),
+            Some(CloseReason::NotAllowed)
+        );
+        // Host sem senha: a senha salva no controlador ficou velha.
+        let settings = HostSettings::default();
+        let (mut s, h) = com_senha("senha-velha", "senha do yuri");
+        assert_eq!(
+            motivo(s.on_hello(&h, &settings, Instant::now())),
+            Some(CloseReason::BadPassword)
+        );
+    }
+
+    #[test]
+    fn senha_errada_demais_bloqueia_mesmo_a_certa() {
+        let settings = HostSettings {
+            password_hash: Some(crate::senha::gerar_hash("senha do yuri").unwrap()),
+            ..HostSettings::default()
+        };
+        let agora = Instant::now();
+        for _ in 0..crate::senha::ERROS_MAX {
+            let (mut s, h) = com_senha("chutador", "chute");
+            assert_eq!(
+                motivo(s.on_hello(&h, &settings, agora)),
+                Some(CloseReason::BadPassword)
+            );
+        }
+        let (mut s, h) = com_senha("chutador", "senha do yuri");
+        assert_eq!(
+            motivo(s.on_hello(&h, &settings, agora)),
+            Some(CloseReason::TooManyAttempts)
+        );
+        let (mut s, h) = com_senha("chutador", "senha do yuri");
+        let depois = agora + crate::senha::BLOQUEIO;
+        assert!(motivo(s.on_hello(&h, &settings, depois)).is_none());
     }
 
     #[test]

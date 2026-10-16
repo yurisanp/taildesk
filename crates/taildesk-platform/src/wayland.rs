@@ -186,6 +186,8 @@ pub struct SessaoPortal {
     monitores: Vec<MonitorPortal>,
     dispositivos: Dispositivos,
     sem_input: Option<SemInput>,
+    /// Para abrir a próxima sessão sem o diálogo (se a pessoa deixou lembrar). Só vale uma vez.
+    token: Option<String>,
 }
 
 impl fmt::Debug for SessaoPortal {
@@ -202,22 +204,33 @@ impl fmt::Debug for SessaoPortal {
 impl SessaoPortal {
     /// Abre a sessão e mostra o diálogo do compositor no host. Espera a pessoa responder.
     ///
-    /// `com_input = false` pede só a tela (sessão só de visualização).
-    pub async fn abrir(com_input: bool) -> Result<SessaoPortal, ErroPortal> {
+    /// `com_input = false` pede só a tela (sessão só de visualização). Com `restaurar` (o
+    /// [`Self::token_restauracao`] da sessão anterior) o compositor pode abrir sem o diálogo,
+    /// para o acesso sem ninguém na frente da tela; token velho só faz o diálogo voltar.
+    pub async fn abrir(
+        com_input: bool,
+        restaurar: Option<&str>,
+    ) -> Result<SessaoPortal, ErroPortal> {
         let screencast = Screencast::new().await?;
         let fontes = SelectSourcesOptions::default()
             .set_sources(BitFlags::from(SourceType::Monitor))
             .set_multiple(true)
-            .set_cursor_mode(modo_cursor(&screencast).await)
-            .set_persist_mode(PersistMode::DoNot);
+            .set_cursor_mode(modo_cursor(&screencast).await);
 
         if com_input {
             match RemoteDesktop::new().await {
-                Ok(rd) => return Self::abrir_remota(rd, screencast, fontes).await,
+                // Numa sessão RemoteDesktop o lembrar vai no `SelectDevices`.
+                Ok(rd) => {
+                    let fontes = fontes.set_persist_mode(PersistMode::DoNot);
+                    return Self::abrir_remota(rd, screencast, fontes, restaurar).await;
+                }
                 Err(ashpd::Error::PortalNotFound(_)) => {}
                 Err(e) => return Err(e.into()),
             }
         }
+        let fontes = fontes
+            .set_persist_mode(PersistMode::ExplicitlyRevoked)
+            .set_restore_token(restaurar);
 
         let sessao = screencast
             .create_session(CreateSessionOptions::default())
@@ -237,13 +250,20 @@ impl SessaoPortal {
             monitores,
             dispositivos: Dispositivos::default(),
             sem_input: com_input.then_some(SemInput::SemRemoteDesktop),
+            token: streams.restore_token().map(str::to_owned),
         })
+    }
+
+    /// Token para a próxima [`Self::abrir`] sem diálogo (guarde no cofre: dá acesso à tela).
+    pub fn token_restauracao(&self) -> Option<&str> {
+        self.token.as_deref()
     }
 
     async fn abrir_remota(
         rd: RemoteDesktop,
         screencast: Screencast,
         fontes: SelectSourcesOptions,
+        restaurar: Option<&str>,
     ) -> Result<SessaoPortal, ErroPortal> {
         let sessao = rd.create_session(CreateSessionOptions::default()).await?;
         // A área de transferência se pede antes do `Start` e entra no mesmo diálogo.
@@ -261,7 +281,8 @@ impl SessaoPortal {
             &sessao,
             SelectDevicesOptions::default()
                 .set_devices(DeviceType::Keyboard | DeviceType::Pointer)
-                .set_persist_mode(PersistMode::DoNot),
+                .set_persist_mode(PersistMode::ExplicitlyRevoked)
+                .set_restore_token(restaurar),
         )
         .await?
         .response()?;
@@ -282,12 +303,14 @@ impl SessaoPortal {
         let sem_input =
             (!dispositivos.teclado && !dispositivos.ponteiro).then_some(SemInput::NaoLiberado);
         let area = area.filter(|_| escolha.is_clipboard_enabled());
+        let token = escolha.restore_token().map(str::to_owned);
         Ok(SessaoPortal {
             tipo: Tipo::Remota { rd, sessao, area },
             screencast,
             monitores,
             dispositivos,
             sem_input,
+            token,
         })
     }
 

@@ -26,6 +26,9 @@ use crate::{avisar, config, no_app};
 
 /// Nome da identidade do host no cofre.
 const SEGREDO_IDENTIDADE: &str = "identidade-host";
+/// Token de restauração da sessão do portal (Linux): abre sem o diálogo do compositor.
+#[cfg(target_os = "linux")]
+const SEGREDO_PORTAL: &str = "portal-restauracao";
 
 /// Identidade do host: a mesma em toda execução (os controladores fixam o fingerprint). Sem
 /// cofre, uma nova a cada execução, e os controladores verão "certificado mudou".
@@ -105,8 +108,32 @@ impl MaquinaApp {
         use taildesk_platform::wayland::SessaoPortal;
         let mut portal = self.portal.lock().await;
         if portal.is_none() {
-            match SessaoPortal::abrir(true).await {
-                Ok(s) => *portal = Some(Arc::new(s)),
+            // Token da última sessão: o compositor pode abrir sem o diálogo (acesso sem
+            // ninguém na tela). Cada token vale uma vez; o novo fica no lugar.
+            let token =
+                tokio::task::spawn_blocking(|| taildesk_platform::segredos::ler(SEGREDO_PORTAL))
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+                    .flatten()
+                    .and_then(|b| String::from_utf8(b).ok());
+            match SessaoPortal::abrir(true, token.as_deref()).await {
+                Ok(s) => {
+                    if let Some(novo) = s.token_restauracao().map(str::to_owned)
+                        && token.as_deref() != Some(novo.as_str())
+                    {
+                        tokio::task::spawn_blocking(move || {
+                            if let Err(e) =
+                                taildesk_platform::segredos::gravar(SEGREDO_PORTAL, novo.as_bytes())
+                            {
+                                eprintln!(
+                                    "taildesk: não foi possível lembrar a sessão do portal: {e}"
+                                );
+                            }
+                        });
+                    }
+                    *portal = Some(Arc::new(s));
+                }
                 Err(e) => {
                     eprintln!("taildesk: portal de controle remoto recusado ou indisponível: {e}");
                     avisar(format!("Sem acesso à tela e ao controle: {e}"));

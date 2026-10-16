@@ -66,6 +66,8 @@ pub mod limits {
     pub const FS_ROOTS: usize = 64;
     /// Nome de exibição de uma raiz.
     pub const FS_ROOT_NAME_LEN: usize = 128;
+    /// Senha de acesso no `Hello`, em bytes.
+    pub const PASSWORD_LEN: usize = 128;
     /// Formatos numa `ClipboardOffer`.
     pub const CLIP_FORMATS: usize = 8;
     /// Arquivos e pastas copiados listados numa `ClipboardOffer` (o resto não vai).
@@ -217,7 +219,9 @@ impl From<Msg> for Control {
 // Sessão
 
 /// C→H: primeira mensagem. Só preferências; a identidade vem de `Overlay::identify()`.
+/// O `Debug` esconde a senha.
 #[derive(Clone, PartialEq, Message)]
+#[prost(skip_debug)]
 pub struct Hello {
     #[prost(uint32, tag = "1")]
     pub proto_version: u32,
@@ -237,6 +241,27 @@ pub struct Hello {
     /// Layout do teclado do controlador.
     #[prost(message, optional, tag = "8")]
     pub keyboard: Option<KeyboardInfo>,
+    /// Senha de acesso deste host (salva no controlador): certa, entra sem o diálogo; errada,
+    /// `Close(BAD_PASSWORD)`. Vazia = pedir acesso. Vai só dentro do QUIC com o certificado do
+    /// host conferido; o host guarda só o hash (argon2).
+    #[prost(string, tag = "9")]
+    pub password: String,
+}
+
+impl std::fmt::Debug for Hello {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Hello")
+            .field("proto_version", &self.proto_version)
+            .field("app_version", &self.app_version)
+            .field("platform", &self.platform)
+            .field("decode_caps", &self.decode_caps)
+            .field("display_prefs", &self.display_prefs)
+            .field("features", &self.features)
+            .field("clock_ns", &self.clock_ns)
+            .field("keyboard", &self.keyboard)
+            .field("password", &(!self.password.is_empty()).then_some("***"))
+            .finish()
+    }
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -305,6 +330,9 @@ pub struct HelloAck {
     /// Layout do teclado do host.
     #[prost(message, optional, tag = "10")]
     pub keyboard: Option<KeyboardInfo>,
+    /// O host aceita senha de acesso (o controlador pode oferecer o campo enquanto espera).
+    #[prost(bool, tag = "11")]
+    pub password_enabled: bool,
 }
 
 /// O que o controlador pode fazer nesta sessão.
@@ -1077,6 +1105,10 @@ pub enum CloseReason {
     ConsentTimeout = 6,
     /// O host não aceita conexões deste peer (configuração ou política).
     NotAllowed = 7,
+    /// Senha de acesso errada (ou o host não tem mais senha).
+    BadPassword = 8,
+    /// Senhas erradas demais deste peer: o host não confere por um tempo.
+    TooManyAttempts = 9,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
@@ -1438,6 +1470,7 @@ impl Control {
             Msg::FileDone(m) => exactly("blake3", m.blake3.len(), 32),
             Msg::Hello(m) => {
                 at_most("app_version", m.app_version.len(), limits::SHORT_TEXT_LEN)?;
+                at_most("password", m.password.len(), limits::PASSWORD_LEN)?;
                 keyboard(m.keyboard.as_ref())?;
                 platform(m.platform.as_ref())?;
                 at_most("decode_caps", m.decode_caps.len(), limits::CODEC_CAPS)?;
@@ -1670,6 +1703,7 @@ mod tests {
                 features: vec![Feature::Files.into(), Feature::MultiDisplay.into()],
                 clock_ns: 1_234_567_890,
                 keyboard: teclado("00020409", "us-intl", vec![]),
+                password: "correta cavalo bateria".into(),
             }),
             Msg::HelloAck(HelloAck {
                 proto_version: PROTO_VERSION,
@@ -1682,6 +1716,7 @@ mod tests {
                 clock_ns: 99,
                 client_clock_ns: 1_234_567_890,
                 keyboard: teclado("xkb:br(abnt2)", "br-abnt2", vec![0x87, 0x85]),
+                password_enabled: true,
             }),
             Msg::KeyboardLayoutChanged(KeyboardLayoutChanged {
                 info: teclado("00010416", "br-abnt2", vec![0x87, 0x85]),
@@ -2200,6 +2235,22 @@ mod tests {
             visible: true,
         }));
         assert_eq!(e.field, "y");
+    }
+
+    #[test]
+    fn senha_tem_limite_e_nao_aparece_no_debug() {
+        let e = invalida(Msg::Hello(Hello {
+            proto_version: PROTO_VERSION,
+            password: "x".repeat(limits::PASSWORD_LEN + 1),
+            ..Hello::default()
+        }));
+        assert_eq!(e.field, "password");
+        let h = Hello {
+            password: "segredo123".into(),
+            ..Hello::default()
+        };
+        let d = format!("{h:?}");
+        assert!(!d.contains("segredo123") && d.contains("***"), "{d}");
     }
 
     #[test]

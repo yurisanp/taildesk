@@ -132,7 +132,7 @@ impl App {
         j.on_conectar(|d| {
             com_app(|app| {
                 app.controlador
-                    .conectar(&app.rt, d.nome.to_string(), d.ip.to_string())
+                    .conectar(&app.rt, d.nome.to_string(), d.ip.to_string(), None)
             });
         });
         let agora = self.agora.clone();

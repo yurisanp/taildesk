@@ -282,6 +282,12 @@ async fn atender<I: Identificador, M: Maquina>(
         clock_ns: super::relogio_ns(),
         client_clock_ns: hello.clock_ns,
         keyboard: Some(descricao.teclado.clone()),
+        password_enabled: config
+            .settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .password_hash
+            .is_some(),
     };
     if saida.send(controle(Msg::HelloAck(ack))).await.is_err() {
         let _ = eventos.send(fim(FimHost::Queda)).await;
