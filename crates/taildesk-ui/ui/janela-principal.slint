@@ -417,6 +417,7 @@ component SecaoConfiguracoes inherits ScrollView {
     in property <bool> tem-senha;
     in-out property <bool> editando-senha;
     in property <string> erro-senha;
+    in-out property <bool> iniciar-com-sistema;
     in property <string> pasta-entrada;
     in property <string> tailscale;
     in property <string> versao-app;
@@ -435,6 +436,7 @@ component SecaoConfiguracoes inherits ScrollView {
     callback revogar(int);
     callback definir-senha(string, string);
     callback remover-senha();
+    callback iniciar-com-sistema-mudou(bool);
     callback abrir-pasta-entrada();
     callback codec-mudou(int);
     callback taxa-mudou(int);
@@ -479,6 +481,13 @@ component SecaoConfiguracoes inherits ScrollView {
                         erro: root.erro-senha;
                         definir(a, b) => { root.definir-senha(a, b); }
                         remover => { root.remover-senha(); }
+                    }
+                    Separador { }
+                    OpcaoConfig {
+                        titulo: @tr("Iniciar com o sistema");
+                        descricao: @tr("O TailDesk abre escondido na bandeja quando você entra no computador e fica pronto para receber conexões, sem precisar abrir o app. Junto com o acesso com senha, dá para entrar de longe sem ninguém na frente da tela.");
+                        ligado <=> root.iniciar-com-sistema;
+                        mudou(v) => { root.iniciar-com-sistema-mudou(v); }
                     }
                     Separador { }
                     VerticalLayout {
@@ -619,6 +628,7 @@ export component JanelaPrincipal inherits Window {
     in property <bool> tem-senha;
     in-out property <bool> editando-senha;
     in property <string> erro-senha;
+    in-out property <bool> iniciar-com-sistema;
     in property <string> pasta-entrada;
     in property <[string]> codecs-config: [@tr("Automático"), "H.264", "HEVC", "AV1", "PyroWave"];
     in-out property <int> codec-config: 0;
@@ -648,6 +658,7 @@ export component JanelaPrincipal inherits Window {
     callback revogar(int);
     callback definir-senha(string, string);
     callback remover-senha();
+    callback iniciar-com-sistema-mudou(bool);
     callback abrir-pasta-entrada();
     callback codec-config-mudou(int);
     callback taxa-config-mudou(int);
@@ -749,6 +760,8 @@ export component JanelaPrincipal inherits Window {
                 erro-senha: root.erro-senha;
                 definir-senha(a, b) => { root.definir-senha(a, b); }
                 remover-senha => { root.remover-senha(); }
+                iniciar-com-sistema <=> root.iniciar-com-sistema;
+                iniciar-com-sistema-mudou(v) => { root.iniciar-com-sistema-mudou(v); }
                 pasta-entrada: root.pasta-entrada;
                 codecs: root.codecs-config;
                 codec <=> root.codec-config;
