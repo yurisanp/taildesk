@@ -55,6 +55,9 @@ pub struct Diagnostico {
     /// Quadros perdidos em cada um dos últimos segundos (para o indicador de qualidade).
     perdidos_recentes: std::collections::VecDeque<u64>,
     variacao: Variacao,
+    /// Quadros por segundo enviados (do host) e exibidos aqui nos últimos segundos: os segundos
+    /// do host e os daqui não batem, e a 10–15 fps um único segundo desalinhado parece travada.
+    fps_recentes: std::collections::VecDeque<(f64, f64)>,
     /// O que a última chamada de [`Diagnostico::linhas`] mediu.
     medida: Medida,
 }
@@ -69,6 +72,7 @@ impl Default for Diagnostico {
             perdidos: 0,
             perdidos_recentes: Default::default(),
             variacao: Variacao::default(),
+            fps_recentes: Default::default(),
             medida: Medida::default(),
         }
     }
@@ -218,6 +222,19 @@ impl Diagnostico {
             },
         ));
         let mbps = (a.bytes - b.bytes) as f64 * 8.0 / 1e6 / s;
+        let enviados = self
+            .host
+            .as_ref()
+            .map_or(0.0, |h| f64::from(h.fps_x100) / 100.0);
+        if self.fps_recentes.len() == 3 {
+            self.fps_recentes.pop_front();
+        }
+        self.fps_recentes.push_back((enviados, exibidos));
+        let n = self.fps_recentes.len() as f64;
+        let (fps_enviados, fps_exibidos) = self
+            .fps_recentes
+            .iter()
+            .fold((0.0, 0.0), |(e, x), (a, b)| (e + a / n, x + b / n));
         self.medida = Medida {
             rtt: self.rede.rtt,
             variacao: self.variacao.medir(self.rede.rtt),
@@ -226,11 +243,8 @@ impl Diagnostico {
             video_kbps: (mbps * 1000.0) as u32,
             rota: self.rede.rota.clone(),
             quadros_perdidos: self.perdidos_recentes.iter().sum(),
-            fps_enviados: self
-                .host
-                .as_ref()
-                .map_or(0.0, |h| f64::from(h.fps_x100) / 100.0),
-            fps_exibidos: exibidos,
+            fps_enviados,
+            fps_exibidos,
             com_host: self.host.is_some(),
         };
         l.push(linha(

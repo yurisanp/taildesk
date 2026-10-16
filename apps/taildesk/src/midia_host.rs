@@ -367,15 +367,12 @@ async fn stats(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
         (p.sent_packets, p.lost_packets)
     };
     let mut antes = caminho(&canal.conn);
+    let mut perda = Perda::default();
     loop {
         t.tick().await;
         let agora = caminho(&canal.conn);
-        let (enviados, perdidos) = (agora.0 - antes.0, agora.1 - antes.1);
+        let loss_ppm = perda.medir(agora.0 - antes.0, agora.1 - antes.1);
         antes = agora;
-        let loss_ppm = (perdidos * 1_000_000)
-            .checked_div(enviados)
-            .unwrap_or(0)
-            .min(1_000_000) as u32;
         let est_kbps = estimar_kbps(canal.conn.stats().path.cwnd, canal.conn.rtt());
         let msgs: Vec<VideoStats> = compartilhado
             .fluxos()
@@ -390,6 +387,35 @@ async fn stats(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
             // Informativo: fila cheia perde esta amostra e a próxima vem em um segundo.
             canal.tentar_enviar(Msg::VideoStats(m));
         }
+    }
+}
+
+/// Perda numa janela dos últimos segundos. Com a tela parada saem só alguns pacotes por segundo
+/// (cursor, estatísticas, keep-alive) e um único perdido viraria "perda de 30 %": abaixo de
+/// [`Perda::MIN_PACOTES`] na janela a amostra é pequena demais e a perda conta como zero.
+#[derive(Debug, Default)]
+struct Perda {
+    janela: std::collections::VecDeque<(u64, u64)>,
+}
+
+impl Perda {
+    const JANELA: usize = 5;
+    const MIN_PACOTES: u64 = 200;
+
+    /// Pacotes enviados e perdidos no último intervalo → perda da janela em ppm.
+    fn medir(&mut self, enviados: u64, perdidos: u64) -> u32 {
+        if self.janela.len() == Self::JANELA {
+            self.janela.pop_front();
+        }
+        self.janela.push_back((enviados, perdidos));
+        let (e, p) = self
+            .janela
+            .iter()
+            .fold((0u64, 0u64), |(e, p), (a, b)| (e + a, p + b));
+        if e < Self::MIN_PACOTES {
+            return 0;
+        }
+        (p.saturating_mul(1_000_000) / e).min(1_000_000) as u32
     }
 }
 
@@ -1114,6 +1140,20 @@ mod tests {
         assert_ne!(n.stream_id, c.stream_id);
         assert!(midia.captura.is_some());
         drop(midia);
+    }
+
+    #[test]
+    fn perda_com_poucos_pacotes_nao_conta() {
+        let mut p = Perda::default();
+        // Tela parada: 5 pacotes por segundo, um perdido.
+        assert_eq!(p.medir(5, 1), 0);
+        // Vídeo: 1000 pacotes, 10 perdidos na janela (1 %).
+        assert_eq!(p.medir(995, 9), 10_000);
+        // A janela esquece o que passou de 5 intervalos.
+        for _ in 0..5 {
+            p.medir(1000, 0);
+        }
+        assert_eq!(p.medir(1000, 0), 0);
     }
 
     #[test]

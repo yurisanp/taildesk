@@ -191,8 +191,14 @@ where
                         chunk.size() as usize,
                         chunk.stride(),
                     );
-                    // Tamanho 0 = a imagem não mudou (só o cursor, por exemplo).
-                    if tamanho == 0 || stride <= 0 {
+                    // Tamanho 0 = a imagem não mudou (só o cursor, por exemplo). O KWin manda o
+                    // buffer de uma atualização só do cursor com `SPA_CHUNK_FLAG_CORRUPTED` e o
+                    // tamanho cheio: a imagem nele é a de um quadro antigo do pool, e codificá-la
+                    // faz janelas e textos de antes piscarem na tela do controlador.
+                    if tamanho == 0
+                        || stride <= 0
+                        || chunk.flags().contains(spa::buffer::ChunkFlags::CORRUPTED)
+                    {
                         return None;
                     }
                     let dados = dado.data()?.get(offset..offset + tamanho)?;
