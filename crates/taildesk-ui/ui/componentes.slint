@@ -54,10 +54,6 @@ export component Botao inherits Rectangle {
     border-width: (primario || discreto) && !foco.has-focus ? 0px : 1px;
     border-color: foco.has-focus ? Tema.primaria : Tema.borda;
 
-    toque := TouchArea {
-        mouse-cursor: habilitado ? pointer : default;
-        clicked => { if root.habilitado { root.clicado(); } }
-    }
     foco := FocusScope {
         key-pressed(e) => {
             if e.text == Key.Return || e.text == " " {
@@ -66,6 +62,12 @@ export component Botao inherits Rectangle {
             }
             reject
         }
+    }
+    // Depois do FocusScope, para ficar por cima: com o FocusScope por cima, o clique só dava
+    // foco e o `clicked` nunca chegava.
+    toque := TouchArea {
+        mouse-cursor: habilitado ? pointer : default;
+        clicked => { if root.habilitado { root.clicado(); } }
     }
     rotulo := Text {
         width: parent.width;
