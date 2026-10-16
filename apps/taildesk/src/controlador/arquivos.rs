@@ -35,6 +35,9 @@ pub(super) struct Painel {
     navegador: Browser,
     locale: Locale,
     ultimo_desenho: Option<Instant>,
+    /// Arrastar arquivos do sistema no Wayland (no Windows e no X11 vem pelo winit).
+    #[cfg(target_os = "linux")]
+    soltar: Option<taildesk_platform::soltar::Ouvinte>,
 }
 
 impl Painel {
@@ -47,7 +50,70 @@ impl Painel {
             navegador: Browser::new(),
             locale: Locale::PtBr,
             ultimo_desenho: None,
+            #[cfg(target_os = "linux")]
+            soltar: None,
         }
+    }
+
+    /// Com a janela já mostrada, escuta arquivos arrastados para ela no Wayland.
+    pub(super) fn ligar_soltar(&mut self, janela: &JanelaSessao) {
+        #[cfg(target_os = "linux")]
+        {
+            use slint::winit_030::WinitWindowAccessor;
+            use slint::winit_030::winit::raw_window_handle::{
+                HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
+            };
+            let id = self.id;
+            self.soltar = janela
+                .window()
+                .with_winit_window(|w| {
+                    let (Ok(d), Ok(h)) = (w.display_handle(), w.window_handle()) else {
+                        return None;
+                    };
+                    let (RawDisplayHandle::Wayland(d), RawWindowHandle::Wayland(h)) =
+                        (d.as_raw(), h.as_raw())
+                    else {
+                        return None;
+                    };
+                    // SAFETY: display e superfície vêm da janela viva do winit; o wl_display é
+                    // do event loop, que vive até o fim do app (mais que o painel).
+                    let ouvinte = unsafe {
+                        taildesk_platform::soltar::ouvir_wayland(d.display, h.surface, move |s| {
+                            soltura(id, s);
+                        })
+                    };
+                    ouvinte
+                        .inspect_err(|e| eprintln!("taildesk: arrastar arquivos indisponível: {e}"))
+                        .ok()
+                })
+                .flatten();
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = janela;
+    }
+
+    /// Arquivos do sistema sobre a janela (mostra o aviso de soltar).
+    pub(super) fn arrastando(&self, janela: &JanelaSessao, sim: bool) {
+        janela.global::<ArquivosSessao>().set_arrastando(sim);
+    }
+
+    /// Arquivos (ou pastas) soltos na janela: vão para a pasta de entrada do host.
+    pub(super) fn soltou(&mut self, janela: &JanelaSessao, caminhos: Vec<PathBuf>) {
+        let g = janela.global::<ArquivosSessao>();
+        g.set_arrastando(false);
+        let Some(servico) = self.servico.clone().filter(|_| g.get_disponivel()) else {
+            janela.set_toast("Esta sessão não recebe arquivos: o host não liberou.".into());
+            return;
+        };
+        g.set_aba(0);
+        g.set_aberto(true);
+        self.rt.spawn(enviar(
+            self.id,
+            servico,
+            INBOX_ROOT,
+            String::new(),
+            caminhos,
+        ));
     }
 
     /// A sessão conectou: daqui em diante dá para enviar e baixar.
@@ -293,6 +359,17 @@ async fn enviar(id: IdLocal, servico: Servico, root: u32, base: String, escolhid
             }
         }
     }
+}
+
+/// Evento do ouvinte do Wayland (na thread dele).
+#[cfg(target_os = "linux")]
+fn soltura(id: IdLocal, s: taildesk_platform::soltar::Soltura) {
+    use taildesk_platform::soltar::Soltura;
+    no_app_painel(id, move |p, j| match s {
+        Soltura::Entrou => p.arrastando(j, true),
+        Soltura::Saiu => p.arrastando(j, false),
+        Soltura::Soltou(caminhos) => p.soltou(j, caminhos),
+    });
 }
 
 fn no_app_painel(id: IdLocal, f: impl FnOnce(&mut Painel, &JanelaSessao) + Send + 'static) {
