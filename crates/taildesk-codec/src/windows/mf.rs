@@ -42,11 +42,12 @@ fn iniciar() -> Result<(), ErroCodec> {
         .map_err(|e| erro("MFStartup", e))
 }
 
-fn subtipo(codec: CodecVideo) -> GUID {
+fn subtipo(codec: CodecVideo) -> Result<GUID, ErroCodec> {
     match codec {
-        CodecVideo::H264 => MFVideoFormat_H264,
-        CodecVideo::Hevc => MFVideoFormat_HEVC,
-        CodecVideo::Av1 => MFVideoFormat_AV1,
+        CodecVideo::H264 => Ok(MFVideoFormat_H264),
+        CodecVideo::Hevc => Ok(MFVideoFormat_HEVC),
+        CodecVideo::Av1 => Ok(MFVideoFormat_AV1),
+        CodecVideo::PyroWave => Err(erro("subtipo", "PyroWave não passa pelo Media Foundation")),
     }
 }
 
@@ -55,7 +56,7 @@ fn subtipo(codec: CodecVideo) -> GUID {
 fn ativar_decoders(codec: CodecVideo) -> Result<Vec<IMFTransform>, ErroCodec> {
     let entrada = MFT_REGISTER_TYPE_INFO {
         guidMajorType: MFMediaType_Video,
-        guidSubtype: subtipo(codec),
+        guidSubtype: subtipo(codec)?,
     };
     let mut lista: *mut Option<IMFActivate> = std::ptr::null_mut();
     let mut n = 0u32;
@@ -194,7 +195,7 @@ impl DecoderMf {
             let tipo = MFCreateMediaType().map_err(|e| erro("MFCreateMediaType", e))?;
             tipo.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
                 .map_err(|e| erro("tipo", e))?;
-            tipo.SetGUID(&MF_MT_SUBTYPE, &subtipo(codec))
+            tipo.SetGUID(&MF_MT_SUBTYPE, &subtipo(codec)?)
                 .map_err(|e| erro("tipo", e))?;
             let _ = tipo.SetUINT64(&MF_MT_FRAME_SIZE, (1920u64 << 32) | 1080);
             let _ = tipo.SetUINT64(&MF_MT_FRAME_RATE, (60u64 << 32) | 1);

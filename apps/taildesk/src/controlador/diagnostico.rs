@@ -170,6 +170,7 @@ impl Diagnostico {
                     match v.codec() {
                         Codec::Hevc => "HEVC",
                         Codec::Av1 => "AV1",
+                        Codec::PyroWave => "PyroWave",
                         _ => "H.264",
                     },
                     v.fps_target

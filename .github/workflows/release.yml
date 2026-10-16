@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v4
       # O app gráfico (Slint) liga o fontconfig e a captura liga a libpipewire (bindgen: libclang).
       - name: Dependências do sistema
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libpipewire-0.3-dev libclang-dev nasm
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libpipewire-0.3-dev libclang-dev nasm ninja-build
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Ferramentas de empacotamento
@@ -78,6 +78,11 @@ jobs:
       - run: cargo build --release --locked -p taildesk -p taildesk-cli
       - name: Símbolos da PipeWire presentes na 0.3.48 do sistema
         run: packaging/linux/check-pipewire-symbols.sh /usr/lib/x86_64-linux-gnu/libpipewire-0.3.so.0 target/release/taildesk target/release/taildesk-cli
+      # PyroWave (codec wavelet em Vulkan, MIT): a biblioteca vai junto, em usr/lib. Se o build
+      # dele falhar, a release sai sem o codec (o app só não o anuncia).
+      - name: PyroWave
+        continue-on-error: true
+        run: packaging/pyrowave/build.sh target/release
       - run: packaging/linux/build-packages.sh "${{ needs.version.outputs.version }}" dist
       - name: Teste rápido do AppImage e do tar.gz
         run: |
@@ -103,6 +108,15 @@ jobs:
       - run: rustup show active-toolchain; if ($LASTEXITCODE -ne 0) { rustup toolchain install }
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked -p taildesk -p taildesk-cli
+      # PyroWave (codec wavelet em Vulkan, MIT): a DLL vai ao lado do taildesk.exe.
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: PyroWave
+        continue-on-error: true
+        shell: bash
+        env:
+          CC: cl
+          CXX: cl
+        run: packaging/pyrowave/build.sh target/release
       - name: Pacote .zip
         shell: pwsh
         run: |
@@ -110,6 +124,10 @@ jobs:
           $dir = "taildesk-$v-windows-x86_64"
           New-Item -ItemType Directory -Force -Path $dir, dist | Out-Null
           Copy-Item target/release/taildesk.exe, target/release/taildesk-cli.exe, LICENSE-MIT, LICENSE-APACHE, README.md $dir
+          if (Test-Path target/release/licencas-pyrowave) {
+            Copy-Item target/release/*pyrowave-shared*.dll $dir
+            Copy-Item target/release/licencas-pyrowave/* $dir
+          }
           Compress-Archive -Path $dir -DestinationPath "dist/$dir.zip"
           & "$dir/taildesk-cli.exe" --version
       - uses: actions/upload-artifact@v4
