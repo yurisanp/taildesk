@@ -131,7 +131,8 @@ pub fn need(msg: &Msg) -> Need {
         | Msg::FsRoots(_)
         | Msg::FsListing(_)
         | Msg::AudioSelected(_)
-        | Msg::AudioStopped(_) => Need::Nothing,
+        | Msg::AudioStopped(_)
+        | Msg::ChatMessage(_) => Need::Nothing,
     }
 }
 
