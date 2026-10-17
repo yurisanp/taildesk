@@ -99,51 +99,60 @@ struct MaquinaApp {
     /// Uma sessão do portal (RemoteDesktop + ScreenCast) para o app todo: input e captura saem
     /// dela, e o diálogo do compositor aparece uma vez só.
     #[cfg(target_os = "linux")]
-    portal: tokio::sync::Mutex<Option<Arc<taildesk_platform::wayland::SessaoPortal>>>,
+    portal: Arc<tokio::sync::Mutex<Option<Arc<taildesk_platform::wayland::SessaoPortal>>>>,
 }
 
 #[cfg(target_os = "linux")]
 impl MaquinaApp {
     /// Abre (uma vez) a sessão do portal: o compositor mostra o diálogo dele.
+    ///
+    /// O diálogo roda numa tarefa própria: se a sessão que pediu acabar antes da resposta, a
+    /// resposta fica para a próxima (sem um segundo diálogo empilhado).
     async fn portal(&self) -> Option<Arc<taildesk_platform::wayland::SessaoPortal>> {
-        use taildesk_platform::wayland::SessaoPortal;
-        let mut portal = self.portal.lock().await;
-        if portal.is_none() {
-            // Token da última sessão: o compositor pode abrir sem o diálogo (acesso sem
-            // ninguém na tela). Cada token vale uma vez; o novo fica no lugar.
-            let token =
-                tokio::task::spawn_blocking(|| taildesk_platform::segredos::ler(SEGREDO_PORTAL))
-                    .await
-                    .ok()
-                    .and_then(Result::ok)
-                    .flatten()
-                    .and_then(|b| String::from_utf8(b).ok());
-            match SessaoPortal::abrir(true, token.as_deref()).await {
-                Ok(s) => {
-                    if let Some(novo) = s.token_restauracao().map(str::to_owned)
-                        && token.as_deref() != Some(novo.as_str())
-                    {
-                        tokio::task::spawn_blocking(move || {
-                            if let Err(e) =
-                                taildesk_platform::segredos::gravar(SEGREDO_PORTAL, novo.as_bytes())
-                            {
-                                eprintln!(
-                                    "taildesk: não foi possível lembrar a sessão do portal: {e}"
-                                );
-                            }
-                        });
-                    }
-                    *portal = Some(Arc::new(s));
+        let portal = self.portal.clone();
+        tokio::spawn(abrir_portal(portal)).await.ok().flatten()
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn abrir_portal(
+    portal: Arc<tokio::sync::Mutex<Option<Arc<taildesk_platform::wayland::SessaoPortal>>>>,
+) -> Option<Arc<taildesk_platform::wayland::SessaoPortal>> {
+    use taildesk_platform::wayland::SessaoPortal;
+    let mut portal = portal.lock().await;
+    if portal.is_none() {
+        // Token da última sessão: o compositor pode abrir sem o diálogo (acesso sem
+        // ninguém na tela). Cada token vale uma vez; o novo fica no lugar.
+        let token =
+            tokio::task::spawn_blocking(|| taildesk_platform::segredos::ler(SEGREDO_PORTAL))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten()
+                .and_then(|b| String::from_utf8(b).ok());
+        match SessaoPortal::abrir(true, token.as_deref()).await {
+            Ok(s) => {
+                if let Some(novo) = s.token_restauracao().map(str::to_owned)
+                    && token.as_deref() != Some(novo.as_str())
+                {
+                    tokio::task::spawn_blocking(move || {
+                        if let Err(e) =
+                            taildesk_platform::segredos::gravar(SEGREDO_PORTAL, novo.as_bytes())
+                        {
+                            eprintln!("taildesk: não foi possível lembrar a sessão do portal: {e}");
+                        }
+                    });
                 }
-                Err(e) => {
-                    eprintln!("taildesk: portal de controle remoto recusado ou indisponível: {e}");
-                    avisar(format!("Sem acesso à tela e ao controle: {e}"));
-                    return None;
-                }
+                *portal = Some(Arc::new(s));
+            }
+            Err(e) => {
+                eprintln!("taildesk: portal de controle remoto recusado ou indisponível: {e}");
+                avisar(format!("Sem acesso à tela e ao controle: {e}"));
+                return None;
             }
         }
-        portal.clone()
     }
+    portal.clone()
 }
 
 /// Monitores liberados no diálogo do portal, como o protocolo descreve.
