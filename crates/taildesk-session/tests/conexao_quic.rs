@@ -12,7 +12,7 @@ use taildesk_keyboard::{Inject, Locks, fixtures};
 use taildesk_overlay::PeerIdentity;
 use taildesk_proto::control::{
     Button, CloseReason, CodecSelected, Feature, Hello, Key, MouseButton, Msg, Permissions,
-    StartVideo,
+    SecureAttention, StartVideo,
 };
 use taildesk_proto::files::INBOX_ROOT;
 use taildesk_session::acessos::{Acesso, Evento, RegistroAcessos, Via};
@@ -75,6 +75,10 @@ impl Entrada for EntradaFalsa {
     async fn soltar_mouse(&mut self) {
         self.0.lock().unwrap().push("soltar mouse".into());
     }
+
+    async fn atencao_segura(&mut self) {
+        self.0.lock().unwrap().push("ctrl+alt+del".into());
+    }
 }
 
 /// Responde `StartVideo` com `CodecSelected` e um datagrama, como o host de verdade.
@@ -121,6 +125,7 @@ impl Maquina for MaquinaFalsa {
         Descricao {
             nome: "desktop".into(),
             keymap: fixtures::abnt2(),
+            atencao_segura: true,
             ..Descricao::default()
         }
     }
@@ -334,7 +339,12 @@ async fn consentimento_teclado_mouse_e_fim_pelo_controlador() {
             }))
             .await
     );
-    esperar_registro(&host, 2).await;
+    assert!(
+        sessao
+            .enviar(Msg::SecureAttention(SecureAttention {}))
+            .await
+    );
+    esperar_registro(&host, 3).await;
     sessao.encerrar().await;
     let EventoHost::Fim { motivo, .. } = host.proximo().await else {
         panic!("esperava o fim")
@@ -346,6 +356,7 @@ async fn consentimento_teclado_mouse_e_fim_pelo_controlador() {
         vec![
             "Key { hid: 4, down: true }".to_owned(),
             "botão 1 true".to_owned(),
+            "ctrl+alt+del".to_owned(),
             "Key { hid: 4, down: false }".to_owned(),
             "soltar mouse".to_owned(),
             "mídia solta".to_owned(),

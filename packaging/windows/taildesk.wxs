@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Instalador MSI do TailDesk (WiX v4/v5), fase 5.
+
+  Instala taildesk.exe e taildesk-cli.exe por máquina em "Arquivos de Programas", com atalho no
+  menu Iniciar e a pasta no PATH. Não instala o serviço do Windows nem liga "Iniciar com o
+  sistema": isso continua sendo escolha da pessoa em Configurações → Este computador, que pede
+  administrador na hora (o MSI por máquina já roda elevado, mas o serviço é opcional).
+
+  Build (no CI do Windows):
+    wix build packaging/windows/taildesk.wxs -arch x64 \
+      -d Version=<versão sem o "-pre"> -d BinDir=target/release -o dist/TailDesk-<versão>-x64.msi
+  A versão do MSI é só X.Y.Z (o ProductVersion do Windows Installer ignora o sufixo de
+  pre-release); UpgradeCode fixo faz cada versão substituir a anterior.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="TailDesk"
+      Manufacturer="TailDesk contributors"
+      Version="$(var.Version)"
+      UpgradeCode="D5C1987E-D6DD-5167-AAD3-1FD9DC018DAC"
+      Scope="perMachine"
+      Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="Já existe uma versão mais nova do TailDesk instalada." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Royalty-free do Slint e MIT/Apache do resto: código aberto, sem EULA de clique. -->
+    <Icon Id="taildesk.ico" SourceFile="packaging/windows/taildesk.ico" />
+    <Property Id="ARPPRODUCTICON" Value="taildesk.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/yurisanp/taildesk" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="TailDesk">
+        <Component Id="taildesk.exe" Guid="91AF5A05-7500-5AA7-B48B-B3D3F6B115F5">
+          <File Id="taildesk.exe" Source="$(var.BinDir)/taildesk.exe" KeyPath="yes">
+            <Shortcut Id="StartMenuTailDesk"
+                      Directory="ProgramMenuFolder"
+                      Name="TailDesk"
+                      Icon="taildesk.ico"
+                      Advertise="yes" />
+          </File>
+        </Component>
+        <Component Id="taildesk_cli.exe" Guid="87FF3139-8DEB-5784-8A3F-70637C94EEE5">
+          <File Id="taildesk_cli.exe" Source="$(var.BinDir)/taildesk-cli.exe" KeyPath="yes" />
+        </Component>
+        <!-- taildesk-cli no PATH de todos os usuários. -->
+        <Component Id="PathEntry" Guid="D849EDCF-B41B-5485-BE2F-B2669C926E9B">
+          <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Part="last"
+                       Action="set" System="yes" Permanent="no" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="TailDesk" Level="1">
+      <ComponentRef Id="taildesk.exe" />
+      <ComponentRef Id="taildesk_cli.exe" />
+      <ComponentRef Id="PathEntry" />
+    </Feature>
+  </Package>
+</Wix>

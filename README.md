@@ -49,7 +49,7 @@ As builds saem na aba [Releases](https://github.com/yurisanp/taildesk/releases):
 | Fedora | `taildesk-<versão>-1.x86_64.rpm` |
 | Arch Linux | `taildesk-bin` ou `taildesk-git` no AUR (`packaging/arch/`), repositório COPR, ou o AppImage |
 | Outros Linux | `taildesk-<versão>-linux-x86_64.tar.gz` |
-| Windows 10/11 x64 | `taildesk-<versão>-windows-x86_64.zip` (instalador MSI na fase 5) |
+| Windows 10/11 x64 | `TailDesk-<versão>-x64.msi` (instalador; põe o `taildesk-cli` no PATH) ou o `taildesk-<versão>-windows-x86_64.zip` portátil |
 
 `SHA256SUMS` acompanha cada versão. Para publicar uma versão: suba a versão no `Cargo.toml`, faça o merge e
 `git tag v0.1.0 && git push origin v0.1.0`. Tags com hífen (`v0.1.0-beta.1`) saem como pre-release.
