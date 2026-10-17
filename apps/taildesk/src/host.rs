@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
+use slint::{CloseRequestResponse, ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use taildesk_keyboard::{Inject, Keymap, Locks};
 use taildesk_overlay::{Overlay, SystemOverlay};
 use taildesk_proto::control::{KeyboardInfo, Msg, Permissions, Platform};
@@ -18,7 +18,7 @@ use taildesk_session::conexao::host::{
 use taildesk_session::{ConsentAnswer, ConsentPrompt, HostSettings};
 use taildesk_transport::{Identity, server_endpoint};
 use taildesk_tsapi::LocalApi;
-use taildesk_ui::{JanelaFaixa, JanelaPedido};
+use taildesk_ui::{JanelaFaixa, JanelaPedido, MensagemChat};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::midia_host::{Fonte, MidiaApp};
@@ -533,6 +533,10 @@ struct Pedido {
 
 struct Faixa {
     janela: JanelaFaixa,
+    /// Para o chat do host mandar `ComandoHost::Chat` por esta sessão.
+    comandos: mpsc::Sender<ComandoHost>,
+    /// Conversa do chat (mais antiga primeiro); `eu` = enviada por este computador.
+    chat: Vec<MensagemChat>,
 }
 
 /// Janelas do host abertas agora, por sessão.
@@ -607,8 +611,12 @@ impl Ui {
                     avisar(format!("Arquivo recebido: {}", path.display()));
                 }
             }
-            // O vídeo vai direto para a `MidiaApp`; aqui só chegaria o que ninguém trata ainda.
-            EventoHost::Mensagem { .. } => {}
+            // O vídeo vai direto para a `MidiaApp`; aqui chega o chat e o que mais ninguém trata.
+            EventoHost::Mensagem { sessao, msg } => {
+                if let Msg::ChatMessage(c) = msg {
+                    self.chat_recebido(sessao, c.text);
+                }
+            }
         }
     }
 
@@ -718,12 +726,60 @@ impl Ui {
         janela.on_encerrar(move || {
             let _ = c.try_send(ComandoHost::Encerrar);
         });
+        janela.on_enviar_chat(move |texto| {
+            let texto = texto.to_string();
+            if texto.is_empty() {
+                return;
+            }
+            no_app(move |app| app.host.chat_enviar(sessao, texto));
+        });
+        let chat_comandos = comandos.clone();
         // Fechar a faixa encerra: nunca deixar alguém controlando sem aviso na tela.
         janela.window().on_close_requested(move || {
             let _ = comandos.try_send(ComandoHost::Encerrar);
             CloseRequestResponse::KeepWindowShown
         });
         let _ = janela.show();
-        self.faixas.borrow_mut().insert(sessao, Faixa { janela });
+        self.faixas.borrow_mut().insert(
+            sessao,
+            Faixa {
+                janela,
+                comandos: chat_comandos,
+                chat: Vec::new(),
+            },
+        );
+    }
+
+    /// Guarda e mostra uma mensagem recebida; marca não lida se o painel estiver fechado.
+    fn chat_recebido(&self, sessao: IdSessao, texto: String) {
+        let mut faixas = self.faixas.borrow_mut();
+        let Some(f) = faixas.get_mut(&sessao) else {
+            return;
+        };
+        f.chat.push(MensagemChat {
+            eu: false,
+            texto: texto.into(),
+        });
+        if !f.janela.get_chat_aberto() {
+            f.janela
+                .set_chat_nao_lidas(f.janela.get_chat_nao_lidas() + 1);
+        }
+        f.janela
+            .set_chat(ModelRc::new(VecModel::from(f.chat.clone())));
+    }
+
+    /// Manda uma mensagem do host pela sessão e a mostra na conversa.
+    fn chat_enviar(&self, sessao: IdSessao, texto: String) {
+        let mut faixas = self.faixas.borrow_mut();
+        let Some(f) = faixas.get_mut(&sessao) else {
+            return;
+        };
+        let _ = f.comandos.try_send(ComandoHost::Chat(texto.clone()));
+        f.chat.push(MensagemChat {
+            eu: true,
+            texto: texto.into(),
+        });
+        f.janela
+            .set_chat(ModelRc::new(VecModel::from(f.chat.clone())));
     }
 }
