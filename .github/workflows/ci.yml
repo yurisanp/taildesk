@@ -36,6 +36,16 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # Licenças (AGENTS.md), vulnerabilidades do RustSec e origem das dependências: `deny.toml`.
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources
+
   # Distros Linux-alvo além do Ubuntu (docs/context/10-plano-windows-linux.md §2.6).
   # Rodam dentro do container oficial de cada distro, com o toolchain do rust-toolchain.toml.
   distro:
