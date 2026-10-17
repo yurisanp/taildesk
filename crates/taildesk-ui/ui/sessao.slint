@@ -411,6 +411,8 @@ export component JanelaSessao inherits Window {
     // Mensagens recebidas com o painel fechado (badge no botão); zera ao abrir.
     in-out property <int> chat-nao-lidas: 0;
     callback enviar-chat(string);
+    // O campo do chat ganhou ou perdeu o foco (o app solta o teclado do remoto enquanto isso).
+    callback chat-digitando(bool);
 
     callback desconectar();
     callback entrar-com-senha(string, bool);
@@ -545,6 +547,11 @@ export component JanelaSessao inherits Window {
         }
         video := Rectangle {
             background: black;
+            // Clicar no vídeo tira o foco do campo do chat: o teclado volta para o remoto.
+            foco-video := FocusScope {
+                width: 0;
+                height: 0;
+            }
             Image {
                 width: 100%;
                 height: 100%;
@@ -563,6 +570,7 @@ export component JanelaSessao inherits Window {
                 moved => { root.mouse-moveu(self.mouse-x, self.mouse-y); }
                 pointer-event(e) => {
                     if e.kind == PointerEventKind.down {
+                        foco-video.focus();
                         root.mouse-botao(e.button, true, self.mouse-x, self.mouse-y);
                     } else if e.kind == PointerEventKind.up {
                         root.mouse-botao(e.button, false, self.mouse-x, self.mouse-y);
@@ -645,6 +653,7 @@ export component JanelaSessao inherits Window {
                 mensagens: root.chat;
                 enviar(t) => { root.enviar-chat(t); }
                 fechar => { root.chat-aberto = false; }
+                digitando-mudou(v) => { root.chat-digitando(v); }
             }
             if root.toast != "": Toast {
                 texto: root.toast;
