@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Metadados AppStream do TailDesk: fazem o app aparecer em lojas (GNOME Software,
+     KDE Discover, Flathub) e acompanham o .deb, o .rpm e o AppImage.
+     O id em DNS reverso já serve para o Flatpak/Flathub; o .desktop instalado
+     continua sendo taildesk.desktop (apontado por <launchable>). -->
+<component type="desktop-application">
+  <id>io.github.yurisanp.TailDesk</id>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+
+  <name>TailDesk</name>
+  <summary>Remote desktop and file transfer over your Tailscale tailnet</summary>
+  <summary xml:lang="pt_BR">Acesso remoto e troca de arquivos pela sua tailnet do Tailscale</summary>
+
+  <description>
+    <p>
+      TailDesk is a remote access tool: view and control another computer and
+      exchange files between the two. The network and identity come from the
+      Tailscale client already installed on each machine, so there is no account
+      or server of its own to set up.
+    </p>
+    <p xml:lang="pt_BR">
+      O TailDesk é uma ferramenta de acesso remoto: ver e controlar outro
+      computador e trocar arquivos entre os dois. A rede e a identidade vêm do
+      cliente Tailscale já instalado em cada máquina, então não há conta nem
+      servidor próprio para configurar.
+    </p>
+    <p>Highlights:</p>
+    <p xml:lang="pt_BR">Destaques:</p>
+    <ul>
+      <li>Windows and Linux (Ubuntu/Debian, Fedora, Arch), x86-64</li>
+      <li xml:lang="pt_BR">Windows e Linux (Ubuntu/Debian, Fedora, Arch), x86-64</li>
+      <li>View and control: keyboard with automatic layout translation, mouse, scroll</li>
+      <li xml:lang="pt_BR">Ver e controlar: teclado com tradução automática de layout, mouse, rolagem</li>
+      <li>Two-way file transfer with a remote file browser</li>
+      <li xml:lang="pt_BR">Troca de arquivos nos dois sentidos com navegador de arquivos remoto</li>
+      <li>Multi-monitor, system audio and hardware-accelerated video when available</li>
+      <li xml:lang="pt_BR">Multi-monitor, áudio do sistema e vídeo acelerado por hardware quando disponível</li>
+      <li>On-screen consent on the host before each session</li>
+      <li xml:lang="pt_BR">Consentimento na tela do host antes de cada sessão</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">taildesk.desktop</launchable>
+
+  <categories>
+    <category>Network</category>
+    <category>RemoteAccess</category>
+  </categories>
+
+  <keywords>
+    <keyword>remote</keyword>
+    <keyword>desktop</keyword>
+    <keyword>vnc</keyword>
+    <keyword>rdp</keyword>
+    <keyword>tailscale</keyword>
+  </keywords>
+
+  <url type="homepage">https://github.com/yurisanp/taildesk</url>
+  <url type="bugtracker">https://github.com/yurisanp/taildesk/issues</url>
+  <url type="vcs-browser">https://github.com/yurisanp/taildesk</url>
+
+  <developer id="io.github.yurisanp">
+    <name>The TailDesk contributors</name>
+  </developer>
+
+  <provides>
+    <binary>taildesk</binary>
+    <binary>taildesk-cli</binary>
+  </provides>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-10-15">
+      <description>
+        <p>First command-line release.</p>
+        <p xml:lang="pt_BR">Primeira versão de linha de comando.</p>
+      </description>
+    </release>
+  </releases>
+</component>
