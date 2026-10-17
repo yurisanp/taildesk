@@ -57,6 +57,11 @@ pub trait Entrada: Send + 'static {
     fn mouse(&mut self, msg: &Msg) -> impl Future<Output = ()> + Send;
     /// Solta os botões que ficaram apertados.
     fn soltar_mouse(&mut self) -> impl Future<Output = ()> + Send;
+    /// Ctrl+Alt+Del de verdade ([`taildesk_proto::control::SecureAttention`]). Só é chamado se
+    /// [`Descricao::atencao_segura`]; o padrão não faz nada.
+    fn atencao_segura(&mut self) -> impl Future<Output = ()> + Send {
+        async {}
+    }
 }
 
 /// Por onde a mídia de uma sessão sai: datagramas e streams na conexão, mensagens
@@ -107,6 +112,8 @@ pub struct Descricao {
     pub encode_caps: Vec<taildesk_proto::control::CodecCap>,
     /// Layout ativo, para traduzir o que o controlador digita.
     pub keymap: Keymap,
+    /// Atende Ctrl+Alt+Del ([`Entrada::atencao_segura`]): o agente do serviço do Windows.
+    pub atencao_segura: bool,
 }
 
 /// Este computador, visto pela sessão.
@@ -313,6 +320,7 @@ async fn atender<I: Identificador, M: Maquina>(
             .unwrap_or_else(|e| e.into_inner())
             .password_hash
             .is_some(),
+        secure_attention: descricao.atencao_segura,
     };
     if saida.send(controle(Msg::HelloAck(ack))).await.is_err() {
         let _ = eventos.send(fim(FimHost::Queda)).await;
@@ -347,6 +355,7 @@ async fn atender<I: Identificador, M: Maquina>(
         id,
         maquina,
         descricao.keymap,
+        descricao.atencao_segura,
         config,
         eventos,
         &saida,
@@ -474,6 +483,7 @@ async fn ao_vivo<M: Maquina>(
     id: IdSessao,
     maquina: &M,
     keymap: Keymap,
+    atencao_segura: bool,
     config: &ConfigHost,
     eventos: &mpsc::Sender<EventoHost>,
     saida: &mpsc::Sender<taildesk_proto::control::Control>,
@@ -600,6 +610,11 @@ async fn ao_vivo<M: Maquina>(
                     Msg::Key(_) | Msg::KeyShortcut(_) | Msg::KeyChar(_) | Msg::ReleaseAll(_) => {
                         if let Some(k) = KeyMsg::from_proto(&msg) {
                             teclado.aplicar(&k).await;
+                        }
+                    }
+                    Msg::SecureAttention(_) => {
+                        if atencao_segura && let Some(e) = &mut teclado.entrada {
+                            e.atencao_segura().await;
                         }
                     }
                     Msg::MouseMove(_) | Msg::MouseButton(_) | Msg::Scroll(_) => {

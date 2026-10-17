@@ -92,7 +92,8 @@ pub fn need(msg: &Msg) -> Need {
         | Msg::KeyboardMode(_)
         | Msg::Key(_)
         | Msg::KeyShortcut(_)
-        | Msg::KeyChar(_) => Need::Control,
+        | Msg::KeyChar(_)
+        | Msg::SecureAttention(_) => Need::Control,
         Msg::StartAudio(_) | Msg::AudioConfig(_) => Need::Audio,
         // Arquivos passam sempre: `taildesk_files::service::Files` confere `Permissions.files`
         // e as raízes e responde `DENIED`, então o controlador nunca fica esperando resposta.
@@ -435,6 +436,7 @@ mod tests {
         s.set_control_paused(true);
         assert!(!s.admits(&key()));
         assert!(!s.admits(&Msg::MouseButton(MouseButton::default())));
+        assert!(!s.admits(&Msg::SecureAttention(Default::default())));
         assert!(s.admits(&Msg::StartVideo(StartVideo::default())));
         assert!(s.admits(&Msg::ReleaseAll(ReleaseAll {})));
         s.set_control_paused(false);

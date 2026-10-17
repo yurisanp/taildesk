@@ -87,7 +87,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 56, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104"
     )]
     pub msg: Option<Msg>,
 }
@@ -156,6 +156,8 @@ pub enum Msg {
     KeyChar(KeyChar),
     #[prost(message, tag = "55")]
     ReleaseAll(ReleaseAll),
+    #[prost(message, tag = "56")]
+    SecureAttention(SecureAttention),
 
     // Cursor
     #[prost(message, tag = "60")]
@@ -337,6 +339,9 @@ pub struct HelloAck {
     /// O host aceita senha de acesso (o controlador pode oferecer o campo enquanto espera).
     #[prost(bool, tag = "11")]
     pub password_enabled: bool,
+    /// O host atende [`SecureAttention`] (Windows com o serviço do TailDesk).
+    #[prost(bool, tag = "12")]
+    pub secure_attention: bool,
 }
 
 /// O que o controlador pode fazer nesta sessão.
@@ -713,6 +718,12 @@ pub struct KeyChar {
 /// C→H: soltar tudo que estiver apertado (perda de foco).
 #[derive(Clone, Copy, PartialEq, Message)]
 pub struct ReleaseAll {}
+
+/// C→H: Ctrl+Alt+Del de verdade no host (a sequência de atenção segura, que o controlador não
+/// consegue mandar como teclas: o próprio sistema dele a intercepta). Exige `control` e só vale
+/// se o host disse `HelloAck.secure_attention`.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct SecureAttention {}
 
 // ---------------------------------------------------------------------------------------------
 // Mouse e cursor
@@ -1586,6 +1597,7 @@ impl Control {
             | Msg::CursorShapeRef(_)
             | Msg::KeyboardMode(_)
             | Msg::ReleaseAll(_)
+            | Msg::SecureAttention(_)
             | Msg::ClipboardRequest(_)
             | Msg::ClipboardError(_)
             | Msg::FsRootsRequest(_)
@@ -1752,6 +1764,7 @@ mod tests {
                 client_clock_ns: 1_234_567_890,
                 keyboard: teclado("xkb:br(abnt2)", "br-abnt2", vec![0x87, 0x85]),
                 password_enabled: true,
+                secure_attention: true,
             }),
             Msg::KeyboardLayoutChanged(KeyboardLayoutChanged {
                 info: teclado("00010416", "br-abnt2", vec![0x87, 0x85]),
@@ -1780,6 +1793,7 @@ mod tests {
                 hid_hint: 0x08,
             }),
             Msg::ReleaseAll(ReleaseAll {}),
+            Msg::SecureAttention(SecureAttention {}),
             Msg::ConsentResult(ConsentResult {
                 granted: true,
                 permissions: Some(perms),

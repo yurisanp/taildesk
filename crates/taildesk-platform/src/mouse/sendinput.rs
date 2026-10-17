@@ -165,6 +165,8 @@ impl InjetorMouseWindows {
         if n == 0 {
             return Ok(());
         }
+        // Tela de entrada, bloqueio ou UAC: a entrada vai para a área de trabalho segura.
+        crate::mesa_windows::seguir_entrada_de_vez_em_quando();
         // SAFETY: `buf` tem ao menos `n` estruturas INPUT válidas e o tamanho é o do tipo.
         let enviados = unsafe { SendInput(n as u32, buf.as_ptr(), size_of::<INPUT>() as i32) };
         if enviados as usize == n {

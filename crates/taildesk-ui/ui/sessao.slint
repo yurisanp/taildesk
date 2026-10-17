@@ -401,6 +401,9 @@ export component JanelaSessao inherits Window {
     in property <bool> som-permitido;
     in-out property <bool> som-ligado: true;
     callback som-mudou(bool);
+    // Ctrl+Alt+Del no host (tela de entrada, bloqueio, UAC): só com controle e host que atende.
+    in property <bool> atencao-segura;
+    callback ctrl-alt-del();
 
     callback desconectar();
     callback entrar-com-senha(string, bool);
@@ -473,6 +476,13 @@ export component JanelaSessao inherits Window {
                     font-size: Tema.fonte-pequena;
                     color: Tema.texto-2;
                     vertical-alignment: center;
+                }
+                if root.ao-vivo && root.atencao-segura: Botao {
+                    y: 4px;
+                    altura: 32px;
+                    texto: "Ctrl+Alt+Del";
+                    discreto: true;
+                    clicado => { root.ctrl-alt-del(); }
                 }
                 if root.ao-vivo && root.som-permitido: Botao {
                     y: 4px;
