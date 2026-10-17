@@ -175,6 +175,19 @@ fn monitores_do_portal(
         .collect()
 }
 
+/// O host atende Ctrl+Alt+Del de verdade: só no Windows com o serviço do TailDesk instalado
+/// (`SoftwareSASGeneration` ligado por ele), que é o cenário de acesso sem ninguém na frente.
+fn atende_atencao_segura() -> bool {
+    #[cfg(windows)]
+    {
+        taildesk_platform::servico_windows::instalado()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 fn nome_do_computador() -> String {
     std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
@@ -288,6 +301,7 @@ impl Maquina for MaquinaApp {
             },
             encode_caps: crate::midia_host::encode_caps(),
             keymap,
+            atencao_segura: atende_atencao_segura(),
         }
     }
 
@@ -448,6 +462,11 @@ impl Entrada for EntradaApp {
         for ev in self.presos.soltar_todos() {
             self.injetar_mouse(&ev);
         }
+    }
+
+    async fn atencao_segura(&mut self) {
+        // O serviço do TailDesk roda como SYSTEM; o app lançado por ele, como o usuário.
+        taildesk_platform::mesa_windows::ctrl_alt_del(false);
     }
 }
 

@@ -249,6 +249,9 @@ fn laco<F>(
 ) where
     F: FnMut(&Quadro<'_>),
 {
+    // A duplicação só existe na área de trabalho da thread: segue a de entrada (tela de
+    // entrada, bloqueio, UAC) quando o processo pode abri-la (agente do serviço).
+    crate::mesa_windows::seguir_entrada();
     let mut dup = match Duplicacao::abrir(&alvo) {
         Ok(d) => Some(d),
         Err(e) => {
@@ -270,6 +273,7 @@ fn laco<F>(
             continue;
         }
         let Some(d) = dup.as_mut() else {
+            crate::mesa_windows::seguir_entrada();
             match Duplicacao::abrir(&alvo) {
                 Ok(nova) => dup = Some(nova),
                 Err(_) => std::thread::sleep(RECRIAR),

@@ -196,6 +196,8 @@ struct SessaoUi {
     conexao: (String, IpAddr),
     /// O host aceita senha de acesso (do `HelloAck`).
     host_tem_senha: bool,
+    /// O host atende Ctrl+Alt+Del (`HelloAck.secure_attention`).
+    host_atencao: bool,
     senha_usada: OrigemSenha,
     /// Som do computador remoto: a saída aberta, o destino dos datagramas e o botão.
     som: Option<SomControlador>,
@@ -798,6 +800,8 @@ impl SessaoUi {
                             j.set_ao_vivo(true);
                         }
                         self.janela.set_pede_senha(false);
+                        self.janela
+                            .set_atencao_segura(self.host_atencao && permissions.control);
                         self.som_permitido = permissions.audio;
                         self.janela.set_som_permitido(permissions.audio);
                         if permissions.clipboard
@@ -832,6 +836,7 @@ impl SessaoUi {
             }
             EventoControlador::Ack(a) => {
                 self.host_tem_senha = a.password_enabled;
+                self.host_atencao = a.secure_attention;
                 self.mostrar_senha();
                 if !a.host_name.is_empty() {
                     self.host = a.host_name.clone();
@@ -1185,6 +1190,13 @@ impl Controlador {
             fechar(id);
             CloseRequestResponse::HideWindow
         });
+        janela.on_ctrl_alt_del(move || {
+            na_sessao_ja(id, |s| {
+                s.enviar(Msg::SecureAttention(
+                    taildesk_proto::control::SecureAttention {},
+                ));
+            });
+        });
         janela.on_som_mudou(move |ligar| {
             na_sessao_ja(id, |s| s.pedir_som(ligar));
         });
@@ -1314,6 +1326,7 @@ impl Controlador {
                 rt: rt.clone(),
                 conexao: (nome.clone(), ip),
                 host_tem_senha: false,
+                host_atencao: false,
                 senha_usada: OrigemSenha::Nenhuma,
                 som: None,
                 som_destino: som_destino.clone(),

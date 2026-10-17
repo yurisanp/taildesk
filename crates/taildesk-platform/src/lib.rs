@@ -18,6 +18,8 @@ pub mod captura_pipewire;
 mod forma_cursor_dxgi;
 pub mod inicio;
 pub mod instancia;
+#[cfg(windows)]
+pub mod mesa_windows;
 pub mod mouse;
 pub mod segredos;
 #[cfg(windows)]
