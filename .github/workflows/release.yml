@@ -130,6 +130,32 @@ jobs:
           }
           Compress-Archive -Path $dir -DestinationPath "dist/$dir.zip"
           & "$dir/taildesk-cli.exe" --version
+      - name: Instalador MSI (WiX)
+        shell: pwsh
+        env:
+          # Senha do certificado (.pfx em base64 no secret WINDOWS_PFX_BASE64). Sem os dois, o
+          # MSI sai sem assinatura — serve para instalar, mas o Windows mostra "editor
+          # desconhecido" no SmartScreen.
+          PFX_B64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          PFX_PASS: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $full = "${{ needs.version.outputs.version }}"
+          # O ProductVersion do Windows Installer é só X.Y.Z (sem o sufixo -beta/-dev).
+          $msiver = ($full -split '-')[0]
+          dotnet tool install --global wix --version 5.0.2
+          $msi = "dist/TailDesk-$full-x64.msi"
+          wix build packaging/windows/taildesk.wxs -arch x64 -d Version=$msiver -d BinDir=target/release -o $msi
+          if (-not (Test-Path $msi)) { throw "o MSI não foi gerado" }
+          if ($env:PFX_B64 -and $env:PFX_PASS) {
+            [IO.File]::WriteAllBytes("$env:RUNNER_TEMP/cert.pfx", [Convert]::FromBase64String($env:PFX_B64))
+            $signtool = Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe" |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            & $signtool.FullName sign /f "$env:RUNNER_TEMP/cert.pfx" /p $env:PFX_PASS `
+              /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $msi
+            if ($LASTEXITCODE -ne 0) { throw "a assinatura do MSI falhou" }
+          } else {
+            Write-Host "Sem certificado (WINDOWS_PFX_BASE64): MSI sem assinatura."
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
