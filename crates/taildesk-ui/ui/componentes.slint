@@ -317,3 +317,31 @@ export component PainelChat inherits Rectangle {
         }
     }
 }
+
+// Aviso ao entrar em tela cheia, como faz o navegador: diz como sair (`12-levantamento-ux.md`).
+export component DicaTelaCheia inherits Rectangle {
+    width: 520px;
+    height: dica-linhas.preferred-height;
+    border-radius: Tema.raio-grande;
+    background: #000000d0;
+    drop-shadow-blur: 16px;
+    drop-shadow-color: #00000080;
+    dica-linhas := VerticalLayout {
+        padding: 16px;
+        spacing: 6px;
+        Text {
+            text: @tr("Tela cheia");
+            color: #ffffff;
+            font-size: 18px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: @tr("Para sair, aperte Ctrl+Alt+F ou clique em “Sair da tela cheia” no topo da tela.");
+            color: #e9ebef;
+            font-size: Tema.fonte;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}

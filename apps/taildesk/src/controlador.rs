@@ -31,7 +31,9 @@ use crate::som::SomControlador;
 /// `stream_id` do som do sistema (o único stream de áudio por sessão).
 const STREAM_SOM: u8 = taildesk_proto::media::AUDIO_STREAM_MIN;
 use taildesk_session::conexao::{PORTA, clipboard};
-use taildesk_session::{ControllerState, CursorControlador, EndReason, UmPorVez, atalho};
+use taildesk_session::{
+    ControllerState, CursorControlador, EndReason, UmPorVez, atalho, atalho_tela_cheia,
+};
 use taildesk_transport::{Pin, client_endpoint};
 use taildesk_tsapi::LocalApi;
 use taildesk_ui::{
@@ -210,6 +212,8 @@ struct SessaoUi {
     chat: Vec<MensagemChat>,
     /// O campo do chat tem o foco: o teclado fica na janela em vez de ir para o host.
     chat_digitando: bool,
+    /// Tecla de um atalho do controlador (Ctrl+Alt+F): a soltura dela também não vai ao host.
+    engolida: Option<Hid>,
 }
 
 impl SessaoUi {
@@ -714,11 +718,8 @@ impl SessaoUi {
             voltar();
             CloseRequestResponse::HideWindow
         });
-        let fraca = j.as_weak();
         j.on_mudar_tela_cheia(move |cheia| {
-            if let Some(j) = fraca.upgrade() {
-                j.window().set_fullscreen(cheia);
-            }
+            na_sessao_ja(id, |s| s.mudar_tela_cheia(Some(display), cheia));
         });
         j.on_mouse_moveu(move |x, y| {
             na_sessao_ja(id, |s| s.mouse_moveu(Some(display), x, y));
@@ -973,6 +974,15 @@ impl SessaoUi {
                 self.mods_presos.push(hid);
             }
         }
+        if !down && self.engolida == Some(hid) {
+            self.engolida = None;
+            return true;
+        }
+        if down && atalho_tela_cheia(hid, self.mods()) {
+            self.engolida = Some(hid);
+            self.alternar_tela_cheia(onde);
+            return true;
+        }
         // Escrevendo no chat: a tecla vai para o campo, não para o host.
         if onde.is_none() && self.chat_digitando && self.janela.get_chat_aberto() {
             return false;
@@ -995,6 +1005,33 @@ impl SessaoUi {
             self.enviar(k.to_proto());
         }
         true
+    }
+
+    /// Entra ou sai da tela cheia na janela da sessão (`None`) ou na de um destacado. Ao entrar,
+    /// mostra por alguns segundos como sair.
+    fn mudar_tela_cheia(&self, onde: Option<u32>, sim: bool) {
+        match onde {
+            None => {
+                self.janela.set_tela_cheia(sim);
+                self.janela.set_dica_tela_cheia(sim);
+                self.janela.window().set_fullscreen(sim);
+            }
+            Some(d) => {
+                if let Some(j) = self.janelas.get(&d) {
+                    j.set_tela_cheia(sim);
+                    j.set_dica_tela_cheia(sim);
+                    j.window().set_fullscreen(sim);
+                }
+            }
+        }
+    }
+
+    fn alternar_tela_cheia(&self, onde: Option<u32>) {
+        let agora = match onde {
+            None => self.janela.get_tela_cheia(),
+            Some(d) => self.janelas.get(&d).is_some_and(|j| j.get_tela_cheia()),
+        };
+        self.mudar_tela_cheia(onde, !agora);
     }
 
     /// O campo do chat ganhou ou perdeu o foco. Ao ganhar, solta no host o que estava preso,
@@ -1278,6 +1315,9 @@ impl Controlador {
         janela.on_mouse_rolou(move |dx, dy| {
             na_sessao_ja(id, |s| s.mouse_rolou(dx, dy));
         });
+        janela.on_mudar_tela_cheia(move |sim| {
+            na_sessao_ja(id, |s| s.mudar_tela_cheia(None, sim));
+        });
         janela.on_chat_digitando(move |sim| {
             na_sessao_ja(id, |s| s.chat_digitando(sim));
         });
@@ -1396,6 +1436,7 @@ impl Controlador {
                 som_permitido: false,
                 chat: Vec::new(),
                 chat_digitando: false,
+                engolida: None,
             },
         );
         arquivos::ligar_soltar(id, 50);

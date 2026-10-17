@@ -4,7 +4,7 @@
 // de codec e taxa (`14-selecao-adaptativa.md` §7.3) e o painel de diagnóstico do vídeo e da rede.
 import { LineEdit, CheckBox } from "std-widgets.slint";
 import { Tema } from "tema.slint";
-import { Botao, Toast, MensagemChat, PainelChat } from "componentes.slint";
+import { Botao, Toast, MensagemChat, PainelChat, DicaTelaCheia } from "componentes.slint";
 import { ArquivosNaSessao } from "arquivos.slint";
 
 export struct AbaMonitor {
@@ -413,6 +413,11 @@ export component JanelaSessao inherits Window {
     callback enviar-chat(string);
     // O campo do chat ganhou ou perdeu o foco (o app solta o teclado do remoto enquanto isso).
     callback chat-digitando(bool);
+    // Tela cheia (botão na barra ou Ctrl+Alt+F). Quem muda é o app: a barra some, fica uma
+    // alça no topo com "Sair da tela cheia" e um aviso de como sair por alguns segundos.
+    in property <bool> tela-cheia: false;
+    in-out property <bool> dica-tela-cheia: false;
+    callback mudar-tela-cheia(bool);
 
     callback desconectar();
     callback entrar-com-senha(string, bool);
@@ -432,7 +437,7 @@ export component JanelaSessao inherits Window {
     background: black;
 
     VerticalLayout {
-        Rectangle {
+        if !root.tela-cheia: Rectangle {
             height: 40px;
             background: Tema.superficie;
             HorizontalLayout {
@@ -534,6 +539,13 @@ export component JanelaSessao inherits Window {
                         root.diagnostico-aberto = false;
                         if root.chat-aberto { root.chat-nao-lidas = 0; }
                     }
+                }
+                Botao {
+                    y: 4px;
+                    altura: 32px;
+                    texto: @tr("⛶ Tela cheia");
+                    discreto: true;
+                    clicado => { root.mudar-tela-cheia(true); }
                 }
                 Botao {
                     y: 4px;
@@ -648,7 +660,7 @@ export component JanelaSessao inherits Window {
             }
             if root.chat-aberto && root.ao-vivo: PainelChat {
                 x: parent.width - self.width - 12px;
-                y: 12px;
+                y: root.tela-cheia ? 60px : 12px;
                 height: self.preferred-height;
                 mensagens: root.chat;
                 enviar(t) => { root.enviar-chat(t); }
@@ -660,12 +672,64 @@ export component JanelaSessao inherits Window {
                 x: (parent.width - self.width) / 2;
                 y: parent.height - self.height - 24px;
             }
+            // Em tela cheia: alça sempre visível no topo, com o atalho escrito e o botão de sair
+            // (e o chat, que fica sem a barra).
+            if root.tela-cheia: Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: 8px;
+                width: alca.preferred-width;
+                height: 44px;
+                border-radius: 22px;
+                background: Tema.superficie;
+                drop-shadow-blur: 12px;
+                drop-shadow-color: #00000080;
+                // O cursor do sistema volta aqui (no vídeo ele fica escondido).
+                TouchArea { mouse-cursor: MouseCursor.default; }
+                alca := HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 6px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    spacing: 8px;
+                    Text {
+                        text: root.host + " · " + @tr("Ctrl+Alt+F sai da tela cheia");
+                        color: Tema.texto;
+                        font-size: Tema.fonte-pequena;
+                        vertical-alignment: center;
+                    }
+                    if root.ao-vivo: Botao {
+                        altura: 32px;
+                        texto: root.chat-nao-lidas > 0 ? @tr("💬 Chat ({})", root.chat-nao-lidas) : @tr("💬 Chat");
+                        discreto: !root.chat-aberto;
+                        clicado => {
+                            root.chat-aberto = !root.chat-aberto;
+                            if root.chat-aberto { root.chat-nao-lidas = 0; }
+                        }
+                    }
+                    Botao {
+                        altura: 32px;
+                        texto: @tr("Sair da tela cheia");
+                        primario: true;
+                        clicado => { root.mudar-tela-cheia(false); }
+                    }
+                }
+            }
+            if root.dica-tela-cheia && root.tela-cheia: DicaTelaCheia {
+                width: min(parent.width - 32px, 520px);
+                x: (parent.width - self.width) / 2;
+                y: parent.height / 3 - self.height / 2;
+            }
         }
     }
     Timer {
         interval: 5s;
         running: root.toast != "";
         triggered => { root.toast = ""; }
+    }
+    Timer {
+        interval: 4s;
+        running: root.dica-tela-cheia;
+        triggered => { root.dica-tela-cheia = false; }
     }
     // Painel de arquivos (fase 3), por cima do vídeo.
     ArquivosNaSessao { width: parent.width; height: parent.height; }
@@ -685,6 +749,7 @@ export component JanelaMonitor inherits Window {
     in property <length> cursor-x;
     in property <length> cursor-y;
     in-out property <bool> tela-cheia: false;
+    in-out property <bool> dica-tela-cheia: false;
     out property <length> area-largura: video.width;
     out property <length> area-altura: video.height;
 
@@ -718,12 +783,9 @@ export component JanelaMonitor inherits Window {
                 Botao {
                     y: 2px;
                     altura: 32px;
-                    texto: @tr("Tela cheia");
+                    texto: @tr("⛶ Tela cheia");
                     discreto: true;
-                    clicado => {
-                        root.tela-cheia = true;
-                        root.mudar-tela-cheia(true);
-                    }
+                    clicado => { root.mudar-tela-cheia(true); }
                 }
                 Botao {
                     y: 2px;
@@ -777,11 +839,8 @@ export component JanelaMonitor inherits Window {
                     x: (parent.width - self.width) / 2;
                     y: 8px;
                     altura: 32px;
-                    texto: @tr("Sair da tela cheia");
-                    clicado => {
-                        root.tela-cheia = false;
-                        root.mudar-tela-cheia(false);
-                    }
+                    texto: @tr("Sair da tela cheia (Ctrl+Alt+F)");
+                    clicado => { root.mudar-tela-cheia(false); }
                 }
             }
             if root.terminou && root.tem-video: Rectangle {
@@ -794,6 +853,16 @@ export component JanelaMonitor inherits Window {
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
+            if root.dica-tela-cheia && root.tela-cheia: DicaTelaCheia {
+                width: min(parent.width - 32px, 520px);
+                x: (parent.width - self.width) / 2;
+                y: parent.height / 3 - self.height / 2;
+            }
         }
+    }
+    Timer {
+        interval: 4s;
+        running: root.dica-tela-cheia;
+        triggered => { root.dica-tela-cheia = false; }
     }
 }
