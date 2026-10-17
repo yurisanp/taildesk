@@ -34,7 +34,9 @@ use taildesk_session::conexao::{PORTA, clipboard};
 use taildesk_session::{ControllerState, CursorControlador, EndReason, UmPorVez, atalho};
 use taildesk_transport::{Pin, client_endpoint};
 use taildesk_tsapi::LocalApi;
-use taildesk_ui::{AbaMonitor, JanelaMonitor, JanelaSessao, LinhaDiag, NivelQualidade, OpcaoCodec};
+use taildesk_ui::{
+    AbaMonitor, JanelaMonitor, JanelaSessao, LinhaDiag, MensagemChat, NivelQualidade, OpcaoCodec,
+};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::preferencias::{self, CODECS, TAXAS_KBPS};
@@ -204,9 +206,29 @@ struct SessaoUi {
     som_destino: crate::som::Destino,
     som_ligado: bool,
     som_permitido: bool,
+    /// Conversa de chat da sessão (`ChatMessage`), mais antiga primeiro.
+    chat: Vec<MensagemChat>,
 }
 
 impl SessaoUi {
+    /// Repõe a conversa na janela depois de mudar.
+    fn desenhar_chat(&self) {
+        self.janela
+            .set_chat(ModelRc::new(VecModel::from(self.chat.clone())));
+    }
+
+    /// Guarda e mostra uma mensagem; marca não lida se o painel estiver fechado (só as recebidas).
+    fn chat_recebido(&mut self, texto: String) {
+        self.chat.push(MensagemChat {
+            eu: false,
+            texto: texto.into(),
+        });
+        self.desenhar_chat();
+        if !self.janela.get_chat_aberto() {
+            self.janela
+                .set_chat_nao_lidas(self.janela.get_chat_nao_lidas() + 1);
+        }
+    }
     /// Campo de senha enquanto espera alguém aceitar num host que aceita senha.
     fn mostrar_senha(&self) {
         let esperando = matches!(self.estado, ControllerState::AwaitingConsent { .. });
@@ -918,6 +940,7 @@ impl SessaoUi {
                     self.parar_video(v.display_id);
                     self.monitores.on_video_stopped(&v, &mut out);
                 }
+                Msg::ChatMessage(c) => self.chat_recebido(c.text),
                 Msg::Error(e) if e.code == ErrorCode::TooManyStreams as i32 => {
                     // Monitor a mais numa janela própria: volta a ser aba.
                     if let Some(d) = e.display_id.filter(|&d| self.monitores.destacado(d)) {
@@ -1235,6 +1258,22 @@ impl Controlador {
         janela.on_mouse_rolou(move |dx, dy| {
             na_sessao_ja(id, |s| s.mouse_rolou(dx, dy));
         });
+        janela.on_enviar_chat(move |texto| {
+            let texto = texto.to_string();
+            if texto.is_empty() {
+                return;
+            }
+            na_sessao_ja(id, |s| {
+                s.enviar(Msg::ChatMessage(taildesk_proto::control::ChatMessage {
+                    text: texto.clone(),
+                }));
+                s.chat.push(MensagemChat {
+                    eu: true,
+                    texto: texto.into(),
+                });
+                s.desenhar_chat();
+            });
+        });
         janela.on_codec_mudou(move |i| {
             na_sessao_ja(id, |s| s.mudar_qualidade(Some(i as usize), None));
         });
@@ -1332,6 +1371,7 @@ impl Controlador {
                 som_destino: som_destino.clone(),
                 som_ligado: true,
                 som_permitido: false,
+                chat: Vec::new(),
             },
         );
         arquivos::ligar_soltar(id, 50);
