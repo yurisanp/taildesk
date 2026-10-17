@@ -1,7 +1,7 @@
 // Lado do host: pedido de acesso (`12-levantamento-ux.md` §5.4) e faixa de sessão ativa (§5.5).
 import { CheckBox } from "std-widgets.slint";
 import { Tema } from "tema.slint";
-import { Botao } from "componentes.slint";
+import { Botao, MensagemChat, PainelChat } from "componentes.slint";
 
 // "notebook-yuri quer acessar este computador". Sempre por cima, foco inicial em Recusar.
 export component JanelaPedido inherits Window {
@@ -97,44 +97,68 @@ export component JanelaFaixa inherits Window {
     in property <string> texto;
     in property <bool> pode-pausar;
     in-out property <bool> pausado: false;
+    // Chat da sessão (item pós-MVP): abre pela faixa, aqui `eu` = este computador (o host).
+    in property <[MensagemChat]> chat;
+    in-out property <bool> chat-aberto: false;
+    // Mensagens recebidas com o painel fechado (badge no botão); zera ao abrir.
+    in-out property <int> chat-nao-lidas: 0;
 
     callback pausar(bool);
     callback encerrar();
+    callback enviar-chat(string);
 
     title: @tr("Sessão ativa · TailDesk");
     icon: @image-url("icones/taildesk-64.png");
     always-on-top: true;
     background: Tema.superficie;
 
-    HorizontalLayout {
-        padding: 8px;
-        padding-left: 14px;
-        spacing: 10px;
-        Rectangle {
-            width: 10px;
-            height: 10px;
-            y: (parent.height - self.height) / 2;
-            border-radius: 5px;
-            background: root.pausado ? Tema.relay : Tema.perigo;
-        }
-        Text {
-            text: root.pausado ? @tr("{} · controle pausado", root.texto) : root.texto;
-            font-size: Tema.fonte;
-            color: Tema.texto;
-            vertical-alignment: center;
-        }
-        if root.pode-pausar: Botao {
-            texto: root.pausado ? @tr("Retomar controle") : @tr("Pausar controle");
-            discreto: true;
-            clicado => {
-                root.pausado = !root.pausado;
-                root.pausar(root.pausado);
+    VerticalLayout {
+        HorizontalLayout {
+            padding: 8px;
+            padding-left: 14px;
+            spacing: 10px;
+            Rectangle {
+                width: 10px;
+                height: 10px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 5px;
+                background: root.pausado ? Tema.relay : Tema.perigo;
+            }
+            Text {
+                text: root.pausado ? @tr("{} · controle pausado", root.texto) : root.texto;
+                font-size: Tema.fonte;
+                color: Tema.texto;
+                vertical-alignment: center;
+            }
+            if root.pode-pausar: Botao {
+                texto: root.pausado ? @tr("Retomar controle") : @tr("Pausar controle");
+                discreto: true;
+                clicado => {
+                    root.pausado = !root.pausado;
+                    root.pausar(root.pausado);
+                }
+            }
+            Botao {
+                texto: root.chat-nao-lidas > 0 ? @tr("💬 Chat ({})", root.chat-nao-lidas) : @tr("💬 Chat");
+                discreto: !root.chat-aberto;
+                clicado => {
+                    root.chat-aberto = !root.chat-aberto;
+                    if root.chat-aberto { root.chat-nao-lidas = 0; }
+                }
+            }
+            Botao {
+                texto: @tr("Encerrar");
+                perigo: true;
+                clicado => { root.encerrar(); }
             }
         }
-        Botao {
-            texto: @tr("Encerrar");
-            perigo: true;
-            clicado => { root.encerrar(); }
+        if root.chat-aberto: HorizontalLayout {
+            padding: 8px;
+            PainelChat {
+                mensagens: root.chat;
+                enviar(t) => { root.enviar-chat(t); }
+                fechar => { root.chat-aberto = false; }
+            }
         }
     }
 }

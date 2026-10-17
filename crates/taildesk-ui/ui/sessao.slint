@@ -2,9 +2,9 @@
 // barra com abas dos monitores e teclado, vídeo do monitor ativo e o cursor do host desenhado
 // por cima (cursor separado, `07-protocolo.md`), o indicador de qualidade da conexão com o seletor
 // de codec e taxa (`14-selecao-adaptativa.md` §7.3) e o painel de diagnóstico do vídeo e da rede.
-import { LineEdit, CheckBox, ScrollView } from "std-widgets.slint";
+import { LineEdit, CheckBox } from "std-widgets.slint";
 import { Tema } from "tema.slint";
-import { Botao, Toast } from "componentes.slint";
+import { Botao, Toast, MensagemChat, PainelChat } from "componentes.slint";
 import { ArquivosNaSessao } from "arquivos.slint";
 
 export struct AbaMonitor {
@@ -32,13 +32,6 @@ export struct OpcaoCodec {
     nome: string,
     disponivel: bool,
     motivo: string,
-}
-
-// Uma mensagem de chat da sessão (`taildesk-proto::control::ChatMessage`). `eu` = enviada por
-// quem olha esta janela (o controlador); o resto é do host.
-export struct MensagemChat {
-    eu: bool,
-    texto: string,
 }
 
 export global CoresQualidade {
@@ -316,105 +309,6 @@ component PainelDiagnostico inherits Rectangle {
                 font-size: Tema.fonte-pequena;
                 color: #e9ebef;
                 wrap: word-wrap;
-            }
-        }
-    }
-}
-
-// Painel de chat da sessão (`11-teclado.md` não cobre; chat é item pós-MVP). Abre pela barra,
-// mostra a conversa e um campo para escrever. A identidade do peer vem da sessão, nunca do texto.
-component PainelChat inherits Rectangle {
-    in property <[MensagemChat]> mensagens;
-    callback enviar(string);
-    callback fechar();
-
-    width: 340px;
-    border-radius: Tema.raio-grande;
-    background: #0d1117f0;
-    drop-shadow-blur: 16px;
-    drop-shadow-color: #00000080;
-    // Clique no painel não chega ao vídeo.
-    TouchArea { }
-    VerticalLayout {
-        padding: 12px;
-        spacing: 10px;
-        HorizontalLayout {
-            spacing: 8px;
-            Text {
-                horizontal-stretch: 1;
-                text: @tr("Chat");
-                font-size: 15px;
-                font-weight: 700;
-                color: #ffffff;
-                vertical-alignment: center;
-            }
-            Rectangle {
-                width: 24px;
-                height: 24px;
-                border-radius: 12px;
-                background: fechar-toque.has-hover ? #ffffff1a : transparent;
-                accessible-role: button;
-                accessible-label: @tr("Fechar");
-                accessible-action-default => { root.fechar(); }
-                Text { text: "✕"; color: #9aa4b2; font-size: 12px; }
-                fechar-toque := TouchArea { mouse-cursor: pointer; clicked => { root.fechar(); } }
-            }
-        }
-        rolagem := ScrollView {
-            height: 300px;
-            content-width: self.width;
-            VerticalLayout {
-                padding: 2px;
-                spacing: 6px;
-                if root.mensagens.length == 0: Text {
-                    text: @tr("Ainda não há mensagens. Escreva para conversar com o outro computador.");
-                    font-size: Tema.fonte-pequena;
-                    color: #8b95a3;
-                    wrap: word-wrap;
-                }
-                for m in root.mensagens: HorizontalLayout {
-                    alignment: m.eu ? end : start;
-                    Rectangle {
-                        border-radius: 10px;
-                        background: m.eu ? Tema.primaria : #ffffff14;
-                        HorizontalLayout {
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            padding-top: 6px;
-                            padding-bottom: 6px;
-                            Text {
-                                text: m.texto;
-                                max-width: 240px;
-                                font-size: Tema.fonte-pequena;
-                                color: #ffffff;
-                                wrap: word-wrap;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        HorizontalLayout {
-            spacing: 6px;
-            campo := LineEdit {
-                horizontal-stretch: 1;
-                placeholder-text: @tr("Mensagem");
-                accepted => {
-                    if campo.text != "" {
-                        root.enviar(campo.text);
-                        campo.text = "";
-                    }
-                }
-            }
-            Botao {
-                texto: @tr("Enviar");
-                primario: true;
-                altura: 32px;
-                habilitado: campo.text != "";
-                clicado => {
-                    root.enviar(campo.text);
-                    campo.text = "";
-                }
             }
         }
     }
