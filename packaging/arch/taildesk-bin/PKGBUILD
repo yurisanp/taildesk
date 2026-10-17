@@ -1,5 +1,7 @@
-# Modelo do pacote taildesk-bin para o AUR. Usa o .tar.gz publicado no GitHub Releases.
-# Ao publicar uma versão: atualize pkgver e rode `updpkgsums` (ou copie o hash do SHA256SUMS).
+# Maintainer: Yuri Sant'Ana <yurisantp@gmail.com>
+# Pacote binário do TailDesk para o AUR: usa o .tar.gz publicado no GitHub Releases.
+# O job `aur` do release.yml atualiza pkgver e sha256sums e envia a cada versão
+# (packaging/arch/update-aur.sh).
 pkgname=taildesk-bin
 pkgver=0.0.1
 pkgrel=1
@@ -7,7 +9,8 @@ pkgdesc="Acesso remoto (desktop remoto e troca de arquivos) pela tailnet do Tail
 arch=('x86_64')
 url="https://github.com/yurisanp/taildesk"
 license=('MIT OR Apache-2.0')
-depends=('glibc' 'gcc-libs')
+depends=('glibc' 'gcc-libs' 'fontconfig' 'libpipewire')
+optdepends=('tailscale: rede e identidade pela tailnet (necessário em uso)')
 provides=('taildesk')
 conflicts=('taildesk')
 source=("$url/releases/download/v$pkgver/taildesk-$pkgver-linux-x86_64.tar.gz")
