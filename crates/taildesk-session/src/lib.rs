@@ -29,5 +29,5 @@ pub use host::{
     AckFields, CONSENT_TIMEOUT, ConsentAnswer, ConsentPrompt, HelloReply, HostSession, HostState,
     Need, need,
 };
-pub use monitores::{Aba, Atalho, UmPorVez, atalho};
+pub use monitores::{Aba, Atalho, UmPorVez, atalho, atalho_tela_cheia};
 pub use policy::{Decision, HostSettings, TrustedDevice};

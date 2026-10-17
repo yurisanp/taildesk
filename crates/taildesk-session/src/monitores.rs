@@ -52,6 +52,12 @@ pub fn atalho(hid: Hid, mods: Mods) -> Option<Atalho> {
     }
 }
 
+/// `Ctrl+Alt+F`: entra e sai da tela cheia (janela da sessão ou de um monitor destacado).
+/// Fica com o controlador, como os atalhos de monitor; não vai para o host.
+pub fn atalho_tela_cheia(hid: Hid, mods: Mods) -> bool {
+    hid == 0x09 && mods.bits() == Mods::CTRL.bits() | Mods::ALT.bits()
+}
+
 /// Estado do modo um por vez.
 #[derive(Debug, Default)]
 pub struct UmPorVez {
@@ -429,6 +435,11 @@ mod tests {
         let cas = Mods::from_bits(ca.bits() | Mods::SHIFT.bits());
         assert_eq!(atalho(0x1E, cas), None);
         assert_eq!(atalho(0x27, ca), None, "Ctrl+Alt+0 não é atalho");
+        assert!(atalho_tela_cheia(0x09, ca));
+        assert!(!atalho_tela_cheia(0x09, Mods::CTRL));
+        assert!(!atalho_tela_cheia(0x09, cas));
+        assert!(!atalho_tela_cheia(0x0A, ca));
+        assert_eq!(atalho(0x09, ca), None, "F não troca monitor");
 
         let (mut u, _) = tres();
         let mut out = Vec::new();
