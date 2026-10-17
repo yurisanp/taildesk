@@ -1,0 +1,52 @@
+# Maintainer: Yuri Sant'Ana <yurisantp@gmail.com>
+# Compila o TailDesk do git (branch main). Para quem quer a versão de desenvolvimento.
+pkgname=taildesk-git
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Acesso remoto pela tailnet do Tailscale (versão de desenvolvimento, do git)"
+arch=('x86_64')
+url="https://github.com/yurisanp/taildesk"
+license=('MIT OR Apache-2.0')
+depends=('glibc' 'gcc-libs' 'fontconfig' 'libpipewire')
+makedepends=('git' 'cargo' 'nasm' 'cmake' 'clang')
+optdepends=('tailscale: rede e identidade pela tailnet (necessário em uso)')
+provides=('taildesk')
+conflicts=('taildesk')
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+  # 0.2.0.r123.gabcdef — versão do Cargo.toml, contagem de commits e hash curto.
+  local base count hash
+  base=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+  count=$(git rev-list --count HEAD)
+  hash=$(git rev-parse --short HEAD)
+  printf '%s.r%s.g%s' "$base" "$count" "$hash"
+}
+
+prepare() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  # openh264 precisa do nasm para o SIMD.
+  export TAILDESK_EXIGIR_NASM=1
+  cargo build --frozen --release -p taildesk -p taildesk-cli
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm0755 target/release/taildesk     "$pkgdir/usr/bin/taildesk"
+  install -Dm0755 target/release/taildesk-cli  "$pkgdir/usr/bin/taildesk-cli"
+  install -Dm0644 packaging/linux/taildesk.desktop "$pkgdir/usr/share/applications/taildesk.desktop"
+  install -Dm0644 packaging/linux/taildesk.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/taildesk.svg"
+  install -Dm0644 packaging/linux/io.github.yurisanp.TailDesk.metainfo.xml "$pkgdir/usr/share/metainfo/io.github.yurisanp.TailDesk.metainfo.xml"
+  install -Dm0644 LICENSE-MIT    "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+  install -Dm0644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
+}

@@ -47,7 +47,7 @@ As builds saem na aba [Releases](https://github.com/yurisanp/taildesk/releases):
 | Qualquer Linux x86_64 | `TailDesk-<versão>-x86_64.AppImage` (universal: `chmod +x` e rode; `./TailDesk...AppImage cli --version` abre a CLI) |
 | Ubuntu / Debian | `taildesk_<versão>_amd64.deb` |
 | Fedora | `taildesk-<versão>-1.x86_64.rpm` |
-| Arch Linux | `taildesk-bin` no AUR (modelo em `packaging/arch/PKGBUILD`), ou o AppImage |
+| Arch Linux | `taildesk-bin` ou `taildesk-git` no AUR (`packaging/arch/`), repositório COPR, ou o AppImage |
 | Outros Linux | `taildesk-<versão>-linux-x86_64.tar.gz` |
 | Windows 10/11 x64 | `TailDesk-<versão>-x64.msi` (instalador; põe o `taildesk-cli` no PATH) ou o `taildesk-<versão>-windows-x86_64.zip` portátil |
 

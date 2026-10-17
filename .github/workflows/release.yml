@@ -183,3 +183,59 @@ jobs:
           flags=(--generate-notes --title "TailDesk ${RELEASE_TAG}" --target "$GITHUB_SHA")
           [[ "$RELEASE_TAG" == *-* ]] && flags+=(--prerelease)
           gh release create "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
+
+  # Atualiza o pacote taildesk-bin no AUR. Só com o secret AUR_SSH_KEY (chave SSH do mantenedor);
+  # pre-releases (tag com "-") não vão para o AUR, que segue a versão estável.
+  aur:
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enviar ao AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if [[ -z "$AUR_SSH_KEY" ]]; then
+            echo "Sem AUR_SSH_KEY: pulando a publicação no AUR."
+            exit 0
+          fi
+          pacman -Syu --noconfirm --needed base-devel git openssh
+          # makepkg --printsrcinfo não roda como root.
+          useradd -m builder && chown -R builder: "$GITHUB_WORKSPACE"
+          install -d -m700 /home/builder/.ssh
+          printf '%s\n' "$AUR_SSH_KEY" > /home/builder/.ssh/aur && chmod 600 /home/builder/.ssh/aur
+          ssh-keyscan aur.archlinux.org > /home/builder/.ssh/known_hosts 2>/dev/null
+          printf 'Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n' > /home/builder/.ssh/config
+          chown -R builder: /home/builder/.ssh
+          sudo -u builder env VERSION="$VERSION" bash packaging/arch/update-aur.sh "$VERSION"
+
+  # Build no COPR (Fedora). Só com o secret COPR_TOKEN (o arquivo ~/.config/copr da conta).
+  copr:
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enviar ao COPR
+        env:
+          COPR_TOKEN: ${{ secrets.COPR_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if [[ -z "$COPR_TOKEN" ]]; then
+            echo "Sem COPR_TOKEN: pulando a build no COPR."
+            exit 0
+          fi
+          dnf install -y copr-cli rpm-build rpmdevtools
+          install -d -m700 ~/.config
+          printf '%s\n' "$COPR_TOKEN" > ~/.config/copr
+          rpmdev-setuptree
+          cp packaging/copr/taildesk.spec ~/rpmbuild/SPECS/
+          # Baixa o Source0 (tarball da release) e monta só o SRPM; o COPR compila.
+          spectool -g -R --define "taildesk_version $VERSION" ~/rpmbuild/SPECS/taildesk.spec
+          srpm=$(rpmbuild -bs --define "taildesk_version $VERSION" ~/rpmbuild/SPECS/taildesk.spec \
+            | grep -oE '/[^ ]+\.src\.rpm' | tail -1)
+          copr-cli build yurisanp/taildesk "$srpm"
