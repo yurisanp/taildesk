@@ -11,8 +11,8 @@ use taildesk_files::service::Event;
 use taildesk_keyboard::{Inject, Locks, fixtures};
 use taildesk_overlay::PeerIdentity;
 use taildesk_proto::control::{
-    Button, CloseReason, CodecSelected, Feature, Hello, Key, MouseButton, Msg, Permissions,
-    SecureAttention, StartVideo,
+    Button, ChatMessage, CloseReason, CodecSelected, Feature, Hello, Key, MouseButton, Msg,
+    Permissions, SecureAttention, StartVideo,
 };
 use taildesk_proto::files::INBOX_ROOT;
 use taildesk_session::acessos::{Acesso, Evento, RegistroAcessos, Via};
@@ -546,4 +546,72 @@ async fn video_vai_para_a_midia_e_a_resposta_volta() {
     let r = host.registro();
     assert_eq!(r.first().map(String::as_str), Some("vídeo 1"));
     assert_eq!(r.last().map(String::as_str), Some("mídia solta"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chat_vai_e_volta() {
+    let mut host = Host::iniciar(true, None);
+    {
+        let mut s = host.settings.lock().unwrap();
+        s.ask_always = false;
+        s.trusted.push(taildesk_session::TrustedDevice {
+            node_stable_id: "nNOTE".into(),
+            name: "notebook".into(),
+        });
+    }
+    let (sessao, mut ev) = conectar(&host, Pin::Sha256(host.fingerprint))
+        .await
+        .unwrap();
+    assert_eq!(estado(&mut ev).await, ControllerState::Connecting);
+    assert!(matches!(
+        estado(&mut ev).await,
+        ControllerState::Live { .. }
+    ));
+    let EventoHost::AoVivo { comandos, .. } = host.proximo().await else {
+        panic!("esperava ao vivo")
+    };
+
+    // Controlador → host: o host recebe o chat como uma mensagem que esta camada não trata.
+    assert!(
+        sessao
+            .enviar(Msg::ChatMessage(ChatMessage {
+                text: "oi do controlador".into(),
+            }))
+            .await
+    );
+    loop {
+        match host.proximo().await {
+            EventoHost::Mensagem {
+                msg: Msg::ChatMessage(c),
+                ..
+            } => {
+                assert_eq!(c.text, "oi do controlador");
+                break;
+            }
+            EventoHost::Mensagem { .. } => {}
+            outro => panic!("esperava o chat, veio {outro:?}"),
+        }
+    }
+
+    // Host → controlador: `ComandoHost::Chat` vira `ChatMessage` no fio.
+    comandos
+        .send(ComandoHost::Chat("oi do host".into()))
+        .await
+        .unwrap();
+    loop {
+        match tokio::time::timeout(PRAZO, ev.recv()).await {
+            Ok(Some(EventoControlador::Mensagem(m))) => {
+                let Msg::ChatMessage(c) = *m else { continue };
+                assert_eq!(c.text, "oi do host");
+                break;
+            }
+            Ok(Some(_)) => {}
+            _ => panic!("esperava o chat do host"),
+        }
+    }
+
+    sessao.encerrar().await;
+    let EventoHost::Fim { .. } = host.proximo().await else {
+        panic!("esperava o fim")
+    };
 }

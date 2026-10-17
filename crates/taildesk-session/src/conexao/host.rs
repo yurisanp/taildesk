@@ -20,7 +20,7 @@ use taildesk_files::service::{Config, Event, Files, SharedRoot, Side};
 use taildesk_keyboard::{Inject, KeyMsg, Keymap, Locks};
 use taildesk_overlay::{Overlay, PeerIdentity};
 use taildesk_proto::control::{
-    AudioStopReason, AudioStopped, Close, CloseReason, Consent, DisplayInfo, HelloAck,
+    AudioStopReason, AudioStopped, ChatMessage, Close, CloseReason, Consent, DisplayInfo, HelloAck,
     KeyboardInfo, Msg, PROTO_VERSION, Permissions, Platform, Pong,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -196,10 +196,12 @@ pub enum EventoHost {
 }
 
 /// Pedidos da faixa do host.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ComandoHost {
     PausarControle(bool),
     Encerrar,
+    /// Manda uma linha de chat para o controlador.
+    Chat(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -675,6 +677,11 @@ async fn ao_vivo<M: Maquina>(
                     }
                 }
                 ComandoHost::Encerrar => break FimHost::Fechada(CloseReason::ByHost),
+                ComandoHost::Chat(texto) => {
+                    let _ = saida
+                        .send(controle(Msg::ChatMessage(ChatMessage { text: texto })))
+                        .await;
+                }
             },
         }
     };
