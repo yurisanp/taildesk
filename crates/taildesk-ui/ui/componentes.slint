@@ -218,6 +218,13 @@ export component PainelChat inherits Rectangle {
     in property <[MensagemChat]> mensagens;
     callback enviar(string);
     callback fechar();
+    // O campo de mensagem tem o foco: o app para de mandar o teclado para o computador remoto
+    // enquanto isso, senão as teclas nunca chegam ao campo.
+    out property <bool> digitando: campo.has-focus;
+    callback digitando-mudou(bool);
+    changed digitando => { root.digitando-mudou(self.digitando); }
+    // Abrir o painel já deixa pronto para escrever.
+    init => { campo.focus(); }
 
     width: 340px;
     border-radius: Tema.raio-grande;

@@ -208,6 +208,8 @@ struct SessaoUi {
     som_permitido: bool,
     /// Conversa de chat da sessão (`ChatMessage`), mais antiga primeiro.
     chat: Vec<MensagemChat>,
+    /// O campo do chat tem o foco: o teclado fica na janela em vez de ir para o host.
+    chat_digitando: bool,
 }
 
 impl SessaoUi {
@@ -728,7 +730,7 @@ impl SessaoUi {
             na_sessao_ja(id, |s| s.mouse_rolou(dx, dy));
         });
         j.window()
-            .on_winit_window_event(move |_, ev| teclado_da_janela(id, ev));
+            .on_winit_window_event(move |_, ev| teclado_da_janela(id, Some(display), ev));
         if let Err(e) = j.show() {
             eprintln!("taildesk: janela do monitor: {e}");
         }
@@ -963,12 +965,17 @@ impl SessaoUi {
         self.painel.estado(&self.janela, &self.estado);
     }
 
-    fn tecla(&mut self, hid: Hid, down: bool) -> bool {
+    /// `onde` = `None` na janela da sessão, `Some(display)` na janela de um destacado.
+    fn tecla(&mut self, onde: Option<u32>, hid: Hid, down: bool) -> bool {
         if taildesk_keyboard::is_modifier(hid) {
             self.mods_presos.retain(|&h| h != hid);
             if down {
                 self.mods_presos.push(hid);
             }
+        }
+        // Escrevendo no chat: a tecla vai para o campo, não para o host.
+        if onde.is_none() && self.chat_digitando && self.janela.get_chat_aberto() {
+            return false;
         }
         if down && let Some(a) = atalho(hid, self.mods()) {
             let mut out = Vec::new();
@@ -988,6 +995,15 @@ impl SessaoUi {
             self.enviar(k.to_proto());
         }
         true
+    }
+
+    /// O campo do chat ganhou ou perdeu o foco. Ao ganhar, solta no host o que estava preso,
+    /// como quando a janela perde o foco.
+    fn chat_digitando(&mut self, sim: bool) {
+        self.chat_digitando = sim;
+        if sim {
+            self.foco_perdido();
+        }
     }
 
     fn foco_perdido(&mut self) {
@@ -1078,7 +1094,11 @@ impl SessaoUi {
 
 /// Teclado pelo código físico, antes do Slint (Tab, Alt e atalhos vão para o host), na janela
 /// da sessão e nas dos destacados. Perder o foco solta as teclas.
-fn teclado_da_janela(id: IdLocal, ev: &winit::event::WindowEvent) -> EventResult {
+fn teclado_da_janela(
+    id: IdLocal,
+    onde: Option<u32>,
+    ev: &winit::event::WindowEvent,
+) -> EventResult {
     match ev {
         winit::event::WindowEvent::KeyboardInput {
             event,
@@ -1089,7 +1109,7 @@ fn teclado_da_janela(id: IdLocal, ev: &winit::event::WindowEvent) -> EventResult
                 return EventResult::Propagate;
             };
             let down = event.state.is_pressed();
-            let consumiu = na_sessao_ja(id, |s| s.tecla(hid, down)).unwrap_or(false);
+            let consumiu = na_sessao_ja(id, |s| s.tecla(onde, hid, down)).unwrap_or(false);
             if consumiu {
                 EventResult::PreventDefault
             } else {
@@ -1258,6 +1278,9 @@ impl Controlador {
         janela.on_mouse_rolou(move |dx, dy| {
             na_sessao_ja(id, |s| s.mouse_rolou(dx, dy));
         });
+        janela.on_chat_digitando(move |sim| {
+            na_sessao_ja(id, |s| s.chat_digitando(sim));
+        });
         janela.on_enviar_chat(move |texto| {
             let texto = texto.to_string();
             if texto.is_empty() {
@@ -1286,7 +1309,7 @@ impl Controlador {
             .window()
             .on_winit_window_event(move |_, ev| match ev {
                 winit::event::WindowEvent::KeyboardInput { .. }
-                | winit::event::WindowEvent::Focused(false) => teclado_da_janela(id, ev),
+                | winit::event::WindowEvent::Focused(false) => teclado_da_janela(id, None, ev),
                 // Arrastar arquivos do sistema (Windows e X11; o Wayland vem por `ligar_soltar`).
                 winit::event::WindowEvent::HoveredFile(_) => {
                     na_sessao_ja(id, |s| s.painel.arrastando(&s.janela, true));
@@ -1372,6 +1395,7 @@ impl Controlador {
                 som_ligado: true,
                 som_permitido: false,
                 chat: Vec::new(),
+                chat_digitando: false,
             },
         );
         arquivos::ligar_soltar(id, 50);
