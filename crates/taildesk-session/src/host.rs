@@ -139,6 +139,8 @@ pub fn need(msg: &Msg) -> Need {
 pub struct HostSession {
     peer: PeerIdentity,
     state: HostState,
+    /// Como entrou (para o registro de acessos).
+    via: Option<crate::acessos::Via>,
 }
 
 impl HostSession {
@@ -147,7 +149,13 @@ impl HostSession {
         HostSession {
             peer,
             state: HostState::AwaitHello,
+            via: None,
         }
+    }
+
+    /// Como o acesso foi liberado; `None` antes de entrar.
+    pub fn via(&self) -> Option<crate::acessos::Via> {
+        self.via
     }
 
     pub fn state(&self) -> &HostState {
@@ -188,6 +196,7 @@ impl HostSession {
         match decisao {
             Decision::Refuse => HelloReply::Close(self.close(CloseReason::NotAllowed)),
             Decision::Allow(permissions) => {
+                self.via = Some(crate::acessos::Via::Confiavel);
                 self.state = HostState::Live {
                     permissions,
                     control_paused: false,
@@ -227,6 +236,7 @@ impl HostSession {
         }
         crate::senha::tentativas(|t| t.acertou(&node));
         let permissions = offer(settings, &hello.features);
+        self.via = Some(crate::acessos::Via::Senha);
         self.state = HostState::Live {
             permissions,
             control_paused: false,
@@ -266,6 +276,7 @@ impl HostSession {
                 Msg::Close(self.close(CloseReason::ConsentDenied)),
             ];
         }
+        self.via = Some(crate::acessos::Via::Dialogo);
         self.state = HostState::Live {
             permissions: granted,
             control_paused: false,

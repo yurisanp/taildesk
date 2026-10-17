@@ -75,7 +75,8 @@ pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
         settings,
         inbox,
         raizes: Vec::new(),
-        auditoria: None,
+        auditoria: crate::historico::auditoria_arquivos(),
+        acessos: crate::historico::registro(),
     });
     let (tx, mut rx) = mpsc::channel(64);
     tokio::spawn(servir(
@@ -577,6 +578,7 @@ impl Ui {
             }
             EventoHost::Fim { sessao, .. } => {
                 self.fechar_pedido(sessao);
+                crate::com_app(crate::App::atualizar_configuracoes);
                 if let Some(f) = self.faixas.borrow_mut().remove(&sessao) {
                     let _ = f.janela.hide();
                 }

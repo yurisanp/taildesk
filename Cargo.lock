@@ -5528,6 +5528,7 @@ name = "taildesk"
 version = "0.2.0"
 dependencies = [
  "bytes",
+ "chrono",
  "futures-util",
  "pollster",
  "quinn",
@@ -5664,6 +5665,8 @@ dependencies = [
  "argon2",
  "password-hash",
  "quinn",
+ "serde",
+ "serde_json",
  "taildesk-files",
  "taildesk-keyboard",
  "taildesk-overlay",

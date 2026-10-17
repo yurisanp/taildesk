@@ -18,6 +18,7 @@ mod area;
 mod atualizacao;
 mod config;
 mod controlador;
+mod historico;
 mod host;
 mod midia_host;
 mod modelo;

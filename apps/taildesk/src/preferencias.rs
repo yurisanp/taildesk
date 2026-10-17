@@ -167,6 +167,7 @@ pub fn mostrar(j: &JanelaPrincipal) {
     j.set_codec_config(indice_codec(c.video.codec) as i32);
     j.set_taxas_config(ModelRc::new(VecModel::from(rotulos_taxa())));
     j.set_taxa_config(indice_taxa(c.video.taxa_kbps) as i32);
+    crate::historico::mostrar(j);
     let fraca = j.as_weak();
     std::thread::spawn(move || {
         let inicio = taildesk_platform::inicio::ligado();
@@ -213,6 +214,7 @@ fn gravar_senha(hash: Option<String>) {
 /// Liga os callbacks das Configurações.
 pub fn ligar(j: &JanelaPrincipal) {
     mostrar(j);
+    crate::historico::ligar(j);
     let fraca = j.as_weak();
     j.on_definir_senha(move |nova, confirma| {
         let Some(j) = fraca.upgrade() else { return };
