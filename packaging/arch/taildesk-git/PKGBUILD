@@ -46,6 +46,7 @@ package() {
   install -Dm0755 target/release/taildesk-cli  "$pkgdir/usr/bin/taildesk-cli"
   install -Dm0644 packaging/linux/taildesk.desktop "$pkgdir/usr/share/applications/taildesk.desktop"
   install -Dm0644 packaging/linux/taildesk.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/taildesk.svg"
+  install -Dm0644 packaging/linux/io.github.yurisanp.TailDesk.metainfo.xml "$pkgdir/usr/share/metainfo/io.github.yurisanp.TailDesk.metainfo.xml"
   install -Dm0644 LICENSE-MIT    "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
   install -Dm0644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
 }
