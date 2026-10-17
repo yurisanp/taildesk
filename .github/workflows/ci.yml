@@ -77,3 +77,15 @@ jobs:
           key: ${{ matrix.distro }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  empacotamento:
+    name: metadados dos pacotes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ferramentas
+        run: sudo apt-get update && sudo apt-get install -y appstream desktop-file-utils
+      - name: AppStream MetaInfo
+        run: appstreamcli validate --no-net packaging/linux/io.github.yurisanp.TailDesk.metainfo.xml
+      - name: .desktop
+        run: desktop-file-validate packaging/linux/taildesk.desktop

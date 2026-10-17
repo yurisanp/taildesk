@@ -27,6 +27,7 @@ install -Dm755 "$rel/taildesk"     "$tree/usr/bin/taildesk"
 install -Dm755 "$rel/taildesk-cli" "$tree/usr/bin/taildesk-cli"
 install -Dm644 "$here/taildesk.desktop" "$tree/usr/share/applications/taildesk.desktop"
 install -Dm644 "$here/taildesk.svg"     "$tree/usr/share/icons/hicolor/scalable/apps/taildesk.svg"
+install -Dm644 "$here/io.github.yurisanp.TailDesk.metainfo.xml" "$tree/usr/share/metainfo/io.github.yurisanp.TailDesk.metainfo.xml"
 install -Dm644 "$root/LICENSE-MIT"      "$tree/usr/share/licenses/taildesk/LICENSE-MIT"
 install -Dm644 "$root/LICENSE-APACHE"   "$tree/usr/share/licenses/taildesk/LICENSE-APACHE"
 # PyroWave (opcional): packaging/pyrowave/build.sh target/release deixa a biblioteca ao lado
