@@ -144,8 +144,13 @@ jobs:
           $msiver = ($full -split '-')[0]
           dotnet tool install --global wix --version 5.0.2
           $msi = "dist/TailDesk-$full-x64.msi"
-          wix build packaging/windows/taildesk.wxs -arch x64 -d Version=$msiver -d BinDir=target/release -o $msi
+          # Com o PyroWave compilado, o MSI leva a DLL como o .zip.
+          $pyro = @()
+          if (Test-Path target/release/libpyrowave-shared-1.dll) { $pyro = @('-d', 'PyroWave=1') }
+          wix build packaging/windows/taildesk.wxs -arch x64 -d Version=$msiver -d BinDir=target/release @pyro -o $msi
           if (-not (Test-Path $msi)) { throw "o MSI não foi gerado" }
+          # O .wixpdb (símbolos do WiX) não vai para a release.
+          Remove-Item dist/*.wixpdb -ErrorAction SilentlyContinue
           if ($env:PFX_B64 -and $env:PFX_PASS) {
             [IO.File]::WriteAllBytes("$env:RUNNER_TEMP/cert.pfx", [Convert]::FromBase64String($env:PFX_B64))
             $signtool = Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe" |
