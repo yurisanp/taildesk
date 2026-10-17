@@ -13,7 +13,7 @@ taildesk-codec.workspace = true
 # Opus (MIT/Apache-2.0); a libopus (BSD-3) é compilada junto pelo opusic-sys, com cmake.
 opus = "0.4"
 # Fila sem lock entre a thread de decode e o callback de som (MIT/Apache-2.0).
-ringbuf = "0.4"
+ringbuf = "0.5"
 
 
 [lints]

@@ -1,0 +1,100 @@
+# cargo-deny: licenças, vulnerabilidades e origem das dependências (fase 5, auditoria).
+# Roda no CI (`.github/workflows/ci.yml`, job "deny") e localmente com `cargo deny check`.
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+all-features = false
+
+[advisories]
+# Avisos do RustSec: vulnerabilidade falha o CI; crate sem manutenção só avisa.
+yanked = "warn"
+unmaintained = "workspace"
+ignore = []
+
+[licenses]
+# AGENTS.md: MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0. GPL/AGPL só com ADR.
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "0BSD",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+# MPL-2.0 é permitido pelo AGENTS.md mesmo sem uso hoje.
+unused-allowed-license = "allow"
+
+# Slint entra pela Royalty-free License 2.0 (atribuição em Configurações → Sobre), uma das
+# alternativas de "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR ...". Só os crates do Slint.
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "slint"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "slint-build"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "slint-macros"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-backend-selector"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-backend-winit"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-common"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-compiler"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-core"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-core-macros"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-renderer-femtovg"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-renderer-software"
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+# Decisões travadas (AGENTS.md): nada de nó Tailscale embutido.
+deny = [
+    { crate = "tailscale", reason = "ADR-009: só o Tailscale instalado na máquina" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
