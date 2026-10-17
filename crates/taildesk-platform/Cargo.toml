@@ -14,8 +14,6 @@ taildesk-proto.workspace = true
 keyring-core = "1"
 # PNG da área de transferência: o Windows guarda imagens em DIB (MIT OR Apache-2.0).
 png = "0.18"
-# Som do sistema: loopback do WASAPI no Windows, sink do PipeWire no Linux (Apache-2.0).
-cpal = "0.18.2"
 
 # Pergunta ao D-Bus se há bandeja (StatusNotifierWatcher). O Slint já traz o zbus para a bandeja.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -27,8 +25,6 @@ futures-util = { version = "0.3", default-features = false }
 # Recebe os quadros de cada monitor do portal (MIT). Liga na libpipewire-0.3 do sistema; o build
 # precisa do pacote -dev e do libclang (bindgen).
 pipewire = "0.10"
-# O backend PipeWire do cpal (som); o cpal também liga a libasound (pacote -dev no build).
-cpal = { version = "0.18.2", features = ["pipewire"] }
 # Lê o layout do teclado (keymap XKB); carregado em tempo de execução, sem pacote -dev.
 xkbcommon-dl = "0.4"
 # Arrastar arquivos para a janela no Wayland (o winit não faz): conexão convidada no wl_display
@@ -38,6 +34,8 @@ rustix = { version = "1", features = ["event", "fs", "pipe"] }
 zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-crypto-rust"] }
 
 [target.'cfg(windows)'.dependencies]
+# Som do sistema: WASAPI, loopback na saída padrão (Apache-2.0). No Linux o som vai pelo PipeWire.
+cpal = "0.18.2"
 windows-native-keyring-store = { version = "1", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_DataExchange", "Win32_System_Environment", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Registry", "Win32_System_RemoteDesktop", "Win32_System_Services", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # Desktop Duplication (D3D11 + DXGI) é COM; o crate `windows` (MIT/Apache) cuida das interfaces.
