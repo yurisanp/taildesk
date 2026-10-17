@@ -7,9 +7,15 @@
   sistema": isso continua sendo escolha da pessoa em Configurações → Este computador, que pede
   administrador na hora (o MSI por máquina já roda elevado, mas o serviço é opcional).
 
+  O serviço, quando a pessoa liga, aponta para o taildesk.exe instalado aqui: o MSI para o
+  serviço antes de trocar ou apagar os arquivos e o remove na desinstalação (sem serviço, não faz
+  nada).
+
   Build (no CI do Windows):
     wix build packaging/windows/taildesk.wxs -arch x64 \
       -d Version=<versão sem o "-pre"> -d BinDir=target/release -o dist/TailDesk-<versão>-x64.msi
+  Com `-d PyroWave=1`, leva também a libpyrowave-shared-1.dll e as licenças dela
+  (BinDir/licencas-pyrowave), como o .zip.
   A versão do MSI é só X.Y.Z (o ProductVersion do Windows Installer ignora o sufixo de
   pre-release); UpgradeCode fixo faz cada versão substituir a anterior.
 -->
@@ -22,7 +28,10 @@
       Scope="perMachine"
       Compressed="yes">
 
-    <MajorUpgrade DowngradeErrorMessage="Já existe uma versão mais nova do TailDesk instalada." />
+    <!-- As pre-releases (0.2.0-beta.N) e a 0.2.0 têm o mesmo X.Y.Z: sem AllowSameVersionUpgrades
+         cada uma entraria ao lado da anterior em vez de substituí-la. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Já existe uma versão mais nova do TailDesk instalada." />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Royalty-free do Slint e MIT/Apache do resto: código aberto, sem EULA de clique. -->
@@ -40,6 +49,11 @@
                       Icon="taildesk.ico"
                       Advertise="yes" />
           </File>
+          <!-- Serviço "TailDesk" (servico_windows.rs), instalado pelo app se a pessoa ligar
+               "Iniciar com o sistema": parado ao instalar e desinstalar (atualizar troca o
+               exe), removido ao desinstalar. -->
+          <ServiceControl Id="ServicoTailDesk" Name="TailDesk" Stop="both" Remove="uninstall"
+                          Wait="yes" />
         </Component>
         <Component Id="taildesk_cli.exe" Guid="87FF3139-8DEB-5784-8A3F-70637C94EEE5">
           <File Id="taildesk_cli.exe" Source="$(var.BinDir)/taildesk-cli.exe" KeyPath="yes" />
@@ -49,6 +63,14 @@
           <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Part="last"
                        Action="set" System="yes" Permanent="no" />
         </Component>
+<?ifdef PyroWave ?>
+        <!-- PyroWave (MIT), aberto em runtime ao lado do taildesk.exe. -->
+        <Component Id="pyrowave.dll" Guid="8233FED4-D3E6-4EDB-87F9-157897090896">
+          <File Id="pyrowave.dll" Source="$(var.BinDir)/libpyrowave-shared-1.dll" KeyPath="yes" />
+          <File Id="PyroWave_LICENSE" Source="$(var.BinDir)/licencas-pyrowave/PyroWave-LICENSE" />
+          <File Id="Granite_LICENSE" Source="$(var.BinDir)/licencas-pyrowave/Granite-LICENSE" />
+        </Component>
+<?endif ?>
       </Directory>
     </StandardDirectory>
 
@@ -56,6 +78,9 @@
       <ComponentRef Id="taildesk.exe" />
       <ComponentRef Id="taildesk_cli.exe" />
       <ComponentRef Id="PathEntry" />
+<?ifdef PyroWave ?>
+      <ComponentRef Id="pyrowave.dll" />
+<?endif ?>
     </Feature>
   </Package>
 </Wix>
