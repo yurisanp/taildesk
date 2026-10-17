@@ -42,6 +42,8 @@ pub mod limits {
     pub const SHORT_TEXT_LEN: usize = 128;
     /// Mensagens livres (`Close`, `Error`).
     pub const MESSAGE_LEN: usize = 1024;
+    /// Texto de uma linha de chat da sessão (`ChatMessage`), em bytes.
+    pub const CHAT_TEXT_LEN: usize = 4096;
     /// Capacidades de codec por lista.
     pub const CODEC_CAPS: usize = 32;
     /// Nome de um backend de codec (`VideoStats.encoder`).
@@ -87,7 +89,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 56, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 56, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104, 110"
     )]
     pub msg: Option<Msg>,
 }
@@ -213,6 +215,11 @@ pub enum Msg {
     StopAudio(StopAudio),
     #[prost(message, tag = "104")]
     AudioStopped(AudioStopped),
+
+    // Chat da sessão: texto nos dois sentidos enquanto a sessão está ativa. Quem enviou vem da
+    // direção da conexão (`Overlay::identify()`), nunca do conteúdo.
+    #[prost(message, tag = "110")]
+    ChatMessage(ChatMessage),
 }
 
 impl From<Msg> for Control {
@@ -1086,6 +1093,17 @@ pub struct AudioStopped {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Chat
+
+/// Uma linha de chat da sessão, nos dois sentidos. `text` é UTF-8 livre, limitado a
+/// [`limits::CHAT_TEXT_LEN`] bytes; quem enviou vem da direção da conexão, não daqui.
+#[derive(Clone, PartialEq, Message)]
+pub struct ChatMessage {
+    #[prost(string, tag = "1")]
+    pub text: String,
+}
+
+// ---------------------------------------------------------------------------------------------
 // Enums (0 = não especificado; valor desconhecido = tratar como 0)
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
@@ -1530,6 +1548,7 @@ impl Control {
             }
             Msg::Close(m) => at_most("message", m.message.len(), limits::MESSAGE_LEN),
             Msg::Error(m) => at_most("message", m.message.len(), limits::MESSAGE_LEN),
+            Msg::ChatMessage(m) => at_most("chat_text", m.text.len(), limits::CHAT_TEXT_LEN),
             Msg::DisplaysChanged(m) => displays(&m.displays),
             Msg::CodecSelected(m) => video_stream(m.stream_id),
             Msg::VideoStats(m) => {
@@ -2055,6 +2074,9 @@ mod tests {
                 xfer_id: 9,
                 code: FileErrorCode::ResumeMismatch.into(),
             }),
+            Msg::ChatMessage(ChatMessage {
+                text: "oi, tudo bem? 👋".into(),
+            }),
         ]
     }
 
@@ -2072,6 +2094,21 @@ mod tests {
             resto = &resto[n..];
         }
         assert!(resto.is_empty());
+    }
+
+    #[test]
+    fn limite_do_chat() {
+        let chat = |n: usize| {
+            Msg::ChatMessage(ChatMessage {
+                text: "a".repeat(n),
+            })
+        };
+        assert!(
+            Control::from(chat(limits::CHAT_TEXT_LEN))
+                .validate()
+                .is_ok()
+        );
+        assert_eq!(invalida(chat(limits::CHAT_TEXT_LEN + 1)).field, "chat_text");
     }
 
     #[test]
