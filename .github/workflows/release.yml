@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v4
       # O app gráfico (Slint) liga o fontconfig e a captura liga a libpipewire (bindgen: libclang).
       - name: Dependências do sistema
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libpipewire-0.3-dev libclang-dev nasm ninja-build
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libpipewire-0.3-dev libclang-dev nasm ninja-build cmake
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Ferramentas de empacotamento

@@ -19,11 +19,17 @@ use taildesk_keyboard::{Controller, Hid, KeyMsg, Keymap, Level, Mode, Mods, Tran
 use taildesk_media::video::RecepcaoVideo;
 use taildesk_overlay::{Overlay, SystemOverlay};
 use taildesk_proto::control::{
-    AbsPos, Button, Codec, CodecCap, CodecSelected, Control, ErrorCode, Feature, Hello,
-    KeyboardInfo, MouseButton, MouseMove, Msg, Platform, QualityPrefs, RequestKeyframe, Scroll,
-    SetVideoQuality, mouse_move,
+    AbsPos, AudioPrefs, AudioProfile, AudioSelected, AudioStopReason, Button, Codec, CodecCap,
+    CodecSelected, Control, ErrorCode, Feature, Hello, KeyboardInfo, MouseButton, MouseMove, Msg,
+    Platform, QualityPrefs, RequestKeyframe, Scroll, SetVideoQuality, StartAudio, StopAudio,
+    mouse_move,
 };
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
+
+use crate::som::SomControlador;
+
+/// `stream_id` do som do sistema (o único stream de áudio por sessão).
+const STREAM_SOM: u8 = taildesk_proto::media::AUDIO_STREAM_MIN;
 use taildesk_session::conexao::{PORTA, clipboard};
 use taildesk_session::{ControllerState, CursorControlador, EndReason, UmPorVez, atalho};
 use taildesk_transport::{Pin, client_endpoint};
@@ -191,6 +197,11 @@ struct SessaoUi {
     /// O host aceita senha de acesso (do `HelloAck`).
     host_tem_senha: bool,
     senha_usada: OrigemSenha,
+    /// Som do computador remoto: a saída aberta, o destino dos datagramas e o botão.
+    som: Option<SomControlador>,
+    som_destino: crate::som::Destino,
+    som_ligado: bool,
+    som_permitido: bool,
 }
 
 impl SessaoUi {
@@ -290,6 +301,57 @@ impl SessaoUi {
             }
             Err(e) => eprintln!("taildesk: vídeo: {e}"),
         }
+    }
+
+    /// Botão do som: liga ou desliga o som do computador remoto.
+    fn pedir_som(&mut self, ligar: bool) {
+        self.som_ligado = ligar;
+        self.janela.set_som_ligado(ligar);
+        if !self.ao_vivo() || !self.som_permitido {
+            return;
+        }
+        if ligar {
+            self.enviar(Msg::StartAudio(StartAudio {
+                stream_id: u32::from(STREAM_SOM),
+                prefs: Some(AudioPrefs {
+                    profile: AudioProfile::Auto as i32,
+                    max_kbps: 0,
+                    channels: 2,
+                }),
+            }));
+        } else {
+            self.som = None;
+            self.enviar(Msg::StopAudio(StopAudio {
+                stream_id: u32::from(STREAM_SOM),
+            }));
+        }
+    }
+
+    /// O host começou a mandar o som: abre a saída de som local.
+    fn som_escolhido(&mut self, a: &AudioSelected) {
+        let Ok(stream) = u8::try_from(a.stream_id) else {
+            return;
+        };
+        if !self.som_ligado {
+            return;
+        }
+        let (id, destino) = (self.id, self.som_destino.clone());
+        let tarefa = self
+            .rt
+            .spawn_blocking(move || SomControlador::iniciar(stream, destino));
+        self.rt.spawn(async move {
+            let r = tarefa.await.map_err(|e| e.to_string()).and_then(|r| r);
+            na_sessao(id, move |s| match r {
+                Ok(som) if s.som_ligado => s.som = Some(som),
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("taildesk: saída de som: {e}");
+                    s.janela
+                        .set_toast(format!("Não foi possível tocar o som: {e}").into());
+                    s.pedir_som(false);
+                }
+            });
+        });
     }
 
     fn parar_video(&self, display: u32) {
@@ -736,6 +798,8 @@ impl SessaoUi {
                             j.set_ao_vivo(true);
                         }
                         self.janela.set_pede_senha(false);
+                        self.som_permitido = permissions.audio;
+                        self.janela.set_som_permitido(permissions.audio);
                         if permissions.clipboard
                             && let Some(saida) = self.saida.clone()
                         {
@@ -745,6 +809,9 @@ impl SessaoUi {
                             // Pede o vídeo do monitor principal, agora que pode.
                             self.monitores = UmPorVez::new();
                             self.monitores.atualizar(&self.displays, &mut out);
+                            if self.som_ligado {
+                                self.pedir_som(true);
+                            }
                         }
                     }
                     ControllerState::Ended(r) => {
@@ -758,6 +825,7 @@ impl SessaoUi {
                         self.fim_senha(r);
                         self.saida = None;
                         self.area.desligar();
+                        self.som = None;
                         travar(&self.recepcoes).clear();
                     }
                 }
@@ -825,6 +893,22 @@ impl SessaoUi {
                 Msg::CursorShapeRef(r) => self.cursor.on_shape_ref(r),
                 Msg::CodecSelected(c) => self.iniciar_video(&c),
                 Msg::VideoStats(v) => self.diagnostico.host(v),
+                Msg::AudioSelected(a) => self.som_escolhido(&a),
+                Msg::AudioStopped(a) => {
+                    self.som = None;
+                    let aviso = match AudioStopReason::try_from(a.reason) {
+                        Ok(AudioStopReason::ByHost) => Some("desligou o som."),
+                        Ok(AudioStopReason::NoPermission) => Some("não permite ouvir o som."),
+                        Ok(AudioStopReason::DeviceError) => Some("não conseguiu capturar o som."),
+                        _ => None,
+                    };
+                    if let Some(aviso) = aviso {
+                        self.janela
+                            .set_toast(format!("{} {aviso}", self.host).into());
+                        self.som_ligado = false;
+                        self.janela.set_som_ligado(false);
+                    }
+                }
                 Msg::VideoStopped(v) => {
                     self.parar_video(v.display_id);
                     self.monitores.on_video_stopped(&v, &mut out);
@@ -1101,6 +1185,9 @@ impl Controlador {
             fechar(id);
             CloseRequestResponse::HideWindow
         });
+        janela.on_som_mudou(move |ligar| {
+            na_sessao_ja(id, |s| s.pedir_som(ligar));
+        });
         janela.on_destacar_aba(move |i| {
             na_sessao_ja(id, |s| {
                 let abas = s.monitores.abas();
@@ -1186,6 +1273,7 @@ impl Controlador {
         let recepcoes = Recepcoes::default();
         let contadores = Arc::new(Contadores::default());
         let entrada_area = area::Entrada::default();
+        let som_destino = crate::som::Destino::default();
         self.sessoes.borrow_mut().insert(
             id,
             SessaoUi {
@@ -1227,6 +1315,10 @@ impl Controlador {
                 conexao: (nome.clone(), ip),
                 host_tem_senha: false,
                 senha_usada: OrigemSenha::Nenhuma,
+                som: None,
+                som_destino: som_destino.clone(),
+                som_ligado: true,
+                som_permitido: false,
             },
         );
         arquivos::ligar_soltar(id, 50);
@@ -1239,6 +1331,7 @@ impl Controlador {
                 recepcoes,
                 contadores,
                 area: entrada_area,
+                som: som_destino,
             },
             senha,
             fechar_rx,
@@ -1267,6 +1360,7 @@ struct Midia {
     recepcoes: Recepcoes,
     contadores: Arc<Contadores>,
     area: area::Entrada,
+    som: crate::som::Destino,
 }
 
 /// Conecta e repassa os eventos à janela até a sessão acabar ou ser fechada.
@@ -1283,6 +1377,7 @@ async fn rodar(
         recepcoes,
         contadores,
         area: entrada_area,
+        som,
     } = midia;
     let remoto = SocketAddr::new(ip, PORTA);
     // Quem é o host na tailnet: o fingerprint fica ligado ao `node_stable_id` (TOFU).
@@ -1350,6 +1445,7 @@ async fn rodar(
             Feature::Files.into(),
             Feature::MultiDisplay.into(),
             Feature::Clipboard.into(),
+            Feature::Audio.into(),
         ],
         decode_caps,
         keyboard: Some(teclado),
@@ -1401,7 +1497,12 @@ async fn rodar(
         s.painel.ligar(servico);
     });
     let conn = sessao.conexao().clone();
-    let datagramas = tokio::spawn(ler_datagramas(conn.clone(), recepcoes.clone(), contadores));
+    let datagramas = tokio::spawn(ler_datagramas(
+        conn.clone(),
+        recepcoes.clone(),
+        contadores,
+        som,
+    ));
     let saida_relatorio = sessao.saida();
     // Rota pelo Tailscale (direta ou DERP), em segundo plano: o `ping` disco pode demorar.
     let rota = Arc::new(Mutex::new(None));

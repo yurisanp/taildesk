@@ -20,10 +20,11 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      # O Slint liga o fontconfig e a captura liga a libpipewire (bindgen precisa do libclang).
+      # O Slint liga o fontconfig, a captura de tela e o som ligam a libpipewire (bindgen precisa do
+      # libclang) e o Opus compila com cmake.
       - name: Dependências do sistema (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libpipewire-0.3-dev libclang-dev mesa-vulkan-drivers nasm
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libpipewire-0.3-dev libclang-dev mesa-vulkan-drivers nasm cmake
       # Sem o nasm o openh264 compila sem SIMD.
       - name: nasm (Windows)
         if: runner.os == 'Windows'
@@ -47,10 +48,10 @@ jobs:
         include:
           - distro: fedora
             image: fedora:latest
-            deps: dnf install -y --setopt=install_weak_deps=False gcc gcc-c++ git curl pkgconf-pkg-config fontconfig-devel pipewire-devel clang-devel nasm
+            deps: dnf install -y --setopt=install_weak_deps=False gcc gcc-c++ git curl pkgconf-pkg-config fontconfig-devel pipewire-devel clang-devel nasm cmake
           - distro: archlinux
             image: archlinux:latest
-            deps: pacman -Syu --noconfirm --needed base-devel git curl fontconfig pipewire clang nasm
+            deps: pacman -Syu --noconfirm --needed base-devel git curl fontconfig pipewire clang nasm cmake
     steps:
       - name: Dependências do sistema
         run: ${{ matrix.deps }}

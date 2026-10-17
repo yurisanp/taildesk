@@ -22,6 +22,7 @@ mod host;
 mod midia_host;
 mod modelo;
 mod preferencias;
+mod som;
 mod video;
 
 use std::cell::{Cell, RefCell};

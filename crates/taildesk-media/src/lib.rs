@@ -1,6 +1,7 @@
 //! Pipeline do host (captura, encode, packetização, pacing) e do controlador (remontagem, jitter buffer, decode).
 //!
-//! - [`video`]: envio e recepção de vídeo por monitor (encode, fragmentação, remontagem, decode).
+//! - [`video`]: envio e recepção de vídeo por monitor (encode, fragmentação, remontagem, decode);
+//! - [`audio`]: áudio do sistema em Opus (conversão, silêncio, PLC e fila de reprodução).
 //!
 //! Também existem as partes puras da seleção adaptativa (`docs/context/14-selecao-adaptativa.md`):
 //! - [`measure`]: estatísticas de RTT e sondagem de banda;
@@ -8,6 +9,7 @@
 //! - [`taxa`]: laço rápido do bitrate (fila, perda e banda do QUIC).
 
 pub mod adapt;
+pub mod audio;
 pub mod measure;
 pub mod taxa;
 pub mod video;

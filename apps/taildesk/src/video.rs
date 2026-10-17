@@ -194,18 +194,24 @@ pub fn travar(r: &Recepcoes) -> MutexGuard<'_, HashMap<u8, (u32, RecepcaoVideo)>
     r.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Lê os datagramas da conexão e entrega cada um à recepção do stream dele (byte 1 do header).
+/// Lê os datagramas da conexão e entrega cada um à recepção do stream dele (byte 1 do header):
+/// vídeo por monitor, áudio no [`crate::som::Destino`].
 pub async fn ler_datagramas(
     conn: quinn::Connection,
     recepcoes: Recepcoes,
     contadores: Arc<Contadores>,
+    som: crate::som::Destino,
 ) {
     while let Ok(d) = conn.read_datagram().await {
+        let Some(&stream) = d.get(1) else { continue };
+        if stream >= taildesk_proto::media::AUDIO_STREAM_MIN {
+            crate::som::receber(&som, stream, &d);
+            continue;
+        }
         contadores.datagramas.fetch_add(1, Ordering::Relaxed);
         contadores
             .bytes
             .fetch_add(d.len() as u64, Ordering::Relaxed);
-        let Some(&stream) = d.get(1) else { continue };
         if let Some((_, r)) = travar(&recepcoes).get_mut(&stream) {
             r.receber(&d);
         }

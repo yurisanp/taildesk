@@ -20,8 +20,8 @@ use taildesk_files::service::{Config, Event, Files, SharedRoot, Side};
 use taildesk_keyboard::{Inject, KeyMsg, Keymap, Locks};
 use taildesk_overlay::{Overlay, PeerIdentity};
 use taildesk_proto::control::{
-    Close, CloseReason, Consent, DisplayInfo, HelloAck, KeyboardInfo, Msg, PROTO_VERSION,
-    Permissions, Platform, Pong,
+    AudioStopReason, AudioStopped, Close, CloseReason, Consent, DisplayInfo, HelloAck,
+    KeyboardInfo, Msg, PROTO_VERSION, Permissions, Platform, Pong,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -537,6 +537,15 @@ async fn ao_vivo<M: Maquina>(
                     _ => {}
                 }
                 if !sessao.admits(&msg) {
+                    // Áudio sem permissão: o controlador fica sabendo, e nada é capturado.
+                    if let Msg::StartAudio(a) = &msg {
+                        let _ = saida
+                            .send(controle(Msg::AudioStopped(AudioStopped {
+                                stream_id: a.stream_id,
+                                reason: AudioStopReason::NoPermission.into(),
+                            })))
+                            .await;
+                    }
                     continue;
                 }
                 match &msg {
@@ -584,7 +593,9 @@ async fn ao_vivo<M: Maquina>(
                     | Msg::SetVideoQuality(_)
                     | Msg::RequestKeyframe(_)
                     | Msg::PictureLoss(_)
-                    | Msg::ReceiverReport(_) => midia.mensagem(&msg).await,
+                    | Msg::ReceiverReport(_)
+                    | Msg::StartAudio(_)
+                    | Msg::StopAudio(_) => midia.mensagem(&msg).await,
                     // O layout e o modo escolhidos valem no controlador, que traduz.
                     Msg::KeyboardLayoutChanged(_) | Msg::KeyboardMode(_) => {}
                     _ => {
