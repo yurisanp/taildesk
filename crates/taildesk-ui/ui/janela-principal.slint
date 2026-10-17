@@ -341,6 +341,28 @@ component OpcaoLista inherits HorizontalLayout {
     }
 }
 
+// Uma linha do histórico de acessos (Configurações → Histórico de acessos).
+export struct LinhaAcesso {
+    quando: string,
+    quem: string,
+    texto: string,
+    // Recusa que merece atenção (senha errada, fora da tailnet).
+    alerta: bool,
+}
+
+component ItemAcesso inherits HorizontalLayout {
+    in property <LinhaAcesso> a;
+    spacing: 10px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    Text { width: 86px; text: root.a.quando; font-size: Tema.fonte-pequena; color: Tema.texto-2; vertical-alignment: center; }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        Text { text: root.a.quem; font-size: Tema.fonte; color: Tema.texto; overflow: elide; }
+        Text { text: root.a.texto; font-size: Tema.fonte-pequena; color: root.a.alerta ? Tema.perigo : Tema.texto-2; wrap: word-wrap; }
+    }
+}
+
 // Um dispositivo confiável com o botão Revogar.
 component LinhaConfiavel inherits HorizontalLayout {
     in property <string> nome;
@@ -419,6 +441,7 @@ component SecaoConfiguracoes inherits ScrollView {
     in property <string> erro-senha;
     in-out property <bool> iniciar-com-sistema;
     in property <string> pasta-entrada;
+    in property <[LinhaAcesso]> acessos;
     in property <string> tailscale;
     in property <string> versao-app;
     in property <bool> bandeja;
@@ -438,6 +461,7 @@ component SecaoConfiguracoes inherits ScrollView {
     callback remover-senha();
     callback iniciar-com-sistema-mudou(bool);
     callback abrir-pasta-entrada();
+    callback abrir-registros();
     callback codec-mudou(int);
     callback taxa-mudou(int);
     callback abrir-link(string);
@@ -517,6 +541,29 @@ component SecaoConfiguracoes inherits ScrollView {
                     LinhaInfo {
                         rotulo: @tr("Ao fechar a janela");
                         valor: root.bandeja ? @tr("O TailDesk continua na bandeja do sistema. Para sair, use Sair no menu do ícone.") : @tr("O sistema não tem bandeja: fechar a janela encerra o TailDesk.");
+                    }
+                }
+            }
+
+            TituloGrupo { text: @tr("Histórico de acessos"); }
+            Cartao {
+                VerticalLayout {
+                    padding: 16px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    spacing: 2px;
+                    if root.acessos.length == 0: Text {
+                        text: @tr("Ninguém acessou este computador ainda.");
+                        font-size: Tema.fonte;
+                        color: Tema.texto;
+                    }
+                    for a in root.acessos: ItemAcesso { a: a; }
+                    Separador { }
+                    LinhaInfo {
+                        rotulo: @tr("Registro completo");
+                        valor: @tr("Cada acesso e cada arquivo trocado ficam gravados neste computador.");
+                        acao: @tr("Abrir pasta");
+                        acionar => { root.abrir-registros(); }
                     }
                 }
             }
@@ -630,6 +677,7 @@ export component JanelaPrincipal inherits Window {
     in property <string> erro-senha;
     in-out property <bool> iniciar-com-sistema;
     in property <string> pasta-entrada;
+    in property <[LinhaAcesso]> acessos;
     in property <[string]> codecs-config: [@tr("Automático"), "H.264", "HEVC", "AV1", "PyroWave"];
     in-out property <int> codec-config: 0;
     in property <[string]> taxas-config;
@@ -660,6 +708,7 @@ export component JanelaPrincipal inherits Window {
     callback remover-senha();
     callback iniciar-com-sistema-mudou(bool);
     callback abrir-pasta-entrada();
+    callback abrir-registros();
     callback codec-config-mudou(int);
     callback taxa-config-mudou(int);
     callback atualizar-auto-mudou(bool);
@@ -763,6 +812,8 @@ export component JanelaPrincipal inherits Window {
                 iniciar-com-sistema <=> root.iniciar-com-sistema;
                 iniciar-com-sistema-mudou(v) => { root.iniciar-com-sistema-mudou(v); }
                 pasta-entrada: root.pasta-entrada;
+                acessos: root.acessos;
+                abrir-registros => { root.abrir-registros(); }
                 codecs: root.codecs-config;
                 codec <=> root.codec-config;
                 taxas: root.taxas-config;

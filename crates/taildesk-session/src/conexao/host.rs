@@ -27,6 +27,9 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::clipboard::{ArquivosDaArea, DoSistema, Ponte, Sistema, sem_sistema};
 use super::{ESPERA_HELLO, FimLeitura, Leitor, StreamUni, classificar, controle, encerrar};
+use crate::acessos::{
+    Acesso, Evento, MOTIVO_FORA_DA_TAILNET, MOTIVO_QUEDA, RegistroAcessos, nome_motivo,
+};
 use crate::host::{ConsentAnswer, ConsentPrompt, HelloReply, HostSession, HostState};
 use crate::policy::HostSettings;
 
@@ -133,6 +136,20 @@ pub struct ConfigHost {
     pub inbox: Option<PathBuf>,
     pub raizes: Vec<SharedRoot>,
     pub auditoria: Option<AuditLog>,
+    /// Registro de acessos (quem entrou, como, quanto tempo). `None` = não registra.
+    pub acessos: Option<Arc<RegistroAcessos>>,
+}
+
+impl ConfigHost {
+    /// Acrescenta ao registro de acessos (uma linha curta: escrever direto custa menos que
+    /// mandar para outra thread, e mantém a ordem). Erro só vai para o log.
+    fn registrar(&self, a: Acesso) {
+        if let Some(r) = &self.acessos
+            && let Err(e) = r.registrar(&a)
+        {
+            eprintln!("taildesk: registro de acessos: {e}");
+        }
+    }
 }
 
 /// Identifica uma sessão nos eventos (único enquanto o app roda).
@@ -233,7 +250,11 @@ async fn atender<I: Identificador, M: Maquina>(
     };
 
     // Fora da tailnet (ou o `tailscaled` não soube dizer quem é): não atende.
+    let remoto = conn.remote_address();
     let Ok(peer) = identidade else {
+        config.registrar(
+            Acesso::novo(Evento::Recusado, None, remoto).com_motivo(MOTIVO_FORA_DA_TAILNET),
+        );
         encerrar(&conn, saida, tarefa, Some(fechar(CloseReason::NotAllowed))).await;
         return;
     };
@@ -263,6 +284,10 @@ async fn atender<I: Identificador, M: Maquina>(
     };
     let campos = match resposta {
         HelloReply::Close(c) => {
+            config.registrar(
+                Acesso::novo(Evento::Recusado, Some(&peer), remoto)
+                    .com_motivo(nome_motivo(c.reason())),
+            );
             let motivo = FimHost::Fechada(c.reason());
             encerrar(&conn, saida, tarefa, Some(Msg::Close(c))).await;
             let _ = eventos.send(fim(motivo)).await;
@@ -298,6 +323,10 @@ async fn atender<I: Identificador, M: Maquina>(
         match consentimento(&mut sessao, id, config, eventos, &saida, &mut leitor).await {
             Ok(()) => {}
             Err(motivo) => {
+                config.registrar(
+                    Acesso::novo(Evento::Recusado, Some(&peer), remoto)
+                        .com_motivo(motivo_de(motivo)),
+                );
                 encerrar(&conn, saida, tarefa, None).await;
                 let _ = eventos.send(fim(motivo)).await;
                 return;
@@ -305,6 +334,12 @@ async fn atender<I: Identificador, M: Maquina>(
         }
     }
 
+    let inicio = Instant::now();
+    config.registrar(
+        Acesso::novo(Evento::Entrou, Some(&peer), remoto)
+            .com_via(sessao.via())
+            .com_permissoes(sessao.permissions()),
+    );
     let motivo = ao_vivo(
         &conn,
         hello.decode_caps.clone(),
@@ -324,7 +359,20 @@ async fn atender<I: Identificador, M: Maquina>(
         _ => None,
     };
     encerrar(&conn, saida, tarefa, close).await;
+    config.registrar(
+        Acesso::novo(Evento::Saiu, Some(&peer), remoto)
+            .com_via(sessao.via())
+            .com_motivo(motivo_de(motivo))
+            .com_duracao(inicio.elapsed()),
+    );
     let _ = eventos.send(fim(motivo)).await;
+}
+
+fn motivo_de(m: FimHost) -> &'static str {
+    match m {
+        FimHost::Fechada(r) => nome_motivo(r),
+        FimHost::Queda => MOTIVO_QUEDA,
+    }
 }
 
 /// Espera o diálogo. `Ok` = liberado (o `ConsentResult` já saiu).

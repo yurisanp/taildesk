@@ -24,6 +24,7 @@ taildesk-media.workspace = true
 taildesk-render.workspace = true
 quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 slint = { version = "=1.18.1", features = ["unstable-winit-030", "unstable-wgpu-30", "renderer-femtovg-wgpu"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 pollster = "0.4"
 bytes = "1"
 ringbuf = "0.4"

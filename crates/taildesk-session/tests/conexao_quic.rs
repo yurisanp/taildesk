@@ -15,6 +15,7 @@ use taildesk_proto::control::{
     StartVideo,
 };
 use taildesk_proto::files::INBOX_ROOT;
+use taildesk_session::acessos::{Acesso, Evento, RegistroAcessos, Via};
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
 use taildesk_session::conexao::host::{
     CanalMidia, ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, FimHost, Identificador,
@@ -165,6 +166,8 @@ struct Host {
     eventos: mpsc::Receiver<EventoHost>,
     registro: Registro,
     settings: Arc<Mutex<HostSettings>>,
+    acessos: Arc<RegistroAcessos>,
+    _dir_acessos: TempDir,
 }
 
 impl Host {
@@ -175,6 +178,12 @@ impl Host {
         let registro = Registro::default();
         let settings = Arc::new(Mutex::new(HostSettings::default()));
         let (tx, eventos) = mpsc::channel(64);
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let dir_acessos = TempDir::new(&format!(
+            "acessos-{}",
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let acessos = Arc::new(RegistroAcessos::new(dir_acessos.0.join("acessos.jsonl")));
         tokio::spawn(servir(
             endpoint,
             Arc::new(Tailnet { conhecido }),
@@ -184,6 +193,7 @@ impl Host {
                 inbox,
                 raizes: Vec::new(),
                 auditoria: None,
+                acessos: Some(acessos.clone()),
             }),
             tx,
         ));
@@ -193,7 +203,26 @@ impl Host {
             eventos,
             registro,
             settings,
+            acessos,
+            _dir_acessos: dir_acessos,
         }
+    }
+
+    /// Espera o registro de acessos ter `n` linhas (a gravação é em segundo plano) e devolve
+    /// da mais antiga para a mais nova.
+    async fn acessos(&self, n: usize) -> Vec<Acesso> {
+        for _ in 0..200 {
+            let mut r = self.acessos.ultimos(100).unwrap();
+            if r.len() >= n {
+                r.reverse();
+                return r;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!(
+            "registro de acessos ficou em {:?}",
+            self.acessos.ultimos(100)
+        );
     }
 
     async fn proximo(&mut self) -> EventoHost {
@@ -322,6 +351,14 @@ async fn consentimento_teclado_mouse_e_fim_pelo_controlador() {
             "mídia solta".to_owned(),
         ]
     );
+    let a = host.acessos(2).await;
+    assert_eq!(a[0].evento, Evento::Entrou);
+    assert_eq!(a[0].via, Some(Via::Dialogo));
+    assert_eq!(a[0].maquina, "notebook");
+    assert_eq!(a[0].permissoes, ["ver", "controlar"]);
+    assert_eq!(a[1].evento, Evento::Saiu);
+    assert_eq!(a[1].motivo.as_deref(), Some("por_controlador"));
+    assert!(a[1].duracao_s.is_some());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -343,6 +380,9 @@ async fn recusa_no_host() {
         panic!("esperava o fim")
     };
     assert_eq!(motivo, FimHost::Fechada(CloseReason::ConsentDenied));
+    let a = host.acessos(1).await;
+    assert_eq!(a[0].evento, Evento::Recusado);
+    assert_eq!(a[0].motivo.as_deref(), Some("recusado_no_dialogo"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -354,6 +394,10 @@ async fn fora_da_tailnet_nao_e_atendido() {
         estado(&mut ev).await,
         ControllerState::Ended(EndReason::NotAllowed)
     );
+    let a = host.acessos(1).await;
+    assert_eq!(a[0].evento, Evento::Recusado);
+    assert_eq!(a[0].motivo.as_deref(), Some("fora_da_tailnet"));
+    assert!(a[0].maquina.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -432,6 +476,9 @@ async fn confiavel_entra_direto_e_host_encerra() {
             "soltar mouse"
         ]
     );
+    let a = host.acessos(2).await;
+    assert_eq!(a[0].via, Some(Via::Confiavel));
+    assert_eq!(a[1].motivo.as_deref(), Some("por_host"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

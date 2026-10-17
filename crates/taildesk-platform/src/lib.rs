@@ -77,6 +77,25 @@ pub unsafe fn tomar_token_de_ativacao() -> Option<String> {
     token
 }
 
+/// Onde ficam os registros de auditoria (acessos e arquivos): `%LOCALAPPDATA%\TailDesk\registros`
+/// no Windows, `$XDG_STATE_HOME/taildesk` (`~/.local/state/taildesk`) no Linux.
+pub fn pasta_registros() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    #[cfg(windows)]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(|d| PathBuf::from(d).join("TailDesk").join("registros"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+            .map(|d| d.join("taildesk"))
+    }
+}
+
 /// Pasta de downloads do usuário (`XDG_DOWNLOAD_DIR` no Linux, `%USERPROFILE%\Downloads` no
 /// Windows), onde fica a pasta de entrada `TailDesk`.
 pub fn pasta_downloads() -> Option<std::path::PathBuf> {
