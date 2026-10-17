@@ -112,6 +112,15 @@ export component JanelaFaixa inherits Window {
     always-on-top: true;
     background: Tema.superficie;
 
+    // Largura do botão do chat já com o contador: a janela não cresce sozinha no Wayland, e o
+    // "(1)" empurrava o "Encerrar" para fora dela.
+    medida-chat := Text {
+        visible: false;
+        text: @tr("💬 Chat ({})", 99);
+        font-size: Tema.fonte;
+        font-weight: 600;
+    }
+
     VerticalLayout {
         HorizontalLayout {
             padding: 8px;
@@ -140,6 +149,7 @@ export component JanelaFaixa inherits Window {
             }
             Botao {
                 texto: root.chat-nao-lidas > 0 ? @tr("💬 Chat ({})", root.chat-nao-lidas) : @tr("💬 Chat");
+                min-width: medida-chat.preferred-width + 24px;
                 discreto: !root.chat-aberto;
                 clicado => {
                     root.chat-aberto = !root.chat-aberto;
