@@ -493,24 +493,38 @@ async fn ao_vivo<M: Maquina>(
 ) -> FimHost {
     let permissoes = sessao.permissions();
     let peer = sessao.peer().clone();
-    let entrada = if permissoes.control {
-        maquina.entrada().await
-    } else {
-        None
+    // No Linux entrada, mídia e área esperam o diálogo do portal, que pode ficar na tela sem
+    // resposta: se o controlador desistir nesse meio tempo, a sessão acaba (e vai para o
+    // histórico) em vez de ficar presa até alguém responder.
+    let preparo = async {
+        let entrada = if permissoes.control {
+            maquina.entrada().await
+        } else {
+            None
+        };
+        let midia = maquina
+            .midia(CanalMidia {
+                conn: conn.clone(),
+                saida: saida.clone(),
+                decode_caps,
+            })
+            .await;
+        let area = if permissoes.clipboard {
+            maquina.area().await
+        } else {
+            None
+        };
+        (entrada, midia, area)
+    };
+    let (entrada, mut midia, area) = tokio::select! {
+        p = preparo => p,
+        _ = conn.closed() => return FimHost::Queda,
     };
     let mut teclado = Teclado {
         host: taildesk_keyboard::Host::new(keymap),
         entrada,
         buf: Vec::new(),
     };
-    let mut midia = maquina
-        .midia(CanalMidia {
-            conn: conn.clone(),
-            saida: saida.clone(),
-            decode_caps,
-        })
-        .await;
-
     // Arquivos: o serviço confere `files` e as raízes sozinho.
     let quem = peer
         .user_login
@@ -559,14 +573,10 @@ async fn ao_vivo<M: Maquina>(
         })
     };
 
-    let area = if permissoes.clipboard {
-        maquina.area().await.map(|(s, rx)| {
-            let arq: Arc<dyn ArquivosDaArea> = Arc::new(arquivos.clone());
-            Ponte::com_arquivos(s, rx, saida.clone(), true, Some(arq))
-        })
-    } else {
-        None
-    };
+    let area = area.map(|(s, rx)| {
+        let arq: Arc<dyn ArquivosDaArea> = Arc::new(arquivos.clone());
+        Ponte::com_arquivos(s, rx, saida.clone(), true, Some(arq))
+    });
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel(8);
     let _ = eventos

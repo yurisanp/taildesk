@@ -114,7 +114,8 @@ impl Drop for MidiaFalsa {
     }
 }
 
-struct MaquinaFalsa(Registro);
+/// O `bool` faz a entrada nunca ficar pronta, como o diálogo do portal sem resposta.
+struct MaquinaFalsa(Registro, bool);
 
 impl Maquina for MaquinaFalsa {
     type Entrada = EntradaFalsa;
@@ -131,6 +132,9 @@ impl Maquina for MaquinaFalsa {
     }
 
     async fn entrada(&self) -> Option<EntradaFalsa> {
+        if self.1 {
+            std::future::pending::<()>().await;
+        }
         Some(EntradaFalsa(self.0.clone()))
     }
 
@@ -177,6 +181,10 @@ struct Host {
 
 impl Host {
     fn iniciar(conhecido: bool, inbox: Option<PathBuf>) -> Host {
+        Host::iniciar_com(conhecido, inbox, false)
+    }
+
+    fn iniciar_com(conhecido: bool, inbox: Option<PathBuf>, entrada_presa: bool) -> Host {
         let id = Identity::generate().unwrap();
         let endpoint = server_endpoint((Ipv4Addr::LOCALHOST, 0).into(), &id).unwrap();
         let addr = endpoint.local_addr().unwrap();
@@ -192,7 +200,7 @@ impl Host {
         tokio::spawn(servir(
             endpoint,
             Arc::new(Tailnet { conhecido }),
-            Arc::new(MaquinaFalsa(registro.clone())),
+            Arc::new(MaquinaFalsa(registro.clone(), entrada_presa)),
             Arc::new(ConfigHost {
                 settings: settings.clone(),
                 inbox,
@@ -490,6 +498,36 @@ async fn confiavel_entra_direto_e_host_encerra() {
     let a = host.acessos(2).await;
     assert_eq!(a[0].via, Some(Via::Confiavel));
     assert_eq!(a[1].motivo.as_deref(), Some("por_host"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn controlador_desiste_com_o_portal_sem_resposta() {
+    let mut host = Host::iniciar_com(true, None, true);
+    {
+        let mut s = host.settings.lock().unwrap();
+        s.ask_always = false;
+        s.trusted.push(taildesk_session::TrustedDevice {
+            node_stable_id: "nNOTE".into(),
+            name: "notebook".into(),
+        });
+    }
+    let (sessao, mut ev) = conectar(&host, Pin::Sha256(host.fingerprint))
+        .await
+        .unwrap();
+    assert_eq!(estado(&mut ev).await, ControllerState::Connecting);
+    assert!(matches!(
+        estado(&mut ev).await,
+        ControllerState::Live { .. }
+    ));
+    // A entrada (o diálogo do portal) nunca responde; o controlador desiste.
+    sessao.encerrar().await;
+    loop {
+        if let EventoHost::Fim { .. } = host.proximo().await {
+            break;
+        }
+    }
+    let a = host.acessos(2).await;
+    assert_eq!(a[1].evento, Evento::Saiu);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
