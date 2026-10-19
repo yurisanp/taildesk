@@ -6,8 +6,8 @@
 //! `taildesk_platform::servico_windows`).
 //! Abrir o TailDesk de novo só mostra a janela da instância que já roda.
 //!
-//! Integração nativa com o desktop: no Wayland a janela é um xdg_toplevel com app_id `taildesk`
-//! (o mesmo nome do `.desktop`, de onde o compositor tira ícone e agrupamento), sem XWayland, e
+//! Integração nativa com o desktop: no Wayland a janela é um xdg_toplevel com app_id
+//! `io.github.yurisanp.TailDesk` (o mesmo nome do `.desktop`, de onde o compositor tira ícone e agrupamento), sem XWayland, e
 //! ganha o foco pelo token de xdg-activation que o lançador entrega. Como o Wayland não esconde
 //! janelas, fechar destrói a janela e abrir cria outra, com o token novo.
 
@@ -42,8 +42,9 @@ use modelo::Visao;
 /// De quanto em quanto tempo o app relê o estado do Tailscale.
 const INTERVALO: Duration = Duration::from_secs(3);
 
-/// Nome do `.desktop` (`packaging/linux/taildesk.desktop`): app_id no Wayland, WM_CLASS no X11.
-const APP_ID: &str = "taildesk";
+/// Nome do `.desktop` (`packaging/linux/io.github.yurisanp.TailDesk.desktop`), do ícone e do
+/// MetaInfo: app_id no Wayland, WM_CLASS no X11 e id do Flatpak, que o Flathub exige iguais.
+const APP_ID: &str = "io.github.yurisanp.TailDesk";
 
 /// Estado que vive na thread da interface. A janela só existe enquanto está aberta.
 struct App {

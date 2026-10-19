@@ -49,8 +49,8 @@ extended-description = "Acesso remoto (desktop remoto e troca de arquivos) pela 
 assets = [
   ["target/release/taildesk", "usr/bin/", "755"],
   ["target/release/taildesk-cli", "usr/bin/", "755"],
-  ["../../packaging/linux/taildesk.desktop", "usr/share/applications/", "644"],
-  ["../../packaging/linux/taildesk.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+  ["../../packaging/linux/io.github.yurisanp.TailDesk.desktop", "usr/share/applications/", "644"],
+  ["../../packaging/linux/io.github.yurisanp.TailDesk.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
   ["../../packaging/linux/io.github.yurisanp.TailDesk.metainfo.xml", "usr/share/metainfo/", "644"],
 ]
 
@@ -60,8 +60,8 @@ summary = "Acesso remoto pela tailnet do Tailscale"
 assets = [
   { source = "target/release/taildesk", dest = "/usr/bin/taildesk", mode = "755" },
   { source = "target/release/taildesk-cli", dest = "/usr/bin/taildesk-cli", mode = "755" },
-  { source = "../../packaging/linux/taildesk.desktop", dest = "/usr/share/applications/taildesk.desktop", mode = "644" },
-  { source = "../../packaging/linux/taildesk.svg", dest = "/usr/share/icons/hicolor/scalable/apps/taildesk.svg", mode = "644" },
+  { source = "../../packaging/linux/io.github.yurisanp.TailDesk.desktop", dest = "/usr/share/applications/io.github.yurisanp.TailDesk.desktop", mode = "644" },
+  { source = "../../packaging/linux/io.github.yurisanp.TailDesk.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.yurisanp.TailDesk.svg", mode = "644" },
   { source = "../../packaging/linux/io.github.yurisanp.TailDesk.metainfo.xml", dest = "/usr/share/metainfo/io.github.yurisanp.TailDesk.metainfo.xml", mode = "644" },
   { source = "../../LICENSE-MIT", dest = "/usr/share/licenses/taildesk/LICENSE-MIT", mode = "644", doc = true },
   { source = "../../LICENSE-APACHE", dest = "/usr/share/licenses/taildesk/LICENSE-APACHE", mode = "644", doc = true },

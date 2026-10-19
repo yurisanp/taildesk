@@ -1,2 +1,6 @@
 /target
 *.part
+# Gerado pelo packaging/flatpak/gerar-fontes.sh (muda a cada Cargo.lock).
+/packaging/flatpak/cargo-sources.json
+/.flatpak-builder
+/build-flatpak

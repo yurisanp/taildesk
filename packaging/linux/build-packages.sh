@@ -25,8 +25,8 @@ done
 tree="$work/taildesk-$version-linux-$arch"
 install -Dm755 "$rel/taildesk"     "$tree/usr/bin/taildesk"
 install -Dm755 "$rel/taildesk-cli" "$tree/usr/bin/taildesk-cli"
-install -Dm644 "$here/taildesk.desktop" "$tree/usr/share/applications/taildesk.desktop"
-install -Dm644 "$here/taildesk.svg"     "$tree/usr/share/icons/hicolor/scalable/apps/taildesk.svg"
+install -Dm644 "$here/io.github.yurisanp.TailDesk.desktop" "$tree/usr/share/applications/io.github.yurisanp.TailDesk.desktop"
+install -Dm644 "$here/io.github.yurisanp.TailDesk.svg"     "$tree/usr/share/icons/hicolor/scalable/apps/io.github.yurisanp.TailDesk.svg"
 install -Dm644 "$here/io.github.yurisanp.TailDesk.metainfo.xml" "$tree/usr/share/metainfo/io.github.yurisanp.TailDesk.metainfo.xml"
 install -Dm644 "$root/LICENSE-MIT"      "$tree/usr/share/licenses/taildesk/LICENSE-MIT"
 install -Dm644 "$root/LICENSE-APACHE"   "$tree/usr/share/licenses/taildesk/LICENSE-APACHE"
@@ -45,9 +45,9 @@ tar -C "$work" -czf "$out/taildesk-$version-linux-$arch.tar.gz" "$(basename "$tr
 # 2. AppImage: AppDir = árvore + AppRun + .desktop e ícone na raiz
 appdir="$work/TailDesk.AppDir"
 cp -a "$tree" "$appdir"
-cp "$here/taildesk.desktop" "$appdir/taildesk.desktop"
-cp "$here/taildesk.svg" "$appdir/taildesk.svg"
-ln -s taildesk.svg "$appdir/.DirIcon"
+cp "$here/io.github.yurisanp.TailDesk.desktop" "$appdir/io.github.yurisanp.TailDesk.desktop"
+cp "$here/io.github.yurisanp.TailDesk.svg" "$appdir/io.github.yurisanp.TailDesk.svg"
+ln -s io.github.yurisanp.TailDesk.svg "$appdir/.DirIcon"
 cat > "$appdir/AppRun" <<'APPRUN'
 #!/bin/sh
 # `TailDesk.AppImage cli ...` roda a CLI; sem argumento "cli" abre o app.

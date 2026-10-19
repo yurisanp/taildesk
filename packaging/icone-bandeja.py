@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gera crates/taildesk-ui/ui/icones/taildesk-64.png (ícone da bandeja e da janela) a partir do
-desenho de packaging/linux/taildesk.svg, refeito aqui com Pillow para não depender de rsvg. A
+desenho de packaging/linux/io.github.yurisanp.TailDesk.svg, refeito aqui com Pillow para não depender de rsvg. A
 bandeja precisa de pixels: o Slint não converte SVG para o ícone da bandeja.
 
     python3 packaging/icone-bandeja.py

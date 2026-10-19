@@ -48,22 +48,22 @@ cargo build --release --locked -p taildesk -p taildesk-cli
 %install
 install -Dm0755 target/release/taildesk     %{buildroot}%{_bindir}/taildesk
 install -Dm0755 target/release/taildesk-cli  %{buildroot}%{_bindir}/taildesk-cli
-install -Dm0644 packaging/linux/taildesk.desktop %{buildroot}%{_datadir}/applications/taildesk.desktop
-install -Dm0644 packaging/linux/taildesk.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/taildesk.svg
+install -Dm0644 packaging/linux/io.github.yurisanp.TailDesk.desktop %{buildroot}%{_datadir}/applications/io.github.yurisanp.TailDesk.desktop
+install -Dm0644 packaging/linux/io.github.yurisanp.TailDesk.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.yurisanp.TailDesk.svg
 install -Dm0644 packaging/linux/io.github.yurisanp.TailDesk.metainfo.xml %{buildroot}%{_metainfodir}/io.github.yurisanp.TailDesk.metainfo.xml
 install -Dm0644 LICENSE-MIT    %{buildroot}%{_datadir}/licenses/%{name}/LICENSE-MIT
 install -Dm0644 LICENSE-APACHE %{buildroot}%{_datadir}/licenses/%{name}/LICENSE-APACHE
 
 %check
-desktop-file-validate %{buildroot}%{_datadir}/applications/taildesk.desktop
+desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.yurisanp.TailDesk.desktop
 appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.yurisanp.TailDesk.metainfo.xml
 
 %files
 %license LICENSE-MIT LICENSE-APACHE
 %{_bindir}/taildesk
 %{_bindir}/taildesk-cli
-%{_datadir}/applications/taildesk.desktop
-%{_datadir}/icons/hicolor/scalable/apps/taildesk.svg
+%{_datadir}/applications/io.github.yurisanp.TailDesk.desktop
+%{_datadir}/icons/hicolor/scalable/apps/io.github.yurisanp.TailDesk.svg
 %{_metainfodir}/io.github.yurisanp.TailDesk.metainfo.xml
 
 %changelog
