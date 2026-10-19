@@ -138,6 +138,7 @@ Trait em `taildesk-platform` (já esboçada em `06` §3): `displays()` + `start(
 
 - **Um pipeline por monitor** (captura → encoder → pacer), como `06` §4 já indica ("encoder pool por display"). Um pacer único divide a banda entre os streams.
 - **Prioridades**: `FOCUSED` = qualidade e FPS cheios; `VISIBLE` = teto de 5–15 fps e ~25% do bitrate, sobe quando há dano grande (ex.: vídeo tocando); aba escondida = `StopVideo` (zero custo). O controlador manda `SetPriority` ao mudar o foco de janela.
+  - Implementado: o host corta o `VISIBLE` para no máximo 15 fps e 30 % do teto de taxa, só enquanto outro monitor `FOCUSED` estiver saindo (um só `VISIBLE` não perde nada); a troca vale em até 100 ms (laço de taxa). O controlador manda `SetPriority` quando a janela da sessão ou a de um destacado ganha foco, e depois de trocar, destacar ou recolocar.
 - Divisão de banda sugerida: 70% para o stream com foco, 30% dividido entre os visíveis, ajustada pelo laço de QoS de `07` §5.
 - **Limite padrão de streams simultâneos**: 2 com openh264 (1440p em software já é pesado, ver riscos de `10` §7); até 4 com encoder HW, conforme o probe. Acima disso a UI avisa "Mais monitores podem deixar a sessão lenta".
 - Resolução de cada stream independe das outras (monitor 4K e 1080p na mesma sessão). Monitor HiDPI com openh264: oferecer escala para baixo no host (ex. 4K → 1440p) por padrão em `VISIBLE`.

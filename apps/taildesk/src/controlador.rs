@@ -614,6 +614,8 @@ impl SessaoUi {
     /// Faixa de abas e janelas dos destacados conforme o estado dos monitores.
     fn abas(&mut self) {
         self.sincronizar_janelas();
+        // Monitores mudaram: acerta a prioridade com a janela que tem o foco.
+        self.focou(self.monitores.janela_foco());
         let abas: Vec<AbaMonitor> = if self.monitores.mostrar_abas() {
             self.monitores
                 .abas()
@@ -1043,6 +1045,15 @@ impl SessaoUi {
         }
     }
 
+    /// A janela da sessão (`onde = None`) ou a de um destacado ganhou o foco: o monitor dela
+    /// passa a `Focused` e os outros a `Visible` (o host corta FPS e taxa deles).
+    fn focou(&mut self, onde: Option<u32>) {
+        let mut out = Vec::new();
+        if self.monitores.focar(onde, &mut out) {
+            self.enviar_todas(out);
+        }
+    }
+
     fn foco_perdido(&mut self) {
         self.mods_presos.clear();
         if self.controla() {
@@ -1155,6 +1166,10 @@ fn teclado_da_janela(
         }
         winit::event::WindowEvent::Focused(false) => {
             na_sessao_ja(id, SessaoUi::foco_perdido);
+            EventResult::Propagate
+        }
+        winit::event::WindowEvent::Focused(true) => {
+            na_sessao_ja(id, |s| s.focou(onde));
             EventResult::Propagate
         }
         _ => EventResult::Propagate,
@@ -1349,7 +1364,7 @@ impl Controlador {
             .window()
             .on_winit_window_event(move |_, ev| match ev {
                 winit::event::WindowEvent::KeyboardInput { .. }
-                | winit::event::WindowEvent::Focused(false) => teclado_da_janela(id, None, ev),
+                | winit::event::WindowEvent::Focused(_) => teclado_da_janela(id, None, ev),
                 // Arrastar arquivos do sistema (Windows e X11; o Wayland vem por `ligar_soltar`).
                 winit::event::WindowEvent::HoveredFile(_) => {
                     na_sessao_ja(id, |s| s.painel.arrastando(&s.janela, true));

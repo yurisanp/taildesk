@@ -224,20 +224,23 @@ impl Escada {
         self.formato(captura) != self.formato_em(self.modo.topo(), captura)
     }
 
-    /// Muda a preferência ou o teto de FPS; volta ao topo da escada nova (a rede, se apertada,
-    /// desce de novo em 2 s). Devolve `true` se o degrau mudou.
+    /// Muda a preferência ou o teto de FPS. Escada nova volta ao topo (a rede, se apertada,
+    /// desce de novo em 2 s); só o teto de FPS mudando (prioridade do monitor), o degrau da rede
+    /// fica. Devolve `true` se o degrau mudou.
     pub fn preferir(&mut self, modo: Modo, fps_max: f32, agora: Instant) -> bool {
         let fps_max = fps_max.max(1.0);
         if modo == self.modo && fps_max == self.fps_max {
             return false;
         }
         let antes = self.degrau();
-        self.modo = modo;
+        if modo != self.modo {
+            self.modo = modo;
+            self.indice = modo.topo();
+            self.baixo_desde = None;
+            self.livre_desde = None;
+            self.ultima_troca = Some(agora);
+        }
         self.fps_max = fps_max;
-        self.indice = modo.topo();
-        self.baixo_desde = None;
-        self.livre_desde = None;
-        self.ultima_troca = Some(agora);
         self.degrau() != antes
     }
 
@@ -546,5 +549,18 @@ mod tests {
         assert!(!e.preferir(Modo::Fluidez, 60.0, t0 + Duration::from_secs(4)));
         assert!(e.preferir(Modo::Fluidez, 24.0, t0 + Duration::from_secs(5)));
         assert_eq!(e.formato(FHD).fps, 24.0);
+        // Só o FPS (monitor sem foco): o degrau da rede fica.
+        rodar(
+            &mut e,
+            t0 + Duration::from_secs(5),
+            Duration::from_millis(2_100),
+            FHD,
+            |_| (300_000, false),
+        );
+        let altura = e.formato(FHD).altura;
+        assert!(altura < 1080);
+        assert!(e.preferir(Modo::Fluidez, 15.0, t0 + Duration::from_secs(8)));
+        assert_eq!(e.formato(FHD).altura, altura);
+        assert!(e.formato(FHD).fps <= 15.0);
     }
 }

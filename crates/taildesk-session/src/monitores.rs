@@ -7,10 +7,15 @@
 //! stream, ao mesmo tempo que o da janela da sessão; destacar o monitor que a sessão mostra não
 //! reinicia o vídeo, só muda a janela. Clicar na aba de um destacado o traz de volta.
 //! Monitores fora da seleção do portal (Wayland) viram aba "não liberado".
+//!
+//! Prioridade (`13-multimonitor.md` §2.3): o monitor da janela com foco é `FOCUSED` e os outros
+//! que estão saindo são `VISIBLE` (o host corta FPS e taxa deles); ver [`UmPorVez::focar`].
 
+use std::collections::HashMap;
 use taildesk_keyboard::{Hid, Mods};
+
 use taildesk_proto::control::{
-    CursorPos, DisplayInfo, Msg, Priority, StartVideo, StopVideo, VideoStopped,
+    CursorPos, DisplayInfo, Msg, Priority, SetPriority, StartVideo, StopVideo, VideoStopped,
 };
 
 /// Uma aba da faixa de monitores.
@@ -68,6 +73,10 @@ pub struct UmPorVez {
     destacados: Vec<u32>,
     /// "Seguir o mouse" (desligado por padrão).
     pub seguir_mouse: bool,
+    /// Janela com foco: a da sessão (`None`) ou a de um destacado.
+    janela_foco: Option<u32>,
+    /// Última prioridade pedida ao host para cada monitor saindo.
+    prioridades: HashMap<u32, Priority>,
 }
 
 impl UmPorVez {
@@ -161,6 +170,7 @@ impl UmPorVez {
 
     fn iniciar(&mut self, id: u32, out: &mut Vec<Msg>) {
         self.ativo = Some(id);
+        self.prioridades.insert(id, Priority::Focused);
         out.push(Msg::StartVideo(StartVideo {
             display_id: id,
             wanted: None,
@@ -217,12 +227,53 @@ impl UmPorVez {
         true
     }
 
-    fn iniciar_destacado(&self, id: u32, out: &mut Vec<Msg>) {
+    fn iniciar_destacado(&mut self, id: u32, out: &mut Vec<Msg>) {
+        self.prioridades.insert(id, Priority::Visible);
         out.push(Msg::StartVideo(StartVideo {
             display_id: id,
             wanted: None,
             priority: Priority::Visible as i32,
         }));
+    }
+
+    /// A janela da sessão (`janela = None`) ou a do destacado `Some(id)` ganhou o foco. Também
+    /// serve para acertar as prioridades depois de trocar, destacar ou recolocar um monitor
+    /// (chamar com a janela que tem o foco). Manda `SetPriority` só para o que mudou: o monitor
+    /// da janela com foco fica `FOCUSED` e os outros que estão saindo, `VISIBLE`. Se essa janela
+    /// não mostra monitor nenhum, todos ficam `FOCUSED`. `false` se nada mudou.
+    pub fn focar(&mut self, janela: Option<u32>, out: &mut Vec<Msg>) -> bool {
+        self.janela_foco = janela.filter(|&d| self.destacado(d));
+        let focado = match self.janela_foco {
+            Some(d) => Some(d),
+            None => self.ativo,
+        };
+        let saindo: Vec<u32> = self
+            .ativo
+            .into_iter()
+            .chain(self.destacados.iter().copied())
+            .collect();
+        self.prioridades.retain(|d, _| saindo.contains(d));
+        let mut mudou = false;
+        for d in saindo {
+            let p = if focado.is_none_or(|f| f == d) {
+                Priority::Focused
+            } else {
+                Priority::Visible
+            };
+            if self.prioridades.insert(d, p) != Some(p) {
+                out.push(Msg::SetPriority(SetPriority {
+                    display_id: d,
+                    priority: p as i32,
+                }));
+                mudou = true;
+            }
+        }
+        mudou
+    }
+
+    /// Janela com foco agora (para [`Self::focar`] depois de mudar os monitores).
+    pub fn janela_foco(&self) -> Option<u32> {
+        self.janela_foco
     }
 
     /// A janela do destacado `id` fechou: volta a ser aba. Se a sessão estava sem monitor, ele
@@ -507,6 +558,72 @@ mod tests {
             wanted: None,
             priority: Priority::Visible as i32,
         })
+    }
+
+    fn prioridade(id: u32, p: Priority) -> Msg {
+        Msg::SetPriority(SetPriority {
+            display_id: id,
+            priority: p as i32,
+        })
+    }
+
+    #[test]
+    fn foco_da_janela_decide_a_prioridade() {
+        let (mut u, _) = tres();
+        let mut out = Vec::new();
+        // Um monitor só: nada a mudar.
+        assert!(!u.focar(None, &mut out));
+        // Destacar o 5: começa VISIBLE; a sessão (7) continua FOCUSED.
+        u.destacar(5, &mut out);
+        out.clear();
+        assert!(!u.focar(None, &mut out));
+        // Foco na janela do 5: inverte.
+        assert!(u.focar(Some(5), &mut out));
+        assert_eq!(
+            out,
+            [
+                prioridade(7, Priority::Visible),
+                prioridade(5, Priority::Focused)
+            ]
+        );
+        out.clear();
+        assert!(!u.focar(Some(5), &mut out));
+        // Volta para a sessão.
+        assert!(u.focar(None, &mut out));
+        assert_eq!(
+            out,
+            [
+                prioridade(7, Priority::Focused),
+                prioridade(5, Priority::Visible)
+            ]
+        );
+        // Janela que não é de destacado conta como a da sessão.
+        out.clear();
+        assert!(!u.focar(Some(99), &mut out));
+        assert_eq!(u.janela_foco(), None);
+    }
+
+    #[test]
+    fn prioridade_depois_de_trocar_e_recolocar() {
+        let (mut u, _) = tres();
+        let mut out = Vec::new();
+        u.destacar(5, &mut out);
+        u.focar(Some(5), &mut out);
+        // A janela do 5 fecha com foco nela: o 5 para e a sessão (7) volta a FOCUSED.
+        out.clear();
+        u.recolocar(5, &mut out);
+        assert_eq!(out, [stop(5)]);
+        out.clear();
+        assert!(u.focar(u.janela_foco(), &mut out));
+        assert_eq!(out, [prioridade(7, Priority::Focused)]);
+        // Destacar o mostrado deixa a sessão sem monitor: com o foco nela, todos FOCUSED.
+        let (mut u, _) = tres();
+        u.destacar(7, &mut out);
+        u.focar(Some(7), &mut out);
+        u.destacar(5, &mut out);
+        out.clear();
+        u.focar(None, &mut out);
+        assert_eq!(out, [prioridade(5, Priority::Focused)]);
     }
 
     #[test]
