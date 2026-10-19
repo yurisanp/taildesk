@@ -191,8 +191,12 @@ jobs:
 
   # Atualiza o pacote taildesk-bin no AUR. Só com o secret AUR_SSH_KEY (chave SSH do mantenedor);
   # pre-releases (tag com "-") não vão para o AUR, que segue a versão estável.
+  # Vale para a tag empurrada e para o "Run workflow" com o campo `tag`; a versão vem do job
+  # `version`, que já resolve a tag nos dois casos.
   aur:
-    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    if: >-
+      (github.ref_type == 'tag' && !contains(github.ref_name, '-')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.tag != '' && !contains(inputs.tag, '-'))
     needs: [version, publish]
     runs-on: ubuntu-latest
     container: archlinux:latest
