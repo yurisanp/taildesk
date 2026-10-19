@@ -157,12 +157,15 @@ pub struct ConfigHost {
     pub auditoria: Option<AuditLog>,
     /// Registro de acessos (quem entrou, como, quanto tempo). `None` = não registra.
     pub acessos: Option<Arc<RegistroAcessos>>,
+    /// Host do agente do serviço do Windows na tela de entrada: cada acesso fica marcado.
+    pub tela_de_entrada: bool,
 }
 
 impl ConfigHost {
     /// Acrescenta ao registro de acessos (uma linha curta: escrever direto custa menos que
     /// mandar para outra thread, e mantém a ordem). Erro só vai para o log.
-    fn registrar(&self, a: Acesso) {
+    fn registrar(&self, mut a: Acesso) {
+        a.tela_de_entrada |= self.tela_de_entrada;
         if let Some(r) = &self.acessos
             && let Err(e) = r.registrar(&a)
         {

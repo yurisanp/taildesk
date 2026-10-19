@@ -242,6 +242,15 @@ fn escrever(c: &Config) -> String {
     s
 }
 
+/// Lê um arquivo de configuração em outro lugar (o agente do serviço do Windows lê o do último
+/// usuário); sem arquivo ou ilegível, o padrão.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn ler_de(caminho: &std::path::Path) -> Config {
+    std::fs::read_to_string(caminho)
+        .map(|t| analisar(&t))
+        .unwrap_or_default()
+}
+
 /// Lê o arquivo; sem arquivo (primeira vez) ou ilegível, o padrão.
 pub fn ler() -> Config {
     caminho()

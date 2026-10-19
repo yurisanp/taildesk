@@ -207,6 +207,7 @@ impl Host {
                 raizes: Vec::new(),
                 auditoria: None,
                 acessos: Some(acessos.clone()),
+                tela_de_entrada: false,
             }),
             tx,
         ));

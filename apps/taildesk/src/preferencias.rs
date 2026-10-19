@@ -264,6 +264,17 @@ pub fn ligar(j: &JanelaPrincipal) {
             } else {
                 inicio::desligar()
             };
+            // O agente da tela de entrada (Windows) usa a identidade deste host.
+            #[cfg(windows)]
+            if r.is_ok() {
+                if ligar {
+                    if let Err(e) = crate::host::exportar_para_agente() {
+                        eprintln!("taildesk: identidade para o agente da tela de entrada: {e}");
+                    }
+                } else {
+                    crate::host::apagar_exportacao_do_agente();
+                }
+            }
             let agora = inicio::ligado();
             let _ = fraca.upgrade_in_event_loop(move |j| {
                 j.set_iniciar_com_sistema(agora);

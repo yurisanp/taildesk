@@ -54,21 +54,37 @@ fn identidade() -> Identity {
     id
 }
 
+/// Abre a porta do TailDesk no IP da tailnet, esperando o Tailscale (e a porta ficar livre:
+/// o agente do serviço do Windows pode estar saindo).
+async fn abrir_porta(overlay: &SystemOverlay, id: &Identity) -> quinn::Endpoint {
+    loop {
+        if let Ok(ip) = overlay.local_addr().await {
+            match server_endpoint(SocketAddr::new(ip, PORTA), id) {
+                Ok(e) => return e,
+                Err(e) => eprintln!("taildesk: não foi possível abrir a porta {PORTA}: {e}"),
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+}
+
 /// Sobe o host quando o Tailscale tiver IP e atende até o app fechar.
 pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
     let id = tokio::task::spawn_blocking(identidade)
         .await
         .expect("identidade");
-    let overlay = Arc::new(SystemOverlay::new(LocalApi::default()));
-    let endpoint = loop {
-        if let Ok(ip) = overlay.local_addr().await {
-            match server_endpoint(SocketAddr::new(ip, PORTA), &id) {
-                Ok(e) => break e,
-                Err(e) => eprintln!("taildesk: não foi possível abrir a porta {PORTA}: {e}"),
+    #[cfg(windows)]
+    if taildesk_platform::servico_windows::instalado() {
+        // O agente da tela de entrada usa esta mesma identidade (o controlador fixa o
+        // fingerprint): fica num arquivo que só este usuário, SYSTEM e administradores leem.
+        tokio::task::spawn_blocking(|| {
+            if let Err(e) = exportar_para_agente() {
+                eprintln!("taildesk: identidade para o agente da tela de entrada: {e}");
             }
-        }
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    };
+        });
+    }
+    let overlay = Arc::new(SystemOverlay::new(LocalApi::default()));
+    let endpoint = abrir_porta(&overlay, &id).await;
     crate::midia_host::preparar_encode_caps().await;
     let inbox = crate::preferencias::pasta_entrada();
     let config = Arc::new(ConfigHost {
@@ -77,6 +93,7 @@ pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
         raizes: Vec::new(),
         auditoria: crate::historico::auditoria_arquivos(),
         acessos: crate::historico::registro(),
+        tela_de_entrada: false,
     });
     let (tx, mut rx) = mpsc::channel(64);
     tokio::spawn(servir(
@@ -92,10 +109,117 @@ pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Agente da tela de entrada (Windows)
+
+/// Onde o app do usuário deixa a identidade para o agente: `<LOCALAPPDATA>\TailDesk`.
+#[cfg(windows)]
+fn arquivo_identidade_agente(local_appdata: &std::path::Path) -> std::path::PathBuf {
+    local_appdata.join("TailDesk").join("identidade-agente")
+}
+
+/// Copia a identidade do cofre para o arquivo que o agente lê. O arquivo herda a permissão de
+/// `%LOCALAPPDATA%` (este usuário, SYSTEM e administradores).
+#[cfg(windows)]
+pub fn exportar_para_agente() -> std::io::Result<()> {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| std::io::Error::other("sem LOCALAPPDATA"))?;
+    let segredo = taildesk_platform::segredos::ler(SEGREDO_IDENTIDADE)
+        .map_err(std::io::Error::other)?
+        .ok_or_else(|| std::io::Error::other("identidade ainda não está no cofre"))?;
+    let destino = arquivo_identidade_agente(&base);
+    if std::fs::read(&destino).is_ok_and(|atual| atual == segredo) {
+        return Ok(());
+    }
+    if let Some(d) = destino.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let tmp = destino.with_extension("tmp");
+    std::fs::write(&tmp, &segredo)?;
+    std::fs::rename(tmp, destino)
+}
+
+/// "Iniciar com o sistema" desligado: o agente não roda mais, a cópia sai.
+#[cfg(windows)]
+pub fn apagar_exportacao_do_agente() {
+    if let Some(base) = std::env::var_os("LOCALAPPDATA") {
+        let _ = std::fs::remove_file(arquivo_identidade_agente(std::path::Path::new(&base)));
+    }
+}
+
+/// `taildesk --agente <perfil>`: o host da tela de entrada, como SYSTEM na sessão do console,
+/// sem interface. Usa a identidade, a senha de acesso e os dispositivos lembrados do usuário de
+/// `<perfil>` e grava os acessos no histórico dele, marcados como da tela de entrada. Sem
+/// ninguém para responder, todo pedido que precisaria do diálogo é recusado: só entra quem tem
+/// a senha ou é um dispositivo lembrado. Arquivos não são recebidos.
+#[cfg(windows)]
+pub fn rodar_agente(perfil: std::path::PathBuf) -> std::io::Result<()> {
+    let local = perfil.join("AppData").join("Local");
+    let segredo = std::fs::read(arquivo_identidade_agente(&local))?;
+    let id = Identity::from_secret(&segredo)
+        .ok_or_else(|| std::io::Error::other("identidade do agente ilegível"))?;
+    let settings = config::ler_de(
+        &perfil
+            .join("AppData")
+            .join("Roaming")
+            .join("TailDesk")
+            .join("config"),
+    )
+    .host;
+    let acessos = Arc::new(taildesk_session::acessos::RegistroAcessos::new(
+        local
+            .join("TailDesk")
+            .join("registros")
+            .join("acessos.jsonl"),
+    ));
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async move {
+            crate::midia_host::preparar_encode_caps().await;
+            let overlay = Arc::new(SystemOverlay::new(LocalApi::default()));
+            let endpoint = abrir_porta(&overlay, &id).await;
+            let config = Arc::new(ConfigHost {
+                settings: Arc::new(Mutex::new(settings)),
+                inbox: None,
+                raizes: Vec::new(),
+                auditoria: None,
+                acessos: Some(acessos),
+                tela_de_entrada: true,
+            });
+            let (tx, mut rx) = mpsc::channel(64);
+            tokio::spawn(servir(
+                endpoint,
+                overlay,
+                Arc::new(MaquinaApp { agente: true }),
+                config,
+                tx,
+            ));
+            while let Some(ev) = rx.recv().await {
+                match ev {
+                    // Ninguém na tela para responder: largar o canal recusa.
+                    EventoHost::Pedido { resposta, .. } => drop(resposta),
+                    EventoHost::AoVivo { peer, .. } => {
+                        eprintln!(
+                            "taildesk: agente: sessão de {} pela tela de entrada",
+                            peer.hostname
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------
 // Mouse, teclado e vídeo
 
 #[derive(Debug, Default)]
 struct MaquinaApp {
+    /// Agente do serviço na tela de entrada (Windows, SYSTEM): atende Ctrl+Alt+Del como sistema.
+    #[cfg(windows)]
+    agente: bool,
     /// Uma sessão do portal (RemoteDesktop + ScreenCast) para o app todo: input e captura saem
     /// dela, e o diálogo do compositor aparece uma vez só.
     #[cfg(target_os = "linux")]
@@ -185,11 +309,12 @@ fn monitores_do_portal(
 }
 
 /// O host atende Ctrl+Alt+Del de verdade: só no Windows com o serviço do TailDesk instalado
-/// (`SoftwareSASGeneration` ligado por ele), que é o cenário de acesso sem ninguém na frente.
-fn atende_atencao_segura() -> bool {
+/// (`SoftwareSASGeneration` ligado por ele) ou no agente do serviço (SYSTEM), que é o cenário de
+/// acesso sem ninguém na frente.
+fn atende_atencao_segura(_m: &MaquinaApp) -> bool {
     #[cfg(windows)]
     {
-        taildesk_platform::servico_windows::instalado()
+        _m.agente || taildesk_platform::servico_windows::instalado()
     }
     #[cfg(not(windows))]
     {
@@ -337,7 +462,7 @@ impl Maquina for MaquinaApp {
             },
             encode_caps: crate::midia_host::encode_caps(),
             keymap,
-            atencao_segura: atende_atencao_segura(),
+            atencao_segura: atende_atencao_segura(self),
         }
     }
 
@@ -355,6 +480,7 @@ impl Maquina for MaquinaApp {
             monitores,
             listado: std::time::Instant::now(),
             ultimo: None,
+            agente: self.agente,
         })
     }
 
@@ -477,6 +603,8 @@ pub struct EntradaApp {
     listado: std::time::Instant,
     /// Monitor do último movimento absoluto (botões e rolagem não dizem o monitor).
     ultimo: Option<taildesk_platform::mouse::sendinput::Retangulo>,
+    /// Rodando como o agente do serviço (SYSTEM).
+    agente: bool,
 }
 
 #[cfg(windows)]
@@ -547,8 +675,9 @@ impl Entrada for EntradaApp {
     }
 
     async fn atencao_segura(&mut self) {
-        // O serviço do TailDesk roda como SYSTEM; o app lançado por ele, como o usuário.
-        taildesk_platform::mesa_windows::ctrl_alt_del(false);
+        // O agente roda como SYSTEM; o app lançado pelo serviço, como o usuário (vale pela
+        // política `SoftwareSASGeneration` que o serviço liga).
+        taildesk_platform::mesa_windows::ctrl_alt_del(self.agente);
     }
 }
 

@@ -72,6 +72,9 @@ pub struct Acesso {
     pub motivo: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duracao_s: Option<u64>,
+    /// Atendido pelo agente do serviço do Windows na tela de entrada (ninguém logado).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tela_de_entrada: bool,
 }
 
 fn agora_ms() -> i64 {
@@ -131,6 +134,7 @@ impl Acesso {
             permissoes: Vec::new(),
             motivo: None,
             duracao_s: None,
+            tela_de_entrada: false,
         }
     }
 
@@ -287,7 +291,15 @@ mod tests {
         assert!(s.contains("\"via\":\"senha\""));
         assert!(s.contains("[\"ver\",\"controlar\",\"area\"]"));
         assert!(!s.contains("motivo"));
+        assert!(!s.contains("tela_de_entrada"));
         assert_eq!(serde_json::from_str::<Acesso>(&s).unwrap(), a);
+        let login = Acesso {
+            tela_de_entrada: true,
+            ..a.clone()
+        };
+        let s = serde_json::to_string(&login).unwrap();
+        assert!(s.contains("\"tela_de_entrada\":true"));
+        assert_eq!(serde_json::from_str::<Acesso>(&s).unwrap(), login);
         assert_eq!(a.quem(), "yuri@github (notebook)");
         assert_eq!(a.endereco, "100.64.0.7");
         let fora = Acesso::novo(Evento::Recusado, None, end()).com_motivo(MOTIVO_FORA_DA_TAILNET);

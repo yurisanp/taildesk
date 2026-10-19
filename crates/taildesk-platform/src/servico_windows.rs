@@ -7,6 +7,13 @@
 //! alguém entra (`WTS_SESSION_LOGON`) e se o app cair. Se a pessoa sai pelo menu da bandeja
 //! (código 0), espera a próxima entrada.
 //!
+//! Sem ninguém logado no console (tela de entrada, depois de reiniciar), lança o **agente**:
+//! `taildesk --agente <perfil>` como SYSTEM na sessão do console (o token do próprio serviço com
+//! outra `TokenSessionId`). Só SYSTEM abre a área `Winlogon`, então o agente captura e controla a
+//! tela de entrada e atende Ctrl+Alt+Del. Ele usa a identidade e a senha de acesso do último
+//! usuário que o serviço viu (`<perfil>`, guardado no registro do serviço, que só administradores
+//! mudam). Quando alguém entra, o agente é encerrado e o app do usuário volta a ser o host.
+//!
 //! Instalar e remover pedem administrador: o app se chama de novo com `runas` e
 //! `--instalar-servico` / `--remover-servico` ([`elevar`]).
 
@@ -14,6 +21,8 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::{Duration, Instant};
+
+use std::path::PathBuf;
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SERVICE_EXISTS,
@@ -35,10 +44,13 @@ use windows_sys::Win32::System::Services::{
 };
 use windows_sys::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateEventW, CreateProcessAsUserW, GetExitCodeProcess, INFINITE,
-    PROCESS_INFORMATION, STARTUPINFOW, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
+    PROCESS_INFORMATION, STARTUPINFOW, SetEvent, TerminateProcess, WaitForMultipleObjects,
+    WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
-use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, WTS_SESSION_LOGON};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    SW_HIDE, WTS_CONSOLE_CONNECT, WTS_SESSION_LOGOFF, WTS_SESSION_LOGON,
+};
 
 /// Nome do serviço no Gerenciador de Serviços.
 pub const NOME: &str = "TailDesk";
@@ -246,7 +258,11 @@ unsafe extern "system" fn controle(
             NO_ERROR
         }
         SERVICE_CONTROL_SESSIONCHANGE => {
-            if tipo == WTS_SESSION_LOGON {
+            // Entrou, saiu ou o console trocou de sessão: o laço decide de novo.
+            if matches!(
+                tipo,
+                WTS_SESSION_LOGON | WTS_SESSION_LOGOFF | WTS_CONSOLE_CONNECT
+            ) {
                 // SAFETY: idem.
                 unsafe { SetEvent(ENTROU.load(Ordering::Acquire) as HANDLE) };
             }
@@ -257,9 +273,19 @@ unsafe extern "system" fn controle(
     }
 }
 
-/// O app aberto na sessão do usuário.
+/// O que o serviço mantém aberto na sessão do console.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tipo {
+    /// O app, como o usuário logado.
+    App,
+    /// O agente da tela de entrada, como SYSTEM.
+    Agente,
+}
+
+/// Processo lançado pelo serviço.
 struct Filho {
     processo: HANDLE,
+    tipo: Tipo,
 }
 
 impl Drop for Filho {
@@ -269,17 +295,123 @@ impl Drop for Filho {
     }
 }
 
-/// Lança `exe --oculto` na sessão `sessao`, como o usuário dela.
-fn lancar(exe: &Path, sessao: u32) -> io::Result<Filho> {
-    let mut linha = wide(&format!("\"{}\" --oculto", exe.display()));
-    let mut mesa = wide("winsta0\\default");
-    // SAFETY: token e bloco de ambiente são liberados no fim; estruturas zeradas são válidas;
-    // a linha de comando é mutável como a API pede.
+/// Próximo passo do laço do serviço.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Acao {
+    Nada,
+    Lancar(Tipo),
+    /// Alguém entrou com o agente aberto: encerra o agente (o app vem no passo seguinte).
+    EncerrarAgente,
+}
+
+/// Decide o passo: `aberto` é o que está rodando, `logado` se há usuário no console,
+/// `pausado` se a pessoa saiu pela bandeja, `pode` se já passou a espera desde a última
+/// tentativa e `tem_perfil` se o serviço já viu um usuário (de onde o agente tira identidade e
+/// senha).
+fn decidir(
+    aberto: Option<Tipo>,
+    logado: bool,
+    pausado: bool,
+    pode: bool,
+    tem_perfil: bool,
+) -> Acao {
+    match aberto {
+        Some(Tipo::Agente) if logado => Acao::EncerrarAgente,
+        Some(_) => Acao::Nada,
+        None if !pode => Acao::Nada,
+        None if logado && !pausado => Acao::Lancar(Tipo::App),
+        None if !logado && tem_perfil => Acao::Lancar(Tipo::Agente),
+        None => Acao::Nada,
+    }
+}
+
+/// Token do usuário logado na sessão, se houver.
+fn token_do_usuario(sessao: u32) -> Option<HANDLE> {
+    let mut token: HANDLE = std::ptr::null_mut();
+    // SAFETY: saída num HANDLE local; quem recebe fecha.
+    (unsafe { WTSQueryUserToken(sessao, &mut token) } != 0).then_some(token)
+}
+
+/// Pasta do perfil do dono de `token` (`C:\Users\fulano`).
+fn perfil_do_token(token: HANDLE) -> Option<PathBuf> {
+    use windows_sys::Win32::UI::Shell::GetUserProfileDirectoryW;
+    let mut buf = [0u16; 512];
+    let mut n = buf.len() as u32;
+    // SAFETY: buffer local com o tamanho em caracteres informado.
+    if unsafe { GetUserProfileDirectoryW(token, buf.as_mut_ptr(), &mut n) } == 0 {
+        return None;
+    }
+    let fim = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(PathBuf::from(String::from_utf16_lossy(&buf[..fim])))
+}
+
+/// Chave de parâmetros do serviço (`HKLM\...\Services\TailDesk\Parameters`): só SYSTEM e
+/// administradores escrevem nela.
+fn chave_parametros() -> Vec<u16> {
+    wide(&format!(
+        r"SYSTEM\CurrentControlSet\Services\{NOME}\Parameters"
+    ))
+}
+
+const VALOR_PERFIL: &str = "UltimoPerfil";
+
+/// Lembra o perfil do último usuário (para o agente depois de reiniciar).
+fn gravar_perfil(perfil: &Path) {
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, REG_SZ, RegSetKeyValueW};
+    let chave = chave_parametros();
+    let nome = wide(VALOR_PERFIL);
+    let dado = wide(&perfil.to_string_lossy());
+    // SAFETY: strings terminadas em zero vivas durante a chamada; o tamanho é em bytes e
+    // inclui o zero final, como REG_SZ pede.
     unsafe {
-        let mut token: HANDLE = std::ptr::null_mut();
-        if WTSQueryUserToken(sessao, &mut token) == 0 {
-            return Err(io::Error::last_os_error());
-        }
+        RegSetKeyValueW(
+            HKEY_LOCAL_MACHINE,
+            chave.as_ptr(),
+            nome.as_ptr(),
+            REG_SZ,
+            dado.as_ptr().cast(),
+            (dado.len() * 2) as u32,
+        )
+    };
+}
+
+/// O perfil gravado por [`gravar_perfil`], se a pasta ainda existe.
+fn ler_perfil() -> Option<PathBuf> {
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+    let chave = chave_parametros();
+    let nome = wide(VALOR_PERFIL);
+    let mut buf = [0u16; 512];
+    let mut bytes = std::mem::size_of_val(&buf) as u32;
+    // SAFETY: buffer local com o tamanho em bytes informado.
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            chave.as_ptr(),
+            nome.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            buf.as_mut_ptr().cast(),
+            &mut bytes,
+        )
+    };
+    if r != NO_ERROR {
+        return None;
+    }
+    let fim = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let p = PathBuf::from(String::from_utf16_lossy(&buf[..fim]));
+    p.is_dir().then_some(p)
+}
+
+/// Cria o processo `linha` com `token` na área `winsta0\default`.
+///
+/// # Safety
+/// `token` é um token primário válido; continua sendo de quem chamou.
+unsafe fn criar_processo(token: HANDLE, linha: &str, tipo: Tipo) -> io::Result<Filho> {
+    let mut linha = wide(linha);
+    let mut mesa = wide("winsta0\\default");
+    // SAFETY: bloco de ambiente liberado no fim; estruturas zeradas são válidas; a linha de
+    // comando é mutável como a API pede; `token` válido pela pré-condição.
+    unsafe {
         let mut ambiente: *mut core::ffi::c_void = std::ptr::null_mut();
         if CreateEnvironmentBlock(&mut ambiente, token, 0) == 0 {
             ambiente = std::ptr::null_mut();
@@ -305,14 +437,68 @@ fn lancar(exe: &Path, sessao: u32) -> io::Result<Filho> {
         if !ambiente.is_null() {
             DestroyEnvironmentBlock(ambiente);
         }
-        CloseHandle(token);
         if ok == 0 {
             return Err(erro);
         }
         CloseHandle(pi.hThread);
         Ok(Filho {
             processo: pi.hProcess,
+            tipo,
         })
+    }
+}
+
+/// Lança `exe --oculto` como o dono de `token` e devolve também o perfil dele. Fecha o token.
+fn lancar_app(exe: &Path, token: HANDLE) -> io::Result<(Filho, Option<PathBuf>)> {
+    let perfil = perfil_do_token(token);
+    // SAFETY: token de `WTSQueryUserToken`, válido até o `CloseHandle` abaixo.
+    let r = unsafe { criar_processo(token, &format!("\"{}\" --oculto", exe.display()), Tipo::App) };
+    // SAFETY: token nosso, fechado uma vez.
+    unsafe { CloseHandle(token) };
+    r.map(|f| (f, perfil))
+}
+
+/// Lança o agente da tela de entrada como SYSTEM na sessão `sessao`.
+fn lancar_agente(exe: &Path, sessao: u32, perfil: &Path) -> io::Result<Filho> {
+    use windows_sys::Win32::Security::{
+        DuplicateTokenEx, SecurityImpersonation, SetTokenInformation, TOKEN_ALL_ACCESS,
+        TokenPrimary, TokenSessionId,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    let linha = format!("\"{}\" --agente \"{}\"", exe.display(), perfil.display());
+    // SAFETY: tokens locais fechados no fim; o primário duplicado recebe a sessão do console
+    // antes de criar o processo (o serviço roda como SYSTEM, que tem SeTcbPrivilege).
+    unsafe {
+        let mut proprio: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, &mut proprio) == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut token: HANDLE = std::ptr::null_mut();
+        let ok = DuplicateTokenEx(
+            proprio,
+            TOKEN_ALL_ACCESS,
+            std::ptr::null(),
+            SecurityImpersonation,
+            TokenPrimary,
+            &mut token,
+        );
+        CloseHandle(proprio);
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let r = if SetTokenInformation(
+            token,
+            TokenSessionId,
+            (&raw const sessao).cast(),
+            std::mem::size_of::<u32>() as u32,
+        ) == 0
+        {
+            Err(io::Error::last_os_error())
+        } else {
+            criar_processo(token, &linha, Tipo::Agente)
+        };
+        CloseHandle(token);
+        r
     }
 }
 
@@ -338,15 +524,63 @@ unsafe extern "system" fn principal(_: u32, _: *mut windows_sys::core::PWSTR) {
     // A pessoa saiu pela bandeja: só na próxima entrada.
     let mut pausado = false;
     let mut proxima = Instant::now();
+    let mut perfil = ler_perfil();
     loop {
-        if filho.is_none() && !pausado && Instant::now() >= proxima {
-            // SAFETY: sem pré-condições.
-            let sessao = unsafe { WTSGetActiveConsoleSessionId() };
-            if sessao != SEM_SESSAO {
-                match lancar(&exe, sessao) {
-                    Ok(f) => filho = Some(f),
-                    // Ninguém logado ainda (tela de entrada): tenta de novo.
+        // SAFETY: sem pré-condições.
+        let sessao = unsafe { WTSGetActiveConsoleSessionId() };
+        let token = (sessao != SEM_SESSAO)
+            .then(|| token_do_usuario(sessao))
+            .flatten();
+        let acao = decidir(
+            filho.as_ref().map(|f| f.tipo),
+            token.is_some(),
+            pausado,
+            sessao != SEM_SESSAO && Instant::now() >= proxima,
+            perfil.is_some(),
+        );
+        match acao {
+            Acao::Lancar(Tipo::App) => {
+                let t = token.expect("decidir só lança o app com usuário logado");
+                match lancar_app(&exe, t) {
+                    Ok((f, p)) => {
+                        if let Some(p) = p.filter(|p| perfil.as_deref() != Some(p.as_path())) {
+                            gravar_perfil(&p);
+                            perfil = Some(p);
+                        }
+                        filho = Some(f);
+                    }
                     Err(_) => proxima = Instant::now() + DE_NOVO,
+                }
+            }
+            Acao::Lancar(Tipo::Agente) => {
+                let p = perfil
+                    .clone()
+                    .expect("decidir só lança o agente com perfil");
+                match lancar_agente(&exe, sessao, &p) {
+                    Ok(f) => filho = Some(f),
+                    Err(_) => proxima = Instant::now() + DE_NOVO,
+                }
+            }
+            Acao::EncerrarAgente => {
+                if let Some(f) = filho.take() {
+                    // SAFETY: processo nosso; o handle fecha no `Drop` depois de esperar.
+                    unsafe {
+                        TerminateProcess(f.processo, 0);
+                        WaitForSingleObject(f.processo, 5_000);
+                    }
+                }
+                pausado = false;
+                proxima = Instant::now();
+                if let Some(t) = token {
+                    // SAFETY: token de `token_do_usuario`, não usado nesta volta.
+                    unsafe { CloseHandle(t) };
+                }
+                continue;
+            }
+            Acao::Nada => {
+                if let Some(t) = token {
+                    // SAFETY: idem.
+                    unsafe { CloseHandle(t) };
                 }
             }
         }
@@ -371,15 +605,21 @@ unsafe extern "system" fn principal(_: u32, _: *mut windows_sys::core::PWSTR) {
             }
             2 => {
                 let mut codigo = 1;
+                let tipo = filho.as_ref().map(|f| f.tipo);
                 if let Some(f) = filho.take() {
                     // SAFETY: processo terminado, handle ainda aberto.
                     unsafe { GetExitCodeProcess(f.processo, &mut codigo) };
                 }
-                pausado = codigo == 0;
+                // Só o app tem "Sair" na bandeja; o agente que sai volta depois da espera.
+                pausado = tipo == Some(Tipo::App) && codigo == 0;
                 proxima = Instant::now() + DE_NOVO;
             }
             _ => {}
         }
+    }
+    if let Some(f) = filho.take().filter(|f| f.tipo == Tipo::Agente) {
+        // SAFETY: processo nosso; o serviço parando leva o agente junto.
+        unsafe { TerminateProcess(f.processo, 0) };
     }
     informar(SERVICE_STOPPED);
 }
@@ -415,4 +655,41 @@ pub fn rodar() -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_com_usuario_agente_sem_ninguem() {
+        // Ninguém logado e um perfil conhecido: agente.
+        assert_eq!(
+            decidir(None, false, false, true, true),
+            Acao::Lancar(Tipo::Agente)
+        );
+        // Sem perfil (serviço novo, ninguém entrou ainda): espera.
+        assert_eq!(decidir(None, false, false, true, false), Acao::Nada);
+        // Alguém logado: o app; saiu pela bandeja: nada até a próxima entrada.
+        assert_eq!(
+            decidir(None, true, false, true, true),
+            Acao::Lancar(Tipo::App)
+        );
+        assert_eq!(decidir(None, true, true, true, true), Acao::Nada);
+        // Dentro da espera depois de uma falha: nada.
+        assert_eq!(decidir(None, true, false, false, true), Acao::Nada);
+        // Alguém entrou com o agente aberto: encerra o agente.
+        assert_eq!(
+            decidir(Some(Tipo::Agente), true, false, true, true),
+            Acao::EncerrarAgente
+        );
+        assert_eq!(
+            decidir(Some(Tipo::Agente), false, false, true, true),
+            Acao::Nada
+        );
+        assert_eq!(
+            decidir(Some(Tipo::App), true, false, true, true),
+            Acao::Nada
+        );
+    }
 }
