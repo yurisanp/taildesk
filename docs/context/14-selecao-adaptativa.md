@@ -139,6 +139,22 @@ Os números são o ponto de partida; o simulador da §8 e as medições do G0 v�
 - Toda decisão gera uma **razão legível** ("perda de 4% por 1 s → Lenta"), que vai para o
   log, para o HUD e para a aba de teste.
 
+### 3.3.1 Escada de resolução e FPS (implementada)
+Enquanto a sondagem em sessão (§3.2) não existe, o host não troca de classe: o laço rápido
+(`taildesk-media::taxa`) ajusta a taxa e um laço lento próprio (`taildesk-media::escada`) troca
+**resolução e FPS** numa escada de degraus, guiado pela taxa que o laço rápido consegue manter:
+- desce um degrau quando essa taxa fica abaixo de 45 % do que o degrau precisa (0,07 bit por pixel
+  por quadro, ou a taxa fixa do usuário, se for menor) por 2 s; no máximo uma descida a cada 2 s;
+- sobe um degrau depois de 5 s sem congestão, no mínimo 10 s depois da última troca e 15 s depois
+  da última descida; subida desfeita em menos de 10 s dobra a espera, até 2 min;
+- escadas: Automática 60 fps nativa → 1440p60 → 1080p60 → 1080p30 → 720p30 → 720p15 → 540p10;
+  Nitidez corta FPS antes; Fluidez corta resolução antes; Economizar dados começa em 1080p30.
+  O limite de altura vale para o lado menor; degraus que não mudam a captura são pulados.
+
+A redução é feita no envio (`video::envio`, média de área em BGRx) antes do encoder, que reabre
+no tamanho novo com um quadro-chave; o controlador só vê um stream de outro tamanho. O
+`VideoStats` leva `fps_max` e `reduced` para o painel de diagnóstico.
+
 ### 3.4 Onde mora o código
 - **`taildesk-media::adapt`**: o adaptador é uma **função pura**,
   `Adaptador::atualizar(&mut self, agora, Sinais) -> Option<Decisao>`, sem I/O nem relógio

@@ -116,6 +116,14 @@ impl ControleTaxa {
         self.motivo
     }
 
+    /// O teto mudou de `antes` para `depois` (o laço lento reduziu a resolução): corrige o fator
+    /// para a taxa absoluta não cair junto com o teto.
+    pub fn reescalar(&mut self, antes: u64, depois: u64) {
+        if antes > 0 && depois > 0 {
+            self.fator = (self.fator * antes as f64 / depois as f64).clamp(f64::MIN_POSITIVE, 1.0);
+        }
+    }
+
     /// Fila no caminho agora: RTT acima do mínimo recente.
     pub fn fila(&self, rtt: Duration) -> Duration {
         let min = self.rtts.iter().map(|&(_, r)| r).min().unwrap_or(rtt);
@@ -346,5 +354,20 @@ mod tests {
             monitores: 1,
         });
         assert!((f - 0.17).abs() < 1e-9, "{f}");
+    }
+
+    #[test]
+    fn reescalar_mantem_a_taxa_absoluta() {
+        let mut r = Rede::new();
+        // Fora da LAN começa em 8 de 20 Mbit/s.
+        assert!((r.por(100 * MS, 30 * MS, None) - 0.4).abs() < 1e-9);
+        // Teto caiu para 10 Mbit/s: o fator dobra e a taxa continua em 8.
+        r.c.reescalar(20_000_000, 10_000_000);
+        assert!((r.c.fator() - 0.8).abs() < 1e-9);
+        // Nunca passa de 1.
+        r.c.reescalar(10_000_000, 1_000_000);
+        assert_eq!(r.c.fator(), 1.0);
+        r.c.reescalar(0, 5);
+        assert_eq!(r.c.fator(), 1.0);
     }
 }

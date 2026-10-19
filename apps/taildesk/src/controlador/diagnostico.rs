@@ -195,17 +195,27 @@ impl Diagnostico {
                 Some(h) if h.width > 0 => (h.width, h.height),
                 _ => (v.width, v.height),
             };
+            // O teto de FPS atual vem do host (o laço lento da rede pode ter cortado).
+            let fps = match &self.host {
+                Some(h) if h.fps_max > 0 => h.fps_max,
+                _ => v.fps_target,
+            };
+            let reduzida = self.host.as_ref().is_some_and(|h| h.reduced);
             l.push(linha(
                 "Imagem",
                 format!(
-                    "{w}×{h} · {} · até {} fps",
+                    "{w}×{h} · {} · até {fps} fps{}",
                     match v.codec() {
                         Codec::Hevc => "HEVC",
                         Codec::Av1 => "AV1",
                         Codec::PyroWave => "PyroWave",
                         _ => "H.264",
                     },
-                    v.fps_target
+                    if reduzida {
+                        " · reduzida pela rede"
+                    } else {
+                        ""
+                    }
                 ),
             ));
         }
