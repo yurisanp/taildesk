@@ -452,6 +452,9 @@ component SecaoConfiguracoes inherits ScrollView {
     in-out property <int> codec;
     in property <[string]> taxas;
     in-out property <int> taxa;
+    in property <[string]> modos-monitores;
+    in-out property <int> modo-monitores;
+    in-out property <bool> seguir-mouse;
     in property <string> video-local;
     in property <string> teclado-local;
     callback aceitando-mudou(bool);
@@ -464,6 +467,8 @@ component SecaoConfiguracoes inherits ScrollView {
     callback abrir-registros();
     callback codec-mudou(int);
     callback taxa-mudou(int);
+    callback modo-monitores-mudou(int);
+    callback seguir-mouse-mudou(bool);
     callback abrir-link(string);
     callback atualizar-auto-mudou(bool);
     callback canal-pre-mudou(bool);
@@ -589,6 +594,21 @@ component SecaoConfiguracoes inherits ScrollView {
                         mudou(i) => { root.taxa-mudou(i); }
                     }
                     Separador { }
+                    OpcaoLista {
+                        titulo: @tr("Ao conectar, mostrar os monitores em");
+                        descricao: @tr("Vale quando o outro computador tem mais de um monitor. O que você usar numa sessão fica lembrado para aquele computador.");
+                        opcoes: root.modos-monitores;
+                        escolhida <=> root.modo-monitores;
+                        mudou(i) => { root.modo-monitores-mudou(i); }
+                    }
+                    Separador { }
+                    OpcaoConfig {
+                        titulo: @tr("Seguir o mouse");
+                        descricao: @tr("A aba acompanha o cursor quando ele passa para outro monitor do computador remoto.");
+                        ligado <=> root.seguir-mouse;
+                        mudou(v) => { root.seguir-mouse-mudou(v); }
+                    }
+                    Separador { }
                     VerticalLayout {
                         padding-top: 8px;
                         padding-bottom: 8px;
@@ -682,6 +702,9 @@ export component JanelaPrincipal inherits Window {
     in-out property <int> codec-config: 0;
     in property <[string]> taxas-config;
     in-out property <int> taxa-config: 0;
+    in property <[string]> modos-monitores-config: [@tr("Abas"), @tr("Janelas separadas"), @tr("Todos os meus monitores")];
+    in-out property <int> modo-monitores-config: 0;
+    in-out property <bool> seguir-mouse-config: false;
     in property <string> video-local: @tr("Verificando…");
     in property <string> teclado-local;
     in-out property <string> toast;
@@ -711,6 +734,8 @@ export component JanelaPrincipal inherits Window {
     callback abrir-registros();
     callback codec-config-mudou(int);
     callback taxa-config-mudou(int);
+    callback modo-monitores-config-mudou(int);
+    callback seguir-mouse-config-mudou(bool);
     callback atualizar-auto-mudou(bool);
     callback canal-pre-mudou(bool);
     callback procurar-atualizacao();
@@ -818,6 +843,11 @@ export component JanelaPrincipal inherits Window {
                 codec <=> root.codec-config;
                 taxas: root.taxas-config;
                 taxa <=> root.taxa-config;
+                modos-monitores: root.modos-monitores-config;
+                modo-monitores <=> root.modo-monitores-config;
+                seguir-mouse <=> root.seguir-mouse-config;
+                modo-monitores-mudou(i) => { root.modo-monitores-config-mudou(i); }
+                seguir-mouse-mudou(v) => { root.seguir-mouse-config-mudou(v); }
                 video-local: root.video-local;
                 teclado-local: root.teclado-local;
                 pedir-sempre-mudou(v) => { root.pedir-sempre-mudou(v); }

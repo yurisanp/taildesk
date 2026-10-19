@@ -41,6 +41,7 @@ use taildesk_ui::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+use crate::config::{ModoMonitores, PrefsMonitores};
 use crate::preferencias::{self, CODECS, TAXAS_KBPS};
 use crate::video::{Contadores, DecoderMedido, Recepcoes, Tela, ler_datagramas, travar};
 use crate::{config, no_app};
@@ -214,6 +215,14 @@ struct SessaoUi {
     chat_digitando: bool,
     /// Tecla de um atalho do controlador (Ctrl+Alt+F): a soltura dela também não vai ao host.
     engolida: Option<Hid>,
+    /// "Usar todos os meus monitores" ligado: cada monitor do host em tela cheia num local.
+    todos: bool,
+    /// Host na tailnet (`node_stable_id`), para lembrar a preferência de monitores dele.
+    node: Option<String>,
+    /// Como abrir os monitores e "Seguir o mouse" (a lembrada para o host, ou o padrão).
+    prefs_monitores: PrefsMonitores,
+    /// Abrir "Usar todos os meus monitores" assim que a sessão ficar ao vivo.
+    todos_ao_conectar: bool,
 }
 
 impl SessaoUi {
@@ -839,7 +848,13 @@ impl SessaoUi {
                         if !antes {
                             // Pede o vídeo do monitor principal, agora que pode.
                             self.monitores = UmPorVez::new();
+                            self.monitores.seguir_mouse = self.prefs_monitores.seguir_mouse;
                             self.monitores.atualizar(&self.displays, &mut out);
+                            match self.prefs_monitores.modo {
+                                ModoMonitores::Abas => {}
+                                ModoMonitores::Janelas => self.monitores.destacar_todos(&mut out),
+                                ModoMonitores::Todos => self.todos_ao_conectar = true,
+                            }
                             if self.som_ligado {
                                 self.pedir_som(true);
                             }
@@ -966,6 +981,28 @@ impl SessaoUi {
         self.abas();
         self.desenhar_cursor();
         self.painel.estado(&self.janela, &self.estado);
+        if std::mem::take(&mut self.todos_ao_conectar) {
+            self.usar_todos(false);
+        }
+    }
+
+    /// Guarda a preferência de monitores para este host (vale na próxima conexão a ele).
+    fn lembrar_monitores(&mut self, f: impl FnOnce(&mut PrefsMonitores)) {
+        f(&mut self.prefs_monitores);
+        let Some(node) = self.node.clone() else {
+            return;
+        };
+        let mut c = config::ler();
+        c.monitores_host.insert(node, self.prefs_monitores);
+        if let Err(e) = config::gravar(&c) {
+            eprintln!("taildesk: não foi possível gravar a preferência de monitores: {e}");
+        }
+    }
+
+    /// Botão "Seguir o mouse" da sessão.
+    fn seguir_mouse(&mut self, sim: bool) {
+        self.monitores.seguir_mouse = sim;
+        self.lembrar_monitores(|p| p.seguir_mouse = sim);
     }
 
     /// `onde` = `None` na janela da sessão, `Some(display)` na janela de um destacado.
@@ -1011,7 +1048,12 @@ impl SessaoUi {
 
     /// Entra ou sai da tela cheia na janela da sessão (`None`) ou na de um destacado. Ao entrar,
     /// mostra por alguns segundos como sair.
-    fn mudar_tela_cheia(&self, onde: Option<u32>, sim: bool) {
+    fn mudar_tela_cheia(&mut self, onde: Option<u32>, sim: bool) {
+        if !sim && self.todos {
+            // Sair da tela cheia em qualquer janela sai do modo inteiro.
+            self.sair_de_todos();
+            return;
+        }
         match onde {
             None => {
                 self.janela.set_tela_cheia(sim);
@@ -1028,7 +1070,97 @@ impl SessaoUi {
         }
     }
 
-    fn alternar_tela_cheia(&self, onde: Option<u32>) {
+    /// "Usar todos os meus monitores": um monitor do host em tela cheia em cada monitor local,
+    /// na ordem de posição dos dois lados (`13-multimonitor.md` §2.2).
+    fn usar_todos(&mut self, pelo_botao: bool) {
+        let mut locais = self
+            .janela
+            .window()
+            .with_winit_window(|w| w.available_monitors().collect::<Vec<_>>())
+            .unwrap_or_default();
+        locais.sort_by_key(|m| (m.position().x, m.position().y));
+        let mut out = Vec::new();
+        let alvo = self.monitores.usar_todos(locais.len(), &mut out);
+        if alvo.len() < 2 {
+            // Ao conectar (preferência), um monitor só de um dos lados fica nas abas sem aviso.
+            if pelo_botao {
+                self.janela
+                    .set_toast("Este computador tem um monitor só: use a tela cheia.".into());
+            }
+            self.enviar_todas(out);
+            return;
+        }
+        self.enviar_todas(out);
+        if pelo_botao {
+            self.lembrar_monitores(|p| p.modo = ModoMonitores::Todos);
+        }
+        self.todos = true;
+        self.janela.set_todos_monitores(true);
+        self.abas();
+        self.desenhar_cursor();
+        let pares: Vec<_> = alvo.into_iter().zip(locais).collect();
+        self.tela_cheia_nos_locais(pares, 10);
+    }
+
+    /// Põe cada janela em tela cheia no monitor local dela. A janela de um destacado recém-aberto
+    /// pode ainda não existir no winit: tenta de novo em seguida.
+    fn tela_cheia_nos_locais(
+        &mut self,
+        pares: Vec<(u32, winit::monitor::MonitorHandle)>,
+        tentativas: u32,
+    ) {
+        if !self.todos {
+            return;
+        }
+        let mut faltam = Vec::new();
+        for (d, local) in pares {
+            let na_sessao = self.monitores.ativo() == Some(d);
+            let janela = if na_sessao {
+                Some(self.janela.window())
+            } else {
+                self.janelas.get(&d).map(|j| j.window())
+            };
+            let Some(janela) = janela else { continue };
+            let pronto = janela
+                .with_winit_window(|w| {
+                    w.set_fullscreen(Some(winit::window::Fullscreen::Borderless(Some(
+                        local.clone(),
+                    ))));
+                })
+                .is_some();
+            if !pronto {
+                faltam.push((d, local));
+                continue;
+            }
+            if na_sessao {
+                self.janela.set_tela_cheia(true);
+            } else if let Some(j) = self.janelas.get(&d) {
+                j.set_tela_cheia(true);
+            }
+        }
+        if !faltam.is_empty() && tentativas > 0 {
+            let id = self.id;
+            slint::Timer::single_shot(Duration::from_millis(100), move || {
+                na_sessao_ja(id, |s| s.tela_cheia_nos_locais(faltam, tentativas - 1));
+            });
+        }
+    }
+
+    /// Sai de "Usar todos os meus monitores": as janelas dos destacados fecham e tudo volta
+    /// às abas na janela da sessão.
+    fn sair_de_todos(&mut self) {
+        self.todos = false;
+        self.lembrar_monitores(|p| p.modo = ModoMonitores::Abas);
+        self.janela.set_todos_monitores(false);
+        let mut out = Vec::new();
+        self.monitores.recolocar_todos(&mut out);
+        self.enviar_todas(out);
+        self.mudar_tela_cheia(None, false);
+        self.abas();
+        self.desenhar_cursor();
+    }
+
+    fn alternar_tela_cheia(&mut self, onde: Option<u32>) {
         let agora = match onde {
             None => self.janela.get_tela_cheia(),
             Some(d) => self.janelas.get(&d).is_some_and(|j| j.get_tela_cheia()),
@@ -1333,6 +1465,12 @@ impl Controlador {
         janela.on_mudar_tela_cheia(move |sim| {
             na_sessao_ja(id, |s| s.mudar_tela_cheia(None, sim));
         });
+        janela.on_usar_todos_monitores(move || {
+            na_sessao_ja(id, |s| s.usar_todos(true));
+        });
+        janela.on_seguir_mouse_mudou(move |sim| {
+            na_sessao_ja(id, |s| s.seguir_mouse(sim));
+        });
         janela.on_chat_digitando(move |sim| {
             na_sessao_ja(id, |s| s.chat_digitando(sim));
         });
@@ -1398,7 +1536,10 @@ impl Controlador {
             extra_hid: Vec::new(),
         };
         let (fechar_tx, fechar_rx) = oneshot::channel();
-        let video = config::ler().video;
+        let (video, monitores) = {
+            let c = config::ler();
+            (c.video, c.monitores)
+        };
         let recepcoes = Recepcoes::default();
         let contadores = Arc::new(Contadores::default());
         let entrada_area = area::Entrada::default();
@@ -1452,6 +1593,10 @@ impl Controlador {
                 chat: Vec::new(),
                 chat_digitando: false,
                 engolida: None,
+                todos: false,
+                node: None,
+                prefs_monitores: monitores,
+                todos_ao_conectar: false,
             },
         );
         arquivos::ligar_soltar(id, 50);
@@ -1520,6 +1665,16 @@ async fn rodar(
         .await
         .ok()
         .map(|p| p.node_stable_id);
+    {
+        // Preferência de monitores lembrada para este host (antes de ficar ao vivo).
+        let node = node.clone();
+        let prefs = config::ler().monitores_de(node.as_deref());
+        na_sessao(id, move |s| {
+            s.node = node;
+            s.prefs_monitores = prefs;
+            s.janela.set_seguir_mouse(prefs.seguir_mouse);
+        });
+    }
     let conhecido = node
         .as_ref()
         .and_then(|n| config::ler().hosts.get(n).copied());

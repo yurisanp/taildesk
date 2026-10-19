@@ -49,6 +49,7 @@ Conclusões para o TailDesk:
 - Cada janela tem barra própria (tela cheia, ajustar/tamanho real); arquivos, teclado e "⋯" ficam na janela do monitor principal, ou em qualquer uma com o mesmo estado (decidir no protótipo).
 - **Destacar/recolocar**: arrastar uma aba para fora (ou botão "abrir em janela") cria a janela; fechar a janela de um monitor devolve a aba, não encerra a sessão. Encerrar a sessão fecha todas.
 - **Posicionamento automático** (opcional, "Usar todos os meus monitores"): se o controlador tem N monitores e o usuário escolheu até N, o TailDesk distribui as janelas em tela cheia nos monitores locais seguindo a ordem esquerda→direita do host. Lembrar a distribuição por host.
+  - Implementado: botão "🖥 Todos os monitores" na barra da sessão (com 2+ monitores no host). Os N primeiros monitores liberados do host, na ordem das abas, vão para os N monitores locais ordenados por posição; a janela da sessão fica com o que já mostrava (nenhum vídeo reinicia) e os outros viram destacados em tela cheia (`Fullscreen::Borderless` no monitor local certo). Sair da tela cheia em qualquer janela devolve tudo às abas. Com um monitor só num dos lados, nada muda.
 - Teclado vai para a janela com foco; mouse vale na janela onde está. O cursor remoto só é desenhado na janela do monitor onde ele está no host.
 - No fio: um stream por janela aberta e visível.
 
@@ -59,7 +60,7 @@ Conclusões para o TailDesk:
 ### 2.4 O que o usuário escolhe, e onde
 | Onde | O quê |
 |---|---|
-| Configurações → Sessão | Modo padrão (Um por vez / Janelas separadas), "seguir o mouse", "usar todos os meus monitores" |
+| Configurações → Sessão | "Ao conectar, mostrar os monitores em": Abas / Janelas separadas / Todos os meus monitores, e "Seguir o mouse". O que o usuário usa numa sessão (entrar/sair de "Todos os monitores", botão "🖱 Seguir o mouse") fica lembrado para aquele host (`monitores_host` no config, pelo `node_stable_id`) e vale por cima do padrão |
 | Diálogo de conexão / detalhe do dispositivo | Quais monitores abrir (lembrado por host; padrão = principal) |
 | Barra da sessão | Abas de monitores, menu com layout do host, destacar/recolocar, trocar modo a qualquer momento |
 

@@ -9,7 +9,7 @@ use taildesk_codec::CodecVideo;
 use taildesk_proto::control::Codec;
 use taildesk_ui::JanelaPrincipal;
 
-use crate::config::{self, PrefsVideo};
+use crate::config::{self, ModoMonitores, PrefsMonitores, PrefsVideo};
 use crate::{avisar, com_app, no_app};
 
 /// Codecs do seletor, na ordem das listas (o índice 0 é o automático).
@@ -167,6 +167,13 @@ pub fn mostrar(j: &JanelaPrincipal) {
     j.set_codec_config(indice_codec(c.video.codec) as i32);
     j.set_taxas_config(ModelRc::new(VecModel::from(rotulos_taxa())));
     j.set_taxa_config(indice_taxa(c.video.taxa_kbps) as i32);
+    j.set_modo_monitores_config(
+        ModoMonitores::TODOS
+            .iter()
+            .position(|m| *m == c.monitores.modo)
+            .unwrap_or(0) as i32,
+    );
+    j.set_seguir_mouse_config(c.monitores.seguir_mouse);
     crate::historico::mostrar(j);
     let fraca = j.as_weak();
     std::thread::spawn(move || {
@@ -184,6 +191,14 @@ pub fn mostrar(j: &JanelaPrincipal) {
 /// `~/Downloads/TailDesk`, onde chegam os arquivos recebidos.
 pub fn pasta_entrada() -> Option<std::path::PathBuf> {
     taildesk_platform::pasta_downloads().map(|d| d.join("TailDesk"))
+}
+
+fn gravar_monitores(f: impl FnOnce(&mut PrefsMonitores)) {
+    let mut c = config::ler();
+    f(&mut c.monitores);
+    if let Err(e) = config::gravar(&c) {
+        avisar(format!("Não foi possível gravar a configuração: {e}"));
+    }
 }
 
 fn gravar_video(f: impl FnOnce(&mut PrefsVideo)) {
@@ -307,6 +322,14 @@ pub fn ligar(j: &JanelaPrincipal) {
         let kbps = TAXAS_KBPS.get(i as usize).copied().unwrap_or(0);
         gravar_video(|v| v.taxa_kbps = kbps);
     });
+    j.on_modo_monitores_config_mudou(|i| {
+        let modo = ModoMonitores::TODOS
+            .get(i as usize)
+            .copied()
+            .unwrap_or_default();
+        gravar_monitores(|m| m.modo = modo);
+    });
+    j.on_seguir_mouse_config_mudou(|v| gravar_monitores(|m| m.seguir_mouse = v));
 }
 
 #[cfg(test)]
