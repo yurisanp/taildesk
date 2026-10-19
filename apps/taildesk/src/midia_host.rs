@@ -18,7 +18,7 @@ use taildesk_media::video::{ConfigEnvio, EnvioVideo};
 use taildesk_platform::captura::{FormaCursor, FormatoPixel, Quadro};
 use taildesk_proto::control::{
     AudioCodec, AudioSelected, AudioStopReason, AudioStopped, Codec, CodecCap, CodecSelected,
-    ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg, QualityMode, QualityPrefs,
+    ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg, Priority, QualityMode, QualityPrefs,
     SetVideoQuality, StartAudio, StartVideo, VideoStats, VideoStopReason, VideoStopped,
 };
 use taildesk_proto::cursor::{STREAM_MAGIC, ShapeHeader};
@@ -138,6 +138,10 @@ fn fps_pedido(p: &QualityPrefs, encoder: f32) -> f32 {
 const FATOR_LIVRE: f64 = 0.98;
 /// Fila no caminho abaixo disso conta como folga.
 const FILA_LIVRE: Duration = Duration::from_millis(5);
+/// Monitor `Visible` (janela sem foco) com outro `Focused` saindo: teto de FPS e parte da taxa
+/// (`13-multimonitor.md` §2.3). O focado fica com o resto da banda.
+const FPS_VISIVEL: f32 = 15.0;
+const PARTE_VISIVEL: f64 = 0.3;
 
 /// Taxa pedida pelo controlador (`QualityPrefs.bitrate_kbps`), em bit/s; `None` = automática.
 fn taxa_pedida(p: &QualityPrefs) -> Option<u32> {
@@ -191,14 +195,21 @@ struct Fluxo {
     codec: CodecVideo,
     /// Alvo atual do encoder: o teto vezes o fator do controle de taxa.
     bitrate_bps: u32,
-    /// Teto: a taxa do tamanho da imagem, ou a que o usuário fixou.
+    /// Teto: a taxa do tamanho da imagem, ou a que o usuário fixou (cortada se `visivel`).
     teto_bps: u32,
     /// Taxa escolhida pelo usuário: o ajuste pelo tamanho da imagem não mexe no teto.
-    taxa_fixa: bool,
+    taxa_usuario: Option<u32>,
     /// FPS com que o encoder abriu.
     fps: f32,
+    /// Teto de FPS pedido pelo controlador (no máximo o do encoder).
+    fps_usuario: f32,
+    modo: Modo,
     /// Laço lento: resolução e FPS que saem agora.
     escada: Escada,
+    /// Prioridade pedida pelo controlador (`StartVideo`, `SetPriority`).
+    prioridade: Priority,
+    /// Corte de `Visible` aplicado agora (só com outro monitor `Focused` saindo).
+    visivel: bool,
     anterior: (Instant, Amostra),
     ultima_subida: Option<Instant>,
 }
@@ -225,12 +236,54 @@ impl Fluxo {
         })
     }
 
+    /// Teto pela taxa do usuário ou pelo tamanho, com o corte de `Visible`.
+    fn teto_desejado(&self) -> Option<u32> {
+        let base = self.taxa_usuario.or_else(|| self.teto_automatico())?;
+        Some(if self.visivel {
+            ((f64::from(base) * PARTE_VISIVEL) as u32).max(ControleTaxa::PISO_BPS as u32)
+        } else {
+            base
+        })
+    }
+
     fn atualizar_teto(&mut self) {
-        if !self.taxa_fixa
-            && let Some(t) = self.teto_automatico()
-        {
+        if let Some(t) = self.teto_desejado() {
             self.teto_bps = t;
         }
+    }
+
+    /// Teto de FPS para a escada: o do usuário, e no máximo [`FPS_VISIVEL`] se `visivel`.
+    fn fps_teto(&self) -> f32 {
+        if self.visivel {
+            self.fps_usuario.min(FPS_VISIVEL)
+        } else {
+            self.fps_usuario
+        }
+    }
+
+    /// Passa preferência e teto de FPS à escada (o degrau da rede fica).
+    fn preferir(&mut self, agora: Instant) {
+        if self.escada.preferir(self.modo, self.fps_teto(), agora) {
+            self.aplicar_degrau();
+        }
+    }
+
+    /// Liga ou desliga o corte de `Visible`. Vale na hora: FPS no próximo quadro e a taxa já
+    /// ajustada (ao ganhar o foco, o teto inteiro; o laço rápido corta se não couber).
+    fn tornar_visivel(&mut self, visivel: bool, agora: Instant) {
+        if visivel == self.visivel {
+            return;
+        }
+        self.visivel = visivel;
+        self.preferir(agora);
+        self.atualizar_teto();
+        let alvo = if visivel {
+            self.bitrate_bps.min(self.teto_bps)
+        } else {
+            self.teto_bps
+        };
+        self.envio.ajustar_bitrate(alvo);
+        self.bitrate_bps = alvo;
     }
 
     /// Passa o degrau atual da escada ao envio.
@@ -558,7 +611,12 @@ async fn controle_taxa(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
             .unwrap_or_else(PoisonError::into_inner);
         let (teto_bps, monitores) = {
             let mut f = compartilhado.fluxos();
-            f.values_mut().for_each(Fluxo::atualizar_teto);
+            // `Visible` só perde banda para um `Focused` que esteja saindo.
+            let algum_focado = f.len() > 1 && f.values().any(|x| x.prioridade != Priority::Visible);
+            for x in f.values_mut() {
+                x.tornar_visivel(algum_focado && x.prioridade == Priority::Visible, agora);
+                x.atualizar_teto();
+            }
             (
                 f.values().map(|f| u64::from(f.teto_bps)).sum::<u64>(),
                 f.len() as u32,
@@ -655,6 +713,8 @@ pub struct MidiaApp {
     proximo_stream: u8,
     /// Codec e taxa pedidos para cada monitor (`StartVideo.wanted` e `SetVideoQuality`).
     pedidos: HashMap<u32, QualityPrefs>,
+    /// Prioridade de cada monitor (`StartVideo.priority` e `SetPriority`).
+    prioridades: HashMap<u32, Priority>,
     tarefa_cursor: tokio::task::JoinHandle<()>,
     tarefa_stats: tokio::task::JoinHandle<()>,
     tarefa_taxa: tokio::task::JoinHandle<()>,
@@ -682,6 +742,7 @@ impl MidiaApp {
             stream_id: HashMap::new(),
             proximo_stream: 0,
             pedidos: HashMap::new(),
+            prioridades: HashMap::new(),
             tarefa_cursor,
             tarefa_stats,
             tarefa_taxa,
@@ -779,6 +840,7 @@ impl MidiaApp {
                 .erro(ErrorCode::DisplayNotShared, id, String::new())
                 .await;
         }
+        self.prioridade(id, s.priority);
         if let Some(f) = self.compartilhado.fluxos().get(&id) {
             // Já está saindo (o controlador reabriu a aba): só um quadro-chave novo.
             f.envio.pedir_chave();
@@ -822,6 +884,11 @@ impl MidiaApp {
         let pedido = codec_video(prefs.codec);
         let taxa_fixa = taxa_pedida(&prefs);
         let bitrate_bps = taxa_fixa.unwrap_or(BITRATE_BPS);
+        let prioridade = self
+            .prioridades
+            .get(&id)
+            .copied()
+            .unwrap_or(Priority::Focused);
         let so_hardware = self.compartilhado.fluxos().len() >= MAX_FLUXOS_SOFTWARE;
         let modo = modo(&prefs);
         let encoder = tokio::task::spawn_blocking(move || {
@@ -885,9 +952,13 @@ impl MidiaApp {
                     codec,
                     bitrate_bps,
                     teto_bps: bitrate_bps,
-                    taxa_fixa: taxa_fixa.is_some(),
+                    taxa_usuario: taxa_fixa,
                     fps,
+                    fps_usuario: fps_pedido(&prefs, fps),
+                    modo,
                     escada: Escada::new(modo, fps_pedido(&prefs, fps)),
+                    prioridade,
+                    visivel: false,
                     ultima_subida: None,
                 };
                 fluxo.aplicar_degrau();
@@ -968,15 +1039,11 @@ impl MidiaApp {
             return;
         }
         if let Some(f) = self.compartilhado.fluxos().get_mut(&id) {
-            if f.escada
-                .preferir(modo(&prefs), fps_pedido(&prefs, f.fps), Instant::now())
-            {
-                f.aplicar_degrau();
-            }
-            let alvo = taxa_pedida(&prefs)
-                .or_else(|| f.teto_automatico())
-                .unwrap_or(BITRATE_BPS);
-            f.taxa_fixa = taxa_pedida(&prefs).is_some();
+            f.modo = modo(&prefs);
+            f.fps_usuario = fps_pedido(&prefs, f.fps);
+            f.taxa_usuario = taxa_pedida(&prefs);
+            f.preferir(Instant::now());
+            let alvo = f.teto_desejado().unwrap_or(BITRATE_BPS);
             // O teto muda na hora; o próximo passo do controle de taxa aplica o fator.
             f.teto_bps = alvo;
             f.envio.ajustar_bitrate(alvo);
@@ -992,6 +1059,7 @@ impl MidiaApp {
             .map(|f| f.envio);
         self.stream_id.remove(&display_id);
         self.pedidos.remove(&display_id);
+        self.prioridades.remove(&display_id);
         if let Some(c) = &self.captura {
             c.ativar(display_id, false);
         }
@@ -1006,6 +1074,18 @@ impl MidiaApp {
             let _ = tokio::task::spawn_blocking(move || drop(c)).await;
         }
         self.parou(display_id, VideoStopReason::ByController).await;
+    }
+
+    /// `StartVideo.priority` ou `SetPriority`. O laço de taxa aplica em até 100 ms.
+    fn prioridade(&mut self, display_id: u32, p: i32) {
+        let p = match Priority::try_from(p) {
+            Ok(Priority::Visible) => Priority::Visible,
+            _ => Priority::Focused,
+        };
+        self.prioridades.insert(display_id, p);
+        if let Some(f) = self.compartilhado.fluxos().get_mut(&display_id) {
+            f.prioridade = p;
+        }
     }
 
     fn pedir_chave(&self, display_id: u32) {
@@ -1098,7 +1178,7 @@ impl Midia for MidiaApp {
                     },
                 ));
             }
-            // Um stream por vez no controlador por enquanto: prioridade não muda nada.
+            Msg::SetPriority(p) => self.prioridade(p.display_id, p.priority),
             _ => {}
         }
     }
@@ -1126,7 +1206,7 @@ mod tests {
     use taildesk_codec::DecoderOpenH264;
     use taildesk_media::video::RecepcaoVideo;
     use taildesk_platform::captura::{Cursor, Imagem, Rotacao};
-    use taildesk_proto::control::{Control, StopVideo};
+    use taildesk_proto::control::{Control, SetPriority, StopVideo};
     use taildesk_proto::cursor::limits;
     use taildesk_transport::{Identity, Pin, client_endpoint, connect, server_endpoint};
 
@@ -1422,6 +1502,84 @@ mod tests {
         assert_eq!(n.codec(), Codec::H264);
         assert_ne!(n.stream_id, c.stream_id);
         assert!(midia.captura.is_some());
+        drop(midia);
+    }
+
+    /// Dois monitores: o `Visible` sai com no máximo 15 fps e menos taxa enquanto o outro é
+    /// `Focused`; trocar o foco inverte.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn prioridade_visible_corta_fps_e_taxa() {
+        let id = Identity::generate().unwrap();
+        let server = server_endpoint((Ipv4Addr::LOCALHOST, 0).into(), &id).unwrap();
+        let addr = server.local_addr().unwrap();
+        let aceitar = tokio::spawn(async move { server.accept().await.unwrap().await.unwrap() });
+        let client = client_endpoint(addr).unwrap();
+        let _controlador = connect(&client, addr, Pin::Sha256(id.fingerprint()))
+            .await
+            .unwrap();
+        let host = aceitar.await.unwrap();
+        let (saida, mut rx) = mpsc::channel(1024);
+        let monitor = |id| DisplayInfo {
+            id,
+            width: 160,
+            height: 96,
+            shared: true,
+            ..DisplayInfo::default()
+        };
+        let mut midia = MidiaApp::new(
+            CanalMidia {
+                conn: host,
+                saida,
+                decode_caps: Vec::new(),
+            },
+            Fonte::Sintetica,
+            vec![monitor(1), monitor(2)],
+        );
+        for (d, p) in [(1, Priority::Focused), (2, Priority::Visible)] {
+            midia
+                .mensagem(&Msg::StartVideo(StartVideo {
+                    display_id: d,
+                    priority: p.into(),
+                    ..StartVideo::default()
+                }))
+                .await;
+        }
+        /// Próximo `VideoStats` do monitor `d` que satisfaz `cond`.
+        async fn stats(
+            rx: &mut mpsc::Receiver<Control>,
+            d: u32,
+            cond: impl Fn(&VideoStats) -> bool,
+        ) -> VideoStats {
+            for _ in 0..20 {
+                let Msg::VideoStats(st) = proxima(rx, |m| matches!(m, Msg::VideoStats(_))).await
+                else {
+                    unreachable!()
+                };
+                if st.display_id == d && cond(&st) {
+                    return st;
+                }
+            }
+            panic!("monitor {d} não chegou ao estado esperado");
+        }
+        // 160x96 fica no piso automático de 4 Mbit/s; o `Visible` leva 30 % disso.
+        stats(&mut rx, 2, |s| s.fps_max == 15 && s.target_kbps == 1_200).await;
+        stats(&mut rx, 1, |s| s.fps_max > 15 && s.target_kbps == 4_000).await;
+        // Foco vai para o 2.
+        for (d, p) in [(2, Priority::Focused), (1, Priority::Visible)] {
+            midia
+                .mensagem(&Msg::SetPriority(SetPriority {
+                    display_id: d,
+                    priority: p.into(),
+                }))
+                .await;
+        }
+        stats(&mut rx, 1, |s| s.fps_max == 15 && s.target_kbps == 1_200).await;
+        stats(&mut rx, 2, |s| s.fps_max > 15 && s.target_kbps == 4_000).await;
+        // Sem o outro saindo, o `Visible` não perde nada.
+        midia
+            .mensagem(&Msg::StopVideo(StopVideo { display_id: 2 }))
+            .await;
+        stats(&mut rx, 1, |s| s.fps_max > 15).await;
         drop(midia);
     }
 
