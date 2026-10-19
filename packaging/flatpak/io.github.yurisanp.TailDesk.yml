@@ -1,0 +1,67 @@
+# Flatpak do TailDesk (Flathub). Build local, a partir da raiz do repositório:
+#
+#   packaging/flatpak/gerar-fontes.sh
+#   flatpak-builder --user --force-clean --install-deps-from=flathub \
+#     build-flatpak packaging/flatpak/io.github.yurisanp.TailDesk.yml
+#
+# No Flathub a fonte `dir` vira a tag da release (type: git) e o cargo-sources.json vai junto
+# do manifesto. O PyroWave (opcional) ainda não entra no Flatpak.
+app-id: io.github.yurisanp.TailDesk
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  # libclang para o bindgen da PipeWire.
+  - org.freedesktop.Sdk.Extension.llvm22
+command: taildesk
+finish-args:
+  # Janela: Wayland, com X11 só onde não há Wayland.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU: vídeo pelo wgpu e encode/decode por hardware (VA-API, NVENC/NVDEC).
+  - --device=dri
+  # QUIC pela tailnet.
+  - --share=network
+  # LocalAPI do tailscaled (identidade do peer, IP e rota). Só leitura basta para conectar.
+  - --filesystem=/run/tailscale:ro
+  # Som do sistema (captura no host, reprodução no controlador) direto na PipeWire. Tela, mouse,
+  # teclado, área de transferência e escolha de arquivos vêm pelos portais, sem permissão aqui.
+  - --filesystem=xdg-run/pipewire-0
+  # Arquivos recebidos (Configurações → pasta de entrada).
+  - --filesystem=xdg-download/TailDesk:create
+  # Ícone na bandeja (StatusNotifierItem; no sandbox o PID é sempre 2).
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=org.kde.StatusNotifierItem-2-1
+  # Chave da identidade e token do portal no cofre do sistema (Secret Service).
+  - --talk-name=org.freedesktop.secrets
+modules:
+  - name: taildesk
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm22/bin
+      env:
+        CARGO_HOME: /run/build/taildesk/cargo
+        CARGO_NET_OFFLINE: 'true'
+        LIBCLANG_PATH: /usr/lib/sdk/llvm22/lib
+        # openh264 sem SIMD é ~4x mais lento: o build falha se faltar o nasm (o SDK tem).
+        TAILDESK_EXIGIR_NASM: '1'
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo --offline build --release --locked -p taildesk -p taildesk-cli
+      - install -Dm755 target/release/taildesk /app/bin/taildesk
+      - install -Dm755 target/release/taildesk-cli /app/bin/taildesk-cli
+      - install -Dm644 packaging/linux/io.github.yurisanp.TailDesk.desktop /app/share/applications/io.github.yurisanp.TailDesk.desktop
+      - install -Dm644 packaging/linux/io.github.yurisanp.TailDesk.svg /app/share/icons/hicolor/scalable/apps/io.github.yurisanp.TailDesk.svg
+      - install -Dm644 packaging/linux/io.github.yurisanp.TailDesk.metainfo.xml /app/share/metainfo/io.github.yurisanp.TailDesk.metainfo.xml
+      - install -Dm644 LICENSE-MIT /app/share/licenses/io.github.yurisanp.TailDesk/LICENSE-MIT
+      - install -Dm644 LICENSE-APACHE /app/share/licenses/io.github.yurisanp.TailDesk/LICENSE-APACHE
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - build-flatpak
+          - .flatpak-builder
+      - cargo-sources.json

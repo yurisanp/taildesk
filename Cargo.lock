@@ -5621,6 +5621,7 @@ dependencies = [
  "keyring-core",
  "pipewire",
  "png",
+ "pollster",
  "rfd",
  "rustix 1.1.5",
  "taildesk-keyboard",

@@ -20,7 +20,9 @@ png = "0.18"
 zbus = "5"
 # Portais RemoteDesktop e ScreenCast (MIT). Sem tokio: o zbus do Slint usa async-io e os dois
 # têm de concordar no runtime do zbus.
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "clipboard", "file_chooser", "open_uri", "remote_desktop", "screencast"] }
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "background", "clipboard", "file_chooser", "open_uri", "remote_desktop", "screencast"] }
+# Espera o portal Background numa thread comum ("Iniciar com o sistema" no Flatpak; MIT/Apache).
+pollster = "0.4"
 futures-util = { version = "0.3", default-features = false }
 # Recebe os quadros de cada monitor do portal (MIT). Liga na libpipewire-0.3 do sistema; o build
 # precisa do pacote -dev e do libclang (bindgen).

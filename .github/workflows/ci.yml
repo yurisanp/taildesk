@@ -88,4 +88,4 @@ jobs:
       - name: AppStream MetaInfo
         run: appstreamcli validate --no-net packaging/linux/io.github.yurisanp.TailDesk.metainfo.xml
       - name: .desktop
-        run: desktop-file-validate packaging/linux/taildesk.desktop
+        run: desktop-file-validate packaging/linux/io.github.yurisanp.TailDesk.desktop

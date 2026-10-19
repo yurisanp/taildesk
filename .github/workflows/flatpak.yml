@@ -1,0 +1,56 @@
+name: Flatpak
+
+# Monta o Flatpak (packaging/flatpak) para validar o manifesto e as permissões. Não publica: o
+# Flathub tem o repositório dele (io.github.yurisanp.TailDesk) com o mesmo manifesto.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packaging/flatpak/**"
+      - "packaging/linux/**"
+      - "Cargo.lock"
+      - ".github/workflows/flatpak.yml"
+  pull_request:
+    paths:
+      - "packaging/flatpak/**"
+      - "packaging/linux/**"
+      - "Cargo.lock"
+      - ".github/workflows/flatpak.yml"
+  workflow_dispatch:
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # O appstreamcli compose roda fora do sandbox e precisa ler o ícone SVG (librsvg).
+      - name: flatpak e flatpak-builder
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flatpak flatpak-builder appstream appstream-compose librsvg2-common
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Fontes do cargo (sem rede no build)
+        run: packaging/flatpak/gerar-fontes.sh
+      - uses: actions/cache@v4
+        with:
+          path: .flatpak-builder
+          key: flatpak-builder-${{ hashFiles('packaging/flatpak/io.github.yurisanp.TailDesk.yml', 'Cargo.lock') }}
+          restore-keys: flatpak-builder-
+      - name: Build
+        run: |
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            --install-deps-from=flathub --repo=repo \
+            build-flatpak packaging/flatpak/io.github.yurisanp.TailDesk.yml
+      - name: Conferir o que foi instalado
+        run: |
+          test -x build-flatpak/files/bin/taildesk
+          test -f build-flatpak/export/share/applications/io.github.yurisanp.TailDesk.desktop
+          test -f build-flatpak/export/share/icons/hicolor/scalable/apps/io.github.yurisanp.TailDesk.svg
+          appstreamcli validate --no-net build-flatpak/files/share/metainfo/io.github.yurisanp.TailDesk.metainfo.xml
+      - name: Pacote .flatpak
+        run: flatpak build-bundle repo taildesk.flatpak io.github.yurisanp.TailDesk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: taildesk.flatpak
+          if-no-files-found: error

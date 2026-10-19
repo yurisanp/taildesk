@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Metadados AppStream do TailDesk: fazem o app aparecer em lojas (GNOME Software,
      KDE Discover, Flathub) e acompanham o .deb, o .rpm e o AppImage.
-     O id em DNS reverso já serve para o Flatpak/Flathub; o .desktop instalado
-     continua sendo taildesk.desktop (apontado por <launchable>). -->
+     O id em DNS reverso vale para tudo: o app_id da janela no Wayland, o .desktop, o
+     ícone e o Flatpak/Flathub. -->
 <component type="desktop-application">
   <id>io.github.yurisanp.TailDesk</id>
 
@@ -42,7 +42,7 @@
     </ul>
   </description>
 
-  <launchable type="desktop-id">taildesk.desktop</launchable>
+  <launchable type="desktop-id">io.github.yurisanp.TailDesk.desktop</launchable>
 
   <categories>
     <category>Network</category>
