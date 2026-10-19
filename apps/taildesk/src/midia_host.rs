@@ -667,20 +667,20 @@ async fn controle_taxa(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
 /// O que mudou nesta máquina durante a sessão ([`Midia::evento`], `13-multimonitor.md` §4.3).
 #[derive(Debug)]
 enum Mudanca {
-    /// Lista nova de monitores (Windows: um monitor ligado ou desligado).
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// Lista nova de monitores (Windows e X11: um monitor ligado ou desligado).
     Monitores(Vec<DisplayInfo>),
     /// O compositor encerrou o stream deste monitor (Wayland: monitor desligado).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     StreamFechou(u32),
 }
 
-/// De quanto em quanto tempo o host confere a lista de monitores (Windows).
-#[cfg(windows)]
+/// De quanto em quanto tempo o host confere a lista de monitores (Windows e X11).
+#[cfg(any(windows, target_os = "linux"))]
 const INTERVALO_MONITORES: Duration = Duration::from_secs(2);
 
-/// Confere a lista de monitores e avisa quando ela muda (Windows; DXGI não tem evento).
-#[cfg(windows)]
+/// Confere a lista de monitores e avisa quando ela muda (Windows e X11: sem evento que chegue
+/// aqui sem uma janela própria).
+#[cfg(any(windows, target_os = "linux"))]
 async fn vigiar_monitores(mut atual: Vec<DisplayInfo>, tx: mpsc::UnboundedSender<Mudanca>) {
     let mut t = tokio::time::interval(INTERVALO_MONITORES);
     t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -707,6 +707,8 @@ enum Captura {
     Dxgi(taildesk_platform::captura_dxgi::CapturaDxgi),
     #[cfg(target_os = "linux")]
     PipeWire(taildesk_platform::captura_pipewire::CapturaPipeWire),
+    #[cfg(target_os = "linux")]
+    X11(taildesk_platform::captura_x11::CapturaX11),
     #[cfg(test)]
     // Só o Drop (parar a thread) importa.
     Sintetica(#[allow(dead_code)] tests::Sintetica),
@@ -719,6 +721,8 @@ impl Captura {
             Captura::Dxgi(c) => c.ativar(display_id, ativo),
             #[cfg(target_os = "linux")]
             Captura::PipeWire(c) => c.ativar(display_id, ativo),
+            #[cfg(target_os = "linux")]
+            Captura::X11(c) => c.ativar(display_id, ativo),
             #[cfg(test)]
             Captura::Sintetica(_) => {}
         }
@@ -733,6 +737,9 @@ pub enum Fonte {
     /// Sessão do portal (a mesma do mouse e do teclado).
     #[cfg(target_os = "linux")]
     Portal(Arc<taildesk_platform::wayland::SessaoPortal>),
+    /// Sessão X11 sem portal: XShm, com os monitores do RandR.
+    #[cfg(target_os = "linux")]
+    X11,
     /// Sem captura (portal recusado, sistema sem suporte): todo `StartVideo` é recusado.
     Nenhuma,
     /// Quadros e cursor gerados, para os testes no container.
@@ -780,9 +787,13 @@ impl MidiaApp {
         let tarefa_taxa = tokio::spawn(controle_taxa(canal.clone(), compartilhado.clone()));
         let (mudancas_tx, mudancas) = mpsc::unbounded_channel();
         #[cfg(windows)]
-        let tarefa_vigia = matches!(fonte, Fonte::Dxgi)
-            .then(|| tokio::spawn(vigiar_monitores(monitores.clone(), mudancas_tx.clone())));
-        #[cfg(not(windows))]
+        let vigiar = matches!(fonte, Fonte::Dxgi);
+        #[cfg(target_os = "linux")]
+        let vigiar = matches!(fonte, Fonte::X11);
+        #[cfg(any(windows, target_os = "linux"))]
+        let tarefa_vigia =
+            vigiar.then(|| tokio::spawn(vigiar_monitores(monitores.clone(), mudancas_tx.clone())));
+        #[cfg(not(any(windows, target_os = "linux")))]
         let tarefa_vigia = None;
         MidiaApp {
             canal,
@@ -856,6 +867,19 @@ impl MidiaApp {
                 .map_err(|e| e.to_string())?
                 .map_err(|e| e.to_string())?;
                 Ok(Captura::PipeWire(c))
+            }
+            #[cfg(target_os = "linux")]
+            Fonte::X11 => {
+                use taildesk_platform::captura_x11::CapturaX11;
+                let mut cb = self.ao_quadro();
+                let c = tokio::task::spawn_blocking(move || {
+                    let ms = taildesk_platform::x11::listar_monitores()?;
+                    CapturaX11::iniciar(&ms, move |q: &Quadro<'_>| cb.quadro(q))
+                })
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+                Ok(Captura::X11(c))
             }
             Fonte::Nenhuma => Err("captura de tela indisponível".into()),
             #[cfg(test)]
@@ -1838,6 +1862,61 @@ mod tests {
             unreachable!()
         };
         assert_eq!(d.displays.iter().map(|m| m.id).collect::<Vec<_>>(), [3]);
+        drop(midia);
+    }
+
+    /// Captura X11 de verdade (XShm) até o `VideoStats`, quando há um servidor X (`DISPLAY`,
+    /// ex.: Xvfb). Sem X, passa sem testar.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn video_pela_captura_x11() {
+        if std::env::var_os("DISPLAY").is_none() {
+            return;
+        }
+        let Ok(ms) = taildesk_platform::x11::listar_monitores() else {
+            return;
+        };
+        let id = Identity::generate().unwrap();
+        let server = server_endpoint((Ipv4Addr::LOCALHOST, 0).into(), &id).unwrap();
+        let addr = server.local_addr().unwrap();
+        let aceitar = tokio::spawn(async move { server.accept().await.unwrap().await.unwrap() });
+        let client = client_endpoint(addr).unwrap();
+        let _controlador = connect(&client, addr, Pin::Sha256(id.fingerprint()))
+            .await
+            .unwrap();
+        let host = aceitar.await.unwrap();
+        let (saida, mut rx) = mpsc::channel(1024);
+        let monitores: Vec<DisplayInfo> = ms
+            .iter()
+            .map(|m| DisplayInfo {
+                id: m.display_id,
+                width: m.largura,
+                height: m.altura,
+                shared: true,
+                ..DisplayInfo::default()
+            })
+            .collect();
+        let mut midia = MidiaApp::new(
+            CanalMidia {
+                conn: host,
+                saida,
+                decode_caps: Vec::new(),
+            },
+            Fonte::X11,
+            monitores,
+        );
+        midia
+            .mensagem(&Msg::StartVideo(StartVideo {
+                display_id: ms[0].display_id,
+                ..StartVideo::default()
+            }))
+            .await;
+        proxima(&mut rx, |m| matches!(m, Msg::CodecSelected(_))).await;
+        let Msg::VideoStats(st) = proxima(&mut rx, |m| matches!(m, Msg::VideoStats(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!((st.width, st.height), (ms[0].largura, ms[0].altura));
         drop(midia);
     }
 

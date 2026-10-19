@@ -30,7 +30,11 @@ xkbcommon-dl = "0.4"
 # Arrastar arquivos para a janela no Wayland (o winit não faz): conexão convidada no wl_display
 # da janela (MIT). `system` + `dlopen`: a mesma libwayland-client do winit, carregada em execução.
 wayland-client = { version = "0.31", features = ["system", "dlopen"] }
-rustix = { version = "1", features = ["event", "fs", "pipe"] }
+rustix = { version = "1", features = ["event", "fs", "mm", "pipe"] }
+# Host em sessão X11 (Xorg, XFCE, i3), sem portal: captura por MIT-SHM com XDamage, cursor pelo
+# XFixes, monitores pelo RandR e input pelo XTest (MIT OR Apache-2.0). Protocolo em Rust puro,
+# sem libxcb; o winit já traz o mesmo crate.
+x11rb = { version = "0.13", features = ["damage", "randr", "shm", "xfixes", "xtest"] }
 zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-crypto-rust"] }
 
 [target.'cfg(windows)'.dependencies]
