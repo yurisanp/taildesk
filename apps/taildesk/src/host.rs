@@ -253,7 +253,7 @@ pub fn layout_local() -> String {
 }
 
 #[cfg(windows)]
-fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
+pub(crate) fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
     use taildesk_platform::captura_dxgi::listar_monitores;
     listar_monitores()
         .unwrap_or_default()
@@ -326,6 +326,7 @@ impl Maquina for MaquinaApp {
             mouse: Default::default(),
             presos: Default::default(),
             monitores,
+            listado: std::time::Instant::now(),
             ultimo: None,
         })
     }
@@ -418,15 +419,33 @@ pub struct EntradaApp {
     mouse: taildesk_platform::mouse::sendinput::InjetorMouseWindows,
     presos: taildesk_platform::mouse::BotoesPresos,
     monitores: Vec<(u32, taildesk_platform::mouse::sendinput::Retangulo)>,
+    /// Quando `monitores` foi lido (monitores ligados ou desligados no meio da sessão).
+    listado: std::time::Instant,
     /// Monitor do último movimento absoluto (botões e rolagem não dizem o monitor).
     ultimo: Option<taildesk_platform::mouse::sendinput::Retangulo>,
 }
 
 #[cfg(windows)]
 impl EntradaApp {
+    /// Relê os retângulos dos monitores se um `display_id` é novo ou se a lista tem mais de
+    /// 2 s (um monitor ligado ou desligado muda a posição dos outros).
+    fn atualizar_monitores(&mut self, display_id: u32) {
+        let conhecido = self.monitores.iter().any(|(id, _)| *id == display_id);
+        if conhecido && self.listado.elapsed() < std::time::Duration::from_secs(2) {
+            return;
+        }
+        self.listado = std::time::Instant::now();
+        if let Ok(ms) = taildesk_platform::captura_dxgi::listar_monitores()
+            && !ms.is_empty()
+        {
+            self.monitores = ms.into_iter().map(|m| (m.display_id, m.area)).collect();
+        }
+    }
+
     fn injetar_mouse(&mut self, ev: &taildesk_platform::mouse::EventoMouse) {
         use taildesk_platform::mouse::EventoMouse;
         if let EventoMouse::Absoluto { display_id, .. } = *ev {
+            self.atualizar_monitores(display_id);
             self.ultimo = self
                 .monitores
                 .iter()

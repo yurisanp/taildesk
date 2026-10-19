@@ -9,6 +9,9 @@
 //! O cursor vem separado da imagem, no `SPA_META_Cursor` de cada buffer (a sessão pede o modo
 //! metadado): posição sempre que mexe e o bitmap só quando a forma muda.
 //!
+//! Stream que o compositor encerra no meio (monitor desligado, compartilhamento parado pelo
+//! sistema) chama `ao_fim` com o `display_id`, uma vez.
+//!
 //! Formatos pedidos: BGRx, RGBx, BGRA, RGBA em memória compartilhada (memfd), o que todo portal
 //! entrega. DMA-BUF sem cópia entra com o encode por hardware (fase 4). Monitor que ninguém está
 //! vendo é pausado (`ativar(id, false)`): o compositor para de produzir quadros para ele
@@ -67,10 +70,17 @@ impl fmt::Debug for CapturaPipeWire {
 
 impl CapturaPipeWire {
     /// Conecta um stream por monitor (`(display_id, node_id)`) e chama `ao_quadro` a cada
-    /// quadro novo, na thread do PipeWire.
-    pub fn iniciar<F>(conexao: Conexao, monitores: &[(u32, u32)], ao_quadro: F) -> io::Result<Self>
+    /// quadro novo, na thread do PipeWire. `ao_fim` recebe o `display_id` de um stream que o
+    /// compositor encerrou.
+    pub fn iniciar<F, G>(
+        conexao: Conexao,
+        monitores: &[(u32, u32)],
+        ao_quadro: F,
+        ao_fim: G,
+    ) -> io::Result<Self>
     where
         F: FnMut(&Quadro<'_>) + Send + 'static,
+        G: FnMut(u32) + Send + 'static,
     {
         let (tx, rx) = pw::channel::channel::<Comando>();
         let (pronto_tx, pronto_rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
@@ -78,7 +88,7 @@ impl CapturaPipeWire {
         let thread = std::thread::Builder::new()
             .name("taildesk-pipewire".into())
             .spawn(move || {
-                if let Err(e) = laco(conexao, &monitores, ao_quadro, rx, &pronto_tx) {
+                if let Err(e) = laco(conexao, &monitores, ao_quadro, ao_fim, rx, &pronto_tx) {
                     let _ = pronto_tx.send(Err(e.to_string()));
                 }
             })?;
@@ -118,17 +128,28 @@ impl Drop for CapturaPipeWire {
 struct Estado {
     display_id: u32,
     formato: Option<(FormatoPixel, u32, u32)>,
+    /// Já chegou a conectar (para não confundir o começo com o fim).
+    conectou: bool,
+    terminou: bool,
 }
 
-fn laco<F>(
+/// O stream acabou de vez: estava conectado e caiu para desconectado ou erro.
+fn stream_terminou(antes: &pw::stream::StreamState, agora: &pw::stream::StreamState) -> bool {
+    use pw::stream::StreamState as S;
+    matches!(antes, S::Paused | S::Streaming) && matches!(agora, S::Unconnected | S::Error(_))
+}
+
+fn laco<F, G>(
     conexao: Conexao,
     monitores: &[(u32, u32)],
     ao_quadro: F,
+    ao_fim: G,
     rx: pw::channel::Receiver<Comando>,
     pronto: &std::sync::mpsc::SyncSender<Result<(), String>>,
 ) -> Result<(), pw::Error>
 where
     F: FnMut(&Quadro<'_>) + 'static,
+    G: FnMut(u32) + 'static,
 {
     pw::init();
     let main_loop = pw::main_loop::MainLoopRc::new(None)?;
@@ -138,6 +159,7 @@ where
         Conexao::Padrao => context.connect_rc(None)?,
     };
     let ao_quadro = Rc::new(RefCell::new(ao_quadro));
+    let ao_fim = Rc::new(RefCell::new(ao_fim));
 
     let mut streams = Vec::with_capacity(monitores.len());
     let mut ouvintes = Vec::with_capacity(monitores.len());
@@ -152,10 +174,22 @@ where
             },
         )?;
         let cb = Rc::clone(&ao_quadro);
+        let fim = Rc::clone(&ao_fim);
         let ouvinte = stream
             .add_local_listener_with_user_data(Estado {
                 display_id,
                 formato: None,
+                conectou: false,
+                terminou: false,
+            })
+            .state_changed(move |_, estado, antes, agora| {
+                if matches!(agora, pw::stream::StreamState::Streaming) {
+                    estado.conectou = true;
+                }
+                if estado.conectou && !estado.terminou && stream_terminou(&antes, &agora) {
+                    estado.terminou = true;
+                    (fim.borrow_mut())(estado.display_id);
+                }
             })
             .param_changed(|stream, estado, id, param| {
                 if id != spa::param::ParamType::Format.as_raw() {
@@ -475,5 +509,14 @@ mod tests {
         };
         assert!(forma_valida(&f));
         assert!(!forma_valida(&FormaCursor { altura: 33, ..f }));
+    }
+
+    #[test]
+    fn so_conta_o_fim_de_um_stream_que_estava_ligado() {
+        use pw::stream::StreamState as S;
+        assert!(stream_terminou(&S::Streaming, &S::Unconnected));
+        assert!(stream_terminou(&S::Paused, &S::Error("removido".into())));
+        assert!(!stream_terminou(&S::Connecting, &S::Unconnected));
+        assert!(!stream_terminou(&S::Streaming, &S::Paused));
     }
 }

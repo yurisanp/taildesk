@@ -7,6 +7,10 @@
 //! físicos o processo precisa ser DPI-aware por monitor: o manifesto do app declara
 //! `PerMonitorV2` e [`listar_monitores`] também pede isso em tempo de execução.
 //!
+//! O `display_id` de um monitor não muda enquanto o processo roda, nem quando outro é ligado ou
+//! desligado no meio da sessão (`13-multimonitor.md` §4.3): fica preso ao nome do dispositivo e
+//! um monitor novo ganha o próximo número livre.
+//!
 //! Cada monitor capturado tem uma thread com o próprio dispositivo D3D11 no adaptador da
 //! saída. O quadro vai da textura da GPU para uma textura de staging reaproveitada e o callback
 //! recebe a imagem emprestada do mapeamento, sem alocar. O ponteiro não entra na imagem (a
@@ -17,11 +21,12 @@
 //! (`DXGI_ERROR_ACCESS_LOST`); a thread recria e segue. Monitor pausado (`ativar(id, false)`)
 //! solta a duplicação inteira: o Windows não copia nada para ele.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -121,17 +126,25 @@ pub fn listar_monitores() -> io::Result<Vec<MonitorDxgi>> {
             });
         }
     }
-    Ok(numerar(brutos))
+    static CONHECIDOS: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
+    let mut conhecidos = CONHECIDOS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    Ok(numerar(brutos, &mut conhecidos))
 }
 
-/// Principal (o que começa em 0,0) primeiro; os outros na ordem do DXGI.
-fn numerar(mut ms: Vec<MonitorDxgi>) -> Vec<MonitorDxgi> {
+/// Principal (o que começa em 0,0) primeiro; os outros na ordem do DXGI. Na primeira lista os
+/// números são 0, 1, 2…; depois, um monitor já visto (pelo nome) mantém o número e um novo ganha
+/// o próximo livre.
+fn numerar(mut ms: Vec<MonitorDxgi>, conhecidos: &mut HashMap<String, u32>) -> Vec<MonitorDxgi> {
     for m in &mut ms {
         m.principal = m.area.x == 0 && m.area.y == 0;
     }
     ms.sort_by_key(|m| !m.principal);
-    for (i, m) in ms.iter_mut().enumerate() {
-        m.display_id = i as u32;
+    for m in &mut ms {
+        let proximo = conhecidos.values().max().map_or(0, |v| v + 1);
+        m.display_id = *conhecidos.entry(m.nome.clone()).or_insert(proximo);
     }
     ms
 }
@@ -562,12 +575,36 @@ mod tests {
 
     #[test]
     fn principal_vem_primeiro() {
-        let ms = numerar(vec![m("A", -1920, 0), m("B", 0, 0), m("C", 1920, 0)]);
+        let mut k = HashMap::new();
+        let ms = numerar(
+            vec![m("A", -1920, 0), m("B", 0, 0), m("C", 1920, 0)],
+            &mut k,
+        );
         let nomes: Vec<_> = ms
             .iter()
             .map(|m| (m.display_id, m.nome.as_str(), m.principal))
             .collect();
         assert_eq!(nomes, [(0, "B", true), (1, "A", false), (2, "C", false)]);
+    }
+
+    #[test]
+    fn numero_fica_quando_um_monitor_sai_ou_entra() {
+        let mut k = HashMap::new();
+        numerar(
+            vec![m("A", -1920, 0), m("B", 0, 0), m("C", 1920, 0)],
+            &mut k,
+        );
+        // O A sai: B e C continuam 0 e 2.
+        let ms = numerar(vec![m("B", 0, 0), m("C", 1920, 0)], &mut k);
+        let ids: Vec<_> = ms.iter().map(|m| (m.nome.as_str(), m.display_id)).collect();
+        assert_eq!(ids, [("B", 0), ("C", 2)]);
+        // Um novo (D) ganha o próximo livre; o A, de volta, o número antigo.
+        let ms = numerar(
+            vec![m("A", -1920, 0), m("B", 0, 0), m("D", 3840, 0)],
+            &mut k,
+        );
+        let ids: Vec<_> = ms.iter().map(|m| (m.nome.as_str(), m.display_id)).collect();
+        assert_eq!(ids, [("B", 0), ("A", 1), ("D", 3)]);
     }
 
     #[test]

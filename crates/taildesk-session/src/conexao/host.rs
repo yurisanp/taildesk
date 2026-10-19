@@ -90,6 +90,18 @@ impl CanalMidia {
 /// `SetPriority`, `RequestKeyframe` e `PictureLoss`. Soltar para tudo.
 pub trait Midia: Send + 'static {
     fn mensagem(&mut self, msg: &Msg) -> impl Future<Output = ()> + Send;
+
+    /// Espera algo mudar nesta máquina (monitor ligado ou desligado, stream do portal
+    /// fechado). Precisa ser seguro de cancelar: a sessão espera isto junto com a rede e só
+    /// depois chama [`Midia::tratar_evento`]. O padrão nunca termina.
+    fn evento(&mut self) -> impl Future<Output = ()> + Send {
+        std::future::pending()
+    }
+
+    /// Trata o que [`Midia::evento`] viu.
+    fn tratar_evento(&mut self) -> impl Future<Output = ()> + Send {
+        async {}
+    }
 }
 
 /// Host sem vídeo (testes, CLI de arquivos).
@@ -590,6 +602,10 @@ async fn ao_vivo<M: Maquina>(
 
     let motivo = loop {
         tokio::select! {
+            () = midia.evento() => {
+                midia.tratar_evento().await;
+                continue;
+            }
             m = leitor.proxima() => {
                 let msg = match m {
                     Ok(m) => m,

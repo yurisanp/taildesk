@@ -18,8 +18,9 @@ use taildesk_media::video::{ConfigEnvio, EnvioVideo};
 use taildesk_platform::captura::{FormaCursor, FormatoPixel, Quadro};
 use taildesk_proto::control::{
     AudioCodec, AudioSelected, AudioStopReason, AudioStopped, Codec, CodecCap, CodecSelected,
-    ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg, Priority, QualityMode, QualityPrefs,
-    SetVideoQuality, StartAudio, StartVideo, VideoStats, VideoStopReason, VideoStopped,
+    ColorInfo, CursorPos, DisplayInfo, DisplaysChanged, Error, ErrorCode, Msg, Priority,
+    QualityMode, QualityPrefs, SetVideoQuality, StartAudio, StartVideo, VideoStats,
+    VideoStopReason, VideoStopped,
 };
 use taildesk_proto::cursor::{STREAM_MAGIC, ShapeHeader};
 use taildesk_proto::media::AUDIO_STREAM_MIN;
@@ -663,6 +664,43 @@ async fn controle_taxa(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
     }
 }
 
+/// O que mudou nesta máquina durante a sessão ([`Midia::evento`], `13-multimonitor.md` §4.3).
+#[derive(Debug)]
+enum Mudanca {
+    /// Lista nova de monitores (Windows: um monitor ligado ou desligado).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Monitores(Vec<DisplayInfo>),
+    /// O compositor encerrou o stream deste monitor (Wayland: monitor desligado).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    StreamFechou(u32),
+}
+
+/// De quanto em quanto tempo o host confere a lista de monitores (Windows).
+#[cfg(windows)]
+const INTERVALO_MONITORES: Duration = Duration::from_secs(2);
+
+/// Confere a lista de monitores e avisa quando ela muda (Windows; DXGI não tem evento).
+#[cfg(windows)]
+async fn vigiar_monitores(mut atual: Vec<DisplayInfo>, tx: mpsc::UnboundedSender<Mudanca>) {
+    let mut t = tokio::time::interval(INTERVALO_MONITORES);
+    t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    t.tick().await;
+    loop {
+        t.tick().await;
+        let Ok(lista) = tokio::task::spawn_blocking(crate::host::monitores).await else {
+            continue;
+        };
+        // Lista vazia é passageira (troca de modo, tela de bloqueio): espera a próxima.
+        if lista.is_empty() || lista == atual {
+            continue;
+        }
+        atual.clone_from(&lista);
+        if tx.send(Mudanca::Monitores(lista)).is_err() {
+            return;
+        }
+    }
+}
+
 /// Captura de todos os monitores, com pausa por monitor.
 enum Captura {
     #[cfg(windows)]
@@ -720,6 +758,13 @@ pub struct MidiaApp {
     tarefa_taxa: tokio::task::JoinHandle<()>,
     /// Som do sistema saindo (`stream_id`, captura), só com `Permissions.audio` e `StartAudio`.
     som: Option<(u32, SomHost)>,
+    /// Mudanças da máquina (monitor ligado ou desligado) esperando [`Midia::tratar_evento`].
+    /// No Windows só o vigia manda (com a cópia dele).
+    #[cfg_attr(windows, allow(dead_code))]
+    mudancas_tx: mpsc::UnboundedSender<Mudanca>,
+    mudancas: mpsc::UnboundedReceiver<Mudanca>,
+    pendentes: Vec<Mudanca>,
+    tarefa_vigia: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl MidiaApp {
@@ -733,6 +778,12 @@ impl MidiaApp {
         });
         let tarefa_stats = tokio::spawn(stats(canal.clone(), compartilhado.clone()));
         let tarefa_taxa = tokio::spawn(controle_taxa(canal.clone(), compartilhado.clone()));
+        let (mudancas_tx, mudancas) = mpsc::unbounded_channel();
+        #[cfg(windows)]
+        let tarefa_vigia = matches!(fonte, Fonte::Dxgi)
+            .then(|| tokio::spawn(vigiar_monitores(monitores.clone(), mudancas_tx.clone())));
+        #[cfg(not(windows))]
+        let tarefa_vigia = None;
         MidiaApp {
             canal,
             fonte,
@@ -747,6 +798,10 @@ impl MidiaApp {
             tarefa_stats,
             tarefa_taxa,
             som: None,
+            mudancas_tx,
+            mudancas,
+            pendentes: Vec::new(),
+            tarefa_vigia,
         }
     }
 
@@ -786,10 +841,16 @@ impl MidiaApp {
                     .map(|m| (m.display_id, m.node_id))
                     .collect();
                 let mut cb = self.ao_quadro();
+                let tx = self.mudancas_tx.clone();
                 let c = tokio::task::spawn_blocking(move || {
-                    CapturaPipeWire::iniciar(Conexao::Portal(fd), &nodes, move |q: &Quadro<'_>| {
-                        cb.quadro(q)
-                    })
+                    CapturaPipeWire::iniciar(
+                        Conexao::Portal(fd),
+                        &nodes,
+                        move |q: &Quadro<'_>| cb.quadro(q),
+                        move |id| {
+                            let _ = tx.send(Mudanca::StreamFechou(id));
+                        },
+                    )
                 })
                 .await
                 .map_err(|e| e.to_string())?
@@ -1088,6 +1149,86 @@ impl MidiaApp {
         }
     }
 
+    /// Para o vídeo de um monitor que sumiu, sem esperar o controlador pedir.
+    async fn monitor_saiu(&mut self, display_id: u32) {
+        let envio = self
+            .compartilhado
+            .fluxos()
+            .remove(&display_id)
+            .map(|f| f.envio);
+        self.stream_id.remove(&display_id);
+        self.pedidos.remove(&display_id);
+        self.prioridades.remove(&display_id);
+        if let Some(e) = envio {
+            let _ = tokio::task::spawn_blocking(move || drop(e)).await;
+            self.parou(display_id, VideoStopReason::DisplayRemoved)
+                .await;
+        }
+    }
+
+    /// Lista nova de monitores: para o vídeo dos que saíram, reabre a captura com a lista nova
+    /// (os que continuam seguem no mesmo stream, com um quadro-chave) e avisa o controlador.
+    async fn monitores_mudaram(&mut self, lista: Vec<DisplayInfo>) {
+        let sairam: Vec<u32> = self
+            .monitores
+            .iter()
+            .map(|m| m.id)
+            .filter(|id| !lista.iter().any(|m| m.id == *id))
+            .collect();
+        eprintln!(
+            "taildesk: monitores mudaram ({} agora, {} saíram)",
+            lista.len(),
+            sairam.len()
+        );
+        for id in sairam {
+            self.monitor_saiu(id).await;
+        }
+        self.monitores = lista;
+        if let Some(c) = self.captura.take() {
+            let _ = tokio::task::spawn_blocking(move || drop(c)).await;
+        }
+        let saindo: Vec<u32> = self.compartilhado.fluxos().keys().copied().collect();
+        if !saindo.is_empty() {
+            match self.abrir_captura().await {
+                Ok(c) => {
+                    for m in &self.monitores {
+                        c.ativar(m.id, saindo.contains(&m.id));
+                    }
+                    self.captura = Some(c);
+                    for id in &saindo {
+                        self.pedir_chave(*id);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("taildesk: captura: {e}");
+                    for id in saindo {
+                        self.monitor_saiu(id).await;
+                    }
+                }
+            }
+        }
+        self.canal
+            .enviar(Msg::DisplaysChanged(DisplaysChanged {
+                displays: self.monitores.clone(),
+            }))
+            .await;
+    }
+
+    /// O compositor fechou o stream de um monitor (Wayland): ele sai da lista.
+    async fn stream_fechou(&mut self, display_id: u32) {
+        if !self.monitores.iter().any(|m| m.id == display_id) {
+            return;
+        }
+        eprintln!("taildesk: o stream do monitor {display_id} foi encerrado pelo sistema");
+        self.monitor_saiu(display_id).await;
+        self.monitores.retain(|m| m.id != display_id);
+        self.canal
+            .enviar(Msg::DisplaysChanged(DisplaysChanged {
+                displays: self.monitores.clone(),
+            }))
+            .await;
+    }
+
     fn pedir_chave(&self, display_id: u32) {
         if let Some(f) = self.compartilhado.fluxos().get(&display_id) {
             f.envio.pedir_chave();
@@ -1182,6 +1323,23 @@ impl Midia for MidiaApp {
             _ => {}
         }
     }
+
+    async fn evento(&mut self) {
+        // Seguro de cancelar: `recv` é, e guardar o que chegou não espera nada.
+        match self.mudancas.recv().await {
+            Some(m) => self.pendentes.push(m),
+            None => std::future::pending().await,
+        }
+    }
+
+    async fn tratar_evento(&mut self) {
+        for m in std::mem::take(&mut self.pendentes) {
+            match m {
+                Mudanca::Monitores(lista) => self.monitores_mudaram(lista).await,
+                Mudanca::StreamFechou(id) => self.stream_fechou(id).await,
+            }
+        }
+    }
 }
 
 impl Drop for MidiaApp {
@@ -1193,6 +1351,9 @@ impl Drop for MidiaApp {
         self.tarefa_cursor.abort();
         self.tarefa_stats.abort();
         self.tarefa_taxa.abort();
+        if let Some(t) = &self.tarefa_vigia {
+            t.abort();
+        }
     }
 }
 
@@ -1580,6 +1741,103 @@ mod tests {
             .mensagem(&Msg::StopVideo(StopVideo { display_id: 2 }))
             .await;
         stats(&mut rx, 1, |s| s.fps_max > 15).await;
+        drop(midia);
+    }
+
+    /// Monitor desligado no meio da sessão: o vídeo dele para com `DisplayRemoved`, o
+    /// controlador recebe a lista nova e o outro monitor segue saindo.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn monitor_removido_e_ligado_no_meio_da_sessao() {
+        let id = Identity::generate().unwrap();
+        let server = server_endpoint((Ipv4Addr::LOCALHOST, 0).into(), &id).unwrap();
+        let addr = server.local_addr().unwrap();
+        let aceitar = tokio::spawn(async move { server.accept().await.unwrap().await.unwrap() });
+        let client = client_endpoint(addr).unwrap();
+        let _controlador = connect(&client, addr, Pin::Sha256(id.fingerprint()))
+            .await
+            .unwrap();
+        let host = aceitar.await.unwrap();
+        let (saida, mut rx) = mpsc::channel(1024);
+        let monitor = |id| DisplayInfo {
+            id,
+            width: 160,
+            height: 96,
+            shared: true,
+            ..DisplayInfo::default()
+        };
+        let mut midia = MidiaApp::new(
+            CanalMidia {
+                conn: host,
+                saida,
+                decode_caps: Vec::new(),
+            },
+            Fonte::Sintetica,
+            vec![monitor(1), monitor(2)],
+        );
+        for d in [1, 2] {
+            midia
+                .mensagem(&Msg::StartVideo(StartVideo {
+                    display_id: d,
+                    ..StartVideo::default()
+                }))
+                .await;
+            proxima(&mut rx, |m| matches!(m, Msg::CodecSelected(_))).await;
+        }
+        // Windows: a lista nova perde o 2 e ganha o 3.
+        midia
+            .mudancas_tx
+            .send(Mudanca::Monitores(vec![monitor(1), monitor(3)]))
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), midia.evento())
+            .await
+            .unwrap();
+        midia.tratar_evento().await;
+        let Msg::VideoStopped(v) = proxima(&mut rx, |m| matches!(m, Msg::VideoStopped(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            (v.display_id, v.reason()),
+            (2, VideoStopReason::DisplayRemoved)
+        );
+        let Msg::DisplaysChanged(d) =
+            proxima(&mut rx, |m| matches!(m, Msg::DisplaysChanged(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(d.displays.iter().map(|m| m.id).collect::<Vec<_>>(), [1, 3]);
+        assert!(midia.captura.is_some());
+        // O 1 continua saindo (sem `CodecSelected` novo) e o 3 pode ser pedido.
+        let antes = midia.compartilhado.fluxos()[&1].amostra().quadros;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(midia.compartilhado.fluxos()[&1].amostra().quadros > antes);
+        midia
+            .mensagem(&Msg::StartVideo(StartVideo {
+                display_id: 3,
+                ..StartVideo::default()
+            }))
+            .await;
+        let Msg::CodecSelected(c) = proxima(&mut rx, |m| matches!(m, Msg::CodecSelected(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(c.display_id, 3);
+
+        // Wayland: o compositor fecha o stream do 1.
+        midia.mudancas_tx.send(Mudanca::StreamFechou(1)).unwrap();
+        midia.evento().await;
+        midia.tratar_evento().await;
+        let Msg::VideoStopped(v) = proxima(&mut rx, |m| matches!(m, Msg::VideoStopped(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(v.display_id, 1);
+        let Msg::DisplaysChanged(d) =
+            proxima(&mut rx, |m| matches!(m, Msg::DisplaysChanged(_))).await
+        else {
+            unreachable!()
+        };
+        assert_eq!(d.displays.iter().map(|m| m.id).collect::<Vec<_>>(), [3]);
         drop(midia);
     }
 

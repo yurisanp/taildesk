@@ -21,7 +21,7 @@ fn medir(
     let ids: Vec<u32> = monitores.iter().map(|m| m.0).collect();
     let medidor = Medidor::novo(&ids, video);
     let cb = medidor.clone();
-    let captura = CapturaPipeWire::iniciar(conexao, monitores, move |q| cb.registrar(q))?;
+    let captura = CapturaPipeWire::iniciar(conexao, monitores, move |q| cb.registrar(q), |_| {})?;
     std::thread::sleep(Duration::from_secs(segundos));
     drop(captura);
     medidor.imprimir();
