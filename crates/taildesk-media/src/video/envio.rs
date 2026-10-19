@@ -4,6 +4,10 @@
 //! "latest-wins" e volta; uma thread por monitor codifica o quadro mais recente, corta em
 //! datagramas e envia pela [`SaidaDatagramas`]. Quadro que chega enquanto o anterior codifica
 //! substitui o que esperava. Nada aloca por quadro depois do primeiro.
+//!
+//! O laço lento ([`crate::escada`]) pode baixar a resolução e o FPS a quente
+//! ([`EnvioVideo::ajustar_formato`]): a imagem é reduzida aqui, antes do encoder, que reabre no
+//! tamanho novo e começa com um quadro-chave.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -13,6 +17,8 @@ use std::time::{Duration, Instant};
 use taildesk_codec::{OrdemRgb, QuadroRgb, TipoQuadro, VideoEncoder};
 
 use super::fragmentos::Fragmentador;
+use super::reducao::Reducao;
+use crate::escada::escalar;
 
 /// Para onde vão os datagramas (a conexão QUIC, em produção).
 pub trait SaidaDatagramas: Send {
@@ -57,14 +63,28 @@ pub struct EstatisticasEnvio {
     pub encode_us: AtomicU64,
     /// Tamanho do último quadro codificado: largura nos 32 bits altos, altura nos baixos.
     pub tamanho: AtomicU64,
+    /// Tamanho do último quadro capturado (antes da redução), no mesmo formato.
+    pub captura: AtomicU64,
 }
 
 impl EstatisticasEnvio {
     /// (largura, altura) do último quadro codificado; (0, 0) antes do primeiro.
     pub fn tamanho(&self) -> (u32, u32) {
-        let t = self.tamanho.load(Ordering::Relaxed);
-        ((t >> 32) as u32, t as u32)
+        separar(self.tamanho.load(Ordering::Relaxed))
     }
+
+    /// (largura, altura) da captura; (0, 0) antes do primeiro quadro.
+    pub fn captura(&self) -> (u32, u32) {
+        separar(self.captura.load(Ordering::Relaxed))
+    }
+}
+
+fn juntar(largura: u32, altura: u32) -> u64 {
+    u64::from(largura) << 32 | u64::from(altura)
+}
+
+fn separar(t: u64) -> (u32, u32) {
+    ((t >> 32) as u32, t as u32)
 }
 
 #[derive(Debug, Default)]
@@ -76,6 +96,8 @@ struct Pendente {
     novo: bool,
     chave: bool,
     bitrate: Option<u32>,
+    /// Novo degrau do laço lento: altura máxima do lado menor (`0` = nativa) e FPS.
+    formato: Option<(u32, f32)>,
     parar: bool,
 }
 
@@ -154,6 +176,12 @@ impl EnvioVideo {
         self.compartilhado.travar().bitrate = Some(bps);
     }
 
+    /// Novo degrau do laço lento: lado menor até `altura_max` pixels (`0` = nativa) e até `fps`
+    /// quadros por segundo (nunca acima do `ConfigEnvio::fps_max`). Vale no próximo quadro.
+    pub fn ajustar_formato(&self, altura_max: u32, fps: f32) {
+        self.compartilhado.travar().formato = Some((altura_max, fps));
+    }
+
     pub fn estatisticas(&self) -> &EstatisticasEnvio {
         &self.estatisticas
     }
@@ -176,7 +204,12 @@ fn laco(
     c: &Compartilhado,
     e: &EstatisticasEnvio,
 ) {
-    let intervalo = Duration::from_secs_f32(1.0 / config.fps_max.max(1.0));
+    let fps_config = config.fps_max.max(1.0);
+    let mut fps = fps_config;
+    let mut altura_max = 0u32;
+    let mut intervalo = Duration::from_secs_f32(1.0 / fps);
+    let mut reducao = Reducao::default();
+    let mut ultimo_tamanho = (0u32, 0u32);
     let inicio = Instant::now();
     let mut proximo = inicio;
     let mut frag = Fragmentador::novo(config.stream_id);
@@ -206,9 +239,20 @@ fn laco(
             std::mem::swap(&mut p.buf, &mut imagem);
             p.novo = false;
             chave |= std::mem::take(&mut p.chave);
-            if let Some(b) = p.bitrate.take() {
-                encoder.ajustar_bitrate(b);
+            let formato = p.formato.take();
+            if let Some((a, f)) = formato {
+                altura_max = a;
+                fps = f.clamp(1.0, fps_config);
+                intervalo = Duration::from_secs_f32(1.0 / fps);
+            }
+            let nova_taxa = p.bitrate.take();
+            if let Some(b) = nova_taxa {
                 bps = b;
+            }
+            if nova_taxa.is_some() || (formato.is_some() && bps != 0) {
+                // O encoder divide a taxa pelo FPS com que abriu: com menos quadros, cada um
+                // ganha a parte dos que não saem.
+                encoder.ajustar_bitrate(taxa_do_encoder(bps, fps, fps_config));
             }
             (p.largura, p.altura, p.ordem.unwrap_or(OrdemRgb::Bgrx))
         };
@@ -219,12 +263,24 @@ fn laco(
             e.fila_cheia.fetch_add(1, Ordering::Relaxed);
             continue;
         }
+        e.captura.store(juntar(largura, altura), Ordering::Relaxed);
+        let (l, a) = escalar(largura, altura, altura_max);
+        let dados: &[u8] = if (l, a) == (largura, altura) {
+            &imagem
+        } else {
+            reducao.reduzir(&imagem, (largura, altura), (l, a))
+        };
+        if (l, a) != ultimo_tamanho {
+            // O encoder reabre no tamanho novo.
+            chave = true;
+            ultimo_tamanho = (l, a);
+        }
         let q = QuadroRgb {
-            largura,
-            altura,
-            stride: largura as usize * 4,
+            largura: l,
+            altura: a,
+            stride: l as usize * 4,
             ordem,
-            dados: &imagem,
+            dados,
         };
         let tipo = match encoder.codificar(&q, chave, &mut au) {
             Ok(Some(tipo)) => tipo,
@@ -262,12 +318,31 @@ fn laco(
         }
         chave = false;
         e.quadros.fetch_add(1, Ordering::Relaxed);
-        e.tamanho.store(
-            u64::from(largura) << 32 | u64::from(altura),
-            Ordering::Relaxed,
-        );
+        e.tamanho.store(juntar(l, a), Ordering::Relaxed);
         e.chaves.fetch_add(u64::from(e_chave), Ordering::Relaxed);
         e.bytes.fetch_add(au.len() as u64, Ordering::Relaxed);
         e.datagramas.fetch_add(n, Ordering::Relaxed);
+    }
+}
+
+/// Taxa para o encoder rodando a `fps` quando ele abriu para `fps_config`.
+fn taxa_do_encoder(bps: u32, fps: f32, fps_config: f32) -> u32 {
+    if fps >= fps_config {
+        return bps;
+    }
+    (f64::from(bps) * f64::from(fps_config) / f64::from(fps.max(1.0))).min(f64::from(u32::MAX))
+        as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menos_fps_da_mais_bits_por_quadro() {
+        assert_eq!(taxa_do_encoder(4_000_000, 60.0, 60.0), 4_000_000);
+        assert_eq!(taxa_do_encoder(4_000_000, 30.0, 60.0), 8_000_000);
+        assert_eq!(taxa_do_encoder(4_000_000, 90.0, 60.0), 4_000_000);
+        assert_eq!(taxa_do_encoder(u32::MAX, 1.0, 60.0), u32::MAX);
     }
 }

@@ -12,13 +12,14 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use taildesk_codec::{CodecVideo, ConfigEncoder, Opcao, OrdemRgb, QuadroRgb};
+use taildesk_media::escada::{Escada, Modo, SinaisEscada};
 use taildesk_media::taxa::{ControleTaxa, Relato, Sinais};
 use taildesk_media::video::{ConfigEnvio, EnvioVideo};
 use taildesk_platform::captura::{FormaCursor, FormatoPixel, Quadro};
 use taildesk_proto::control::{
     AudioCodec, AudioSelected, AudioStopReason, AudioStopped, Codec, CodecCap, CodecSelected,
-    ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg, QualityPrefs, SetVideoQuality,
-    StartAudio, StartVideo, VideoStats, VideoStopReason, VideoStopped,
+    ColorInfo, CursorPos, DisplayInfo, Error, ErrorCode, Msg, QualityMode, QualityPrefs,
+    SetVideoQuality, StartAudio, StartVideo, VideoStats, VideoStopReason, VideoStopped,
 };
 use taildesk_proto::cursor::{STREAM_MAGIC, ShapeHeader};
 use taildesk_proto::media::AUDIO_STREAM_MIN;
@@ -115,6 +116,29 @@ fn candidatos(aceitos: &[CodecVideo], pedido: Option<CodecVideo>) -> Vec<Opcao> 
     lista
 }
 
+/// Escada do laço lento pela preferência do controlador (`QualityPrefs.mode`).
+fn modo(p: &QualityPrefs) -> Modo {
+    match QualityMode::try_from(p.mode).unwrap_or(QualityMode::Auto) {
+        QualityMode::Text => Modo::Nitidez,
+        QualityMode::Motion => Modo::Fluidez,
+        QualityMode::LowBandwidth => Modo::Economia,
+        QualityMode::Auto => Modo::Auto,
+    }
+}
+
+/// Teto de FPS: o do encoder, ou o do controlador (`QualityPrefs.fps_max`) se for menor.
+fn fps_pedido(p: &QualityPrefs, encoder: f32) -> f32 {
+    match p.fps_max {
+        0 => encoder,
+        f => (f as f32).min(encoder),
+    }
+}
+
+/// Fator do laço rápido a partir do qual a rede conta como folgada para o laço lento subir.
+const FATOR_LIVRE: f64 = 0.98;
+/// Fila no caminho abaixo disso conta como folga.
+const FILA_LIVRE: Duration = Duration::from_millis(5);
+
 /// Taxa pedida pelo controlador (`QualityPrefs.bitrate_kbps`), em bit/s; `None` = automática.
 fn taxa_pedida(p: &QualityPrefs) -> Option<u32> {
     (p.bitrate_kbps > 0).then(|| p.bitrate_kbps.saturating_mul(1000))
@@ -171,7 +195,10 @@ struct Fluxo {
     teto_bps: u32,
     /// Taxa escolhida pelo usuário: o ajuste pelo tamanho da imagem não mexe no teto.
     taxa_fixa: bool,
+    /// FPS com que o encoder abriu.
     fps: f32,
+    /// Laço lento: resolução e FPS que saem agora.
+    escada: Escada,
     anterior: (Instant, Amostra),
     ultima_subida: Option<Instant>,
 }
@@ -188,13 +215,52 @@ impl Fluxo {
         }
     }
 
-    /// Teto pelo tamanho físico, que só se sabe pela captura (no Wayland com escala, maior que o
-    /// lógico).
+    /// Teto automático pelo tamanho físico (que só se sabe pela captura; no Wayland com escala,
+    /// maior que o lógico) no degrau atual do laço lento. `None` antes do primeiro quadro.
+    fn teto_automatico(&self) -> Option<u32> {
+        let captura = self.envio.estatisticas().captura();
+        (captura.0 > 0).then(|| {
+            let f = self.escada.formato(captura);
+            taxa_para(f.largura, f.altura, f.fps)
+        })
+    }
+
     fn atualizar_teto(&mut self) {
-        let (largura, altura) = self.envio.estatisticas().tamanho();
-        if largura > 0 && !self.taxa_fixa {
-            self.teto_bps = taxa_para(largura, altura, self.fps);
+        if !self.taxa_fixa
+            && let Some(t) = self.teto_automatico()
+        {
+            self.teto_bps = t;
         }
+    }
+
+    /// Passa o degrau atual da escada ao envio.
+    fn aplicar_degrau(&self) {
+        let d = self.escada.degrau();
+        self.envio.ajustar_formato(d.altura_max, d.fps);
+    }
+
+    /// Um passo do laço lento. `true` se o degrau mudou (o teto já foi recalculado).
+    fn passo_escada(&mut self, display_id: u32, agora: Instant, livre: bool) -> bool {
+        let captura = self.envio.estatisticas().captura();
+        let Some((f, motivo)) = self.escada.passo(&SinaisEscada {
+            agora,
+            alvo_bps: u64::from(self.bitrate_bps),
+            teto_bps: u64::from(self.teto_bps),
+            livre,
+            captura,
+        }) else {
+            return false;
+        };
+        eprintln!(
+            "taildesk: vídeo do monitor {display_id} em {}x{} a {} fps ({})",
+            f.largura,
+            f.altura,
+            f.fps,
+            motivo.texto()
+        );
+        self.aplicar_degrau();
+        self.atualizar_teto();
+        true
     }
 
     /// Alvo novo pelo fator do controle de taxa. Mudança menor que 10 % não vale um ajuste.
@@ -246,6 +312,8 @@ impl Fluxo {
             width: largura,
             height: altura,
             est_kbps: 0,
+            fps_max: self.escada.degrau().fps.round() as u32,
+            reduced: self.escada.reduzido(self.envio.estatisticas().captura()),
         }
     }
 }
@@ -496,14 +564,33 @@ async fn controle_taxa(canal: CanalMidia, compartilhado: Arc<Compartilhado>) {
                 f.len() as u32,
             )
         };
-        let fator = controle.passo(&Sinais {
+        let rtt = canal.conn.rtt();
+        let mut fator = controle.passo(&Sinais {
             agora,
-            rtt: canal.conn.rtt(),
+            rtt,
             banda_bps: Some(banda_bps(&canal.conn)),
             relato,
             teto_bps,
             monitores,
         });
+        // Laço lento: com a taxa apertada, menos pixels ou menos quadros. Ao descer, o fator
+        // sobe na mesma proporção que o teto caiu, para a taxa não despencar junto; ao subir,
+        // fica onde está e o laço rápido corta se a rede não aguentar.
+        let livre = fator >= FATOR_LIVRE && controle.fila(rtt) < FILA_LIVRE;
+        let depois = {
+            let mut f = compartilhado.fluxos();
+            let mut mudou = false;
+            for (&id, fluxo) in f.iter_mut() {
+                mudou |= fluxo.passo_escada(id, agora, livre);
+            }
+            mudou.then(|| f.values().map(|f| u64::from(f.teto_bps)).sum::<u64>())
+        };
+        if let Some(depois) = depois
+            && depois < teto_bps
+        {
+            controle.reescalar(teto_bps, depois);
+            fator = controle.fator();
+        }
         if controle.motivo() != motivo {
             motivo = controle.motivo();
             eprintln!(
@@ -736,6 +823,7 @@ impl MidiaApp {
         let taxa_fixa = taxa_pedida(&prefs);
         let bitrate_bps = taxa_fixa.unwrap_or(BITRATE_BPS);
         let so_hardware = self.compartilhado.fluxos().len() >= MAX_FLUXOS_SOFTWARE;
+        let modo = modo(&prefs);
         let encoder = tokio::task::spawn_blocking(move || {
             for opcao in candidatos(&aceitos, pedido) {
                 if so_hardware && !opcao.hardware() {
@@ -799,8 +887,10 @@ impl MidiaApp {
                     teto_bps: bitrate_bps,
                     taxa_fixa: taxa_fixa.is_some(),
                     fps,
+                    escada: Escada::new(modo, fps_pedido(&prefs, fps)),
                     ultima_subida: None,
                 };
+                fluxo.aplicar_degrau();
                 (stream_id, fluxo)
             })
             .map_err(|e| e.to_string())
@@ -878,17 +968,14 @@ impl MidiaApp {
             return;
         }
         if let Some(f) = self.compartilhado.fluxos().get_mut(&id) {
-            let alvo = match taxa_pedida(&prefs) {
-                Some(bps) => bps,
-                None => {
-                    let (l, a) = f.envio.estatisticas().tamanho();
-                    if l > 0 {
-                        taxa_para(l, a, f.fps)
-                    } else {
-                        BITRATE_BPS
-                    }
-                }
-            };
+            if f.escada
+                .preferir(modo(&prefs), fps_pedido(&prefs, f.fps), Instant::now())
+            {
+                f.aplicar_degrau();
+            }
+            let alvo = taxa_pedida(&prefs)
+                .or_else(|| f.teto_automatico())
+                .unwrap_or(BITRATE_BPS);
             f.taxa_fixa = taxa_pedida(&prefs).is_some();
             // O teto muda na hora; o próximo passo do controle de taxa aplica o fator.
             f.teto_bps = alvo;

@@ -575,6 +575,13 @@ pub struct VideoStats {
     /// em kbit/s; `0` = sem estimativa. Com o vídeo limitando o envio, fica perto do que sai.
     #[prost(uint32, tag = "13")]
     pub est_kbps: u32,
+    /// Teto de quadros por segundo agora (o do encoder, ou menor se o laço lento cortou);
+    /// `0` = host antigo.
+    #[prost(uint32, tag = "14")]
+    pub fps_max: u32,
+    /// O laço lento da rede baixou a resolução ou o FPS (`width`/`height` já são os reduzidos).
+    #[prost(bool, tag = "15")]
+    pub reduced: bool,
 }
 
 /// C→H, a cada 250 ms por monitor recebido: o que chegou ao controlador. O host usa junto com o
@@ -1872,6 +1879,8 @@ mod tests {
                 width: 2560,
                 height: 1600,
                 est_kbps: 48_000,
+                fps_max: 30,
+                reduced: true,
             }),
             Msg::ReceiverReport(ReceiverReport {
                 display_id: 1,

@@ -8,6 +8,7 @@ pub mod envio;
 pub mod fragmentos;
 pub mod medidor;
 pub mod recepcao;
+mod reducao;
 
 pub use envio::{ConfigEnvio, EnvioVideo, EstatisticasEnvio, SaidaDatagramas};
 pub use fragmentos::{Fragmentador, Remontador, Remontagem};
@@ -106,6 +107,9 @@ mod tests {
                 let v = ((p as u32 + i * 7) % 251) as u8;
                 px.copy_from_slice(&[v, v.wrapping_mul(3), v ^ 0x55, 0]);
             }
+            // Lido antes de entregar: a thread do envio pode terminar o quadro antes da leitura.
+            let q = envio.estatisticas().quadros.load(Ordering::Relaxed)
+                + envio.estatisticas().pulados.load(Ordering::Relaxed);
             envio.entregar(&QuadroRgb {
                 largura: l,
                 altura: a,
@@ -113,8 +117,6 @@ mod tests {
                 ordem: OrdemRgb::Bgrx,
                 dados: &img,
             });
-            let q = envio.estatisticas().quadros.load(Ordering::Relaxed)
-                + envio.estatisticas().pulados.load(Ordering::Relaxed);
             assert!(esperar(|| {
                 envio.estatisticas().quadros.load(Ordering::Relaxed)
                     + envio.estatisticas().pulados.load(Ordering::Relaxed)
@@ -145,5 +147,74 @@ mod tests {
         assert!(pedidos.load(Ordering::Relaxed) >= 1);
         let d = decodificados.load(Ordering::Relaxed);
         assert!(d >= 5 && d < enviados, "decodificados {d} de {enviados}");
+    }
+
+    #[test]
+    fn formato_reduzido_chega_menor() {
+        let tamanhos = Arc::new(Mutex::new(Vec::new()));
+        let rx = RecepcaoVideo::iniciar(
+            1,
+            0,
+            Box::new(DecoderOpenH264::novo().unwrap()),
+            Box::new({
+                let t = tamanhos.clone();
+                move |_, q| t.lock().unwrap().push((q.largura, q.altura))
+            }),
+            Arc::new(|| {}),
+        )
+        .unwrap();
+        let rx = Arc::new(Mutex::new(rx));
+        let envio = EnvioVideo::iniciar(
+            ConfigEnvio {
+                stream_id: 0,
+                fps_max: 1000.0,
+            },
+            Box::new(
+                EncoderOpenH264::novo(ConfigEncoder {
+                    bitrate_bps: 4_000_000,
+                    fps_max: 60.0,
+                })
+                .unwrap(),
+            ),
+            Box::new(Loopback {
+                rx: rx.clone(),
+                n: 0,
+                perder: Vec::new(),
+            }),
+        )
+        .unwrap();
+        envio.ajustar_bitrate(4_000_000);
+        let (l, a) = (320u32, 192u32);
+        let img: Vec<u8> = (0..l * a * 4).map(|i| (i % 253) as u8).collect();
+        let entregar = |n: usize| {
+            for _ in 0..n {
+                let antes = envio.estatisticas().quadros.load(Ordering::Relaxed);
+                envio.entregar(&QuadroRgb {
+                    largura: l,
+                    altura: a,
+                    stride: l as usize * 4,
+                    ordem: OrdemRgb::Bgrx,
+                    dados: &img,
+                });
+                assert!(esperar(|| envio
+                    .estatisticas()
+                    .quadros
+                    .load(Ordering::Relaxed)
+                    > antes));
+            }
+        };
+        entregar(3);
+        envio.ajustar_formato(96, 1000.0);
+        entregar(3);
+        assert_eq!(envio.estatisticas().tamanho(), (160, 96));
+        assert_eq!(envio.estatisticas().captura(), (320, 192));
+        // E volta à nativa.
+        envio.ajustar_formato(0, 1000.0);
+        entregar(3);
+        drop(envio);
+        // Na troca de tamanho o decoder pode segurar um quadro: conta a sequência, não o total.
+        let mut t = tamanhos.lock().unwrap().clone();
+        t.dedup();
+        assert_eq!(t, [(320, 192), (160, 96), (320, 192)]);
     }
 }
