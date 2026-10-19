@@ -127,6 +127,7 @@ message VideoStopped { uint32 display_id = 1; Reason reason = 2; }     // H→C:
 - Captura por monitor = `XShmGetImage` do **sub-retângulo** da raiz (um segmento SHM por monitor) + XDamage filtrando o dano por retângulo.
 - Input: XTest em coordenadas da raiz = offset do monitor + posição.
 - Plug: evento `RRScreenChangeNotify` ⇒ re-enumerar e `DisplaysChanged`.
+- Implementado (`taildesk-platform::x11`, `captura_x11`, `entrada_x11`; escolhido quando `XDG_SESSION_TYPE=x11`): monitores pelo `RRGetMonitors` (principal primeiro, depois da esquerda para a direita; sem RandR, a tela inteira); captura de cada monitor por `ShmGetImage` num segmento MIT-SHM (fd do servidor, mapeado só leitura), só quando o XDamage (bounding box na raiz) toca o retângulo, a ~60 Hz; sem MIT-SHM, `GetImage` pelo socket; sem XDamage, 30 fps contínuos. Cursor pelo `XFixesGetCursorImage` (alfa pré-multiplicado convertido). Input pelo XTest: tecla = evdev + 8; caractere fora do layout num keycode livre remapeado (roda de 8); rolagem pelos botões 4–7, 15 px por dente na rolagem precisa. Hotplug: a lista do RandR é relida a cada 2 s (sem janela para o `RRScreenChangeNotify`). Área de transferência no X11 sem portal ainda não existe.
 
 ### 4.4 Resumo
 | | Enumeração | Captura | Quem escolhe | Input absoluto | Hotplug |

@@ -276,9 +276,36 @@ pub(crate) fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
         .collect()
 }
 
-/// No Linux os monitores só se sabem depois do diálogo do portal; a mídia manda
-/// `DisplaysChanged` quando abrir.
-#[cfg(not(windows))]
+/// No Wayland os monitores só se sabem depois do diálogo do portal (a mídia manda
+/// `DisplaysChanged` quando abrir); numa sessão X11 vêm do RandR.
+#[cfg(target_os = "linux")]
+pub(crate) fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
+    if !taildesk_platform::x11::sessao_x11() {
+        return Vec::new();
+    }
+    taildesk_platform::x11::listar_monitores()
+        .inspect_err(|e| eprintln!("taildesk: monitores do X11: {e}"))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| taildesk_proto::control::DisplayInfo {
+            id: m.display_id,
+            name: m.nome,
+            x: m.x,
+            y: m.y,
+            width: m.largura.max(1),
+            height: m.altura.max(1),
+            logical_width: m.largura.max(1),
+            logical_height: m.altura.max(1),
+            scale: 1.0,
+            refresh_mhz: 0,
+            primary: m.principal,
+            rotation: 0,
+            shared: true,
+        })
+        .collect()
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn monitores() -> Vec<taildesk_proto::control::DisplayInfo> {
     Vec::new()
 }
@@ -333,7 +360,22 @@ impl Maquina for MaquinaApp {
 
     #[cfg(target_os = "linux")]
     async fn entrada(&self) -> Option<EntradaApp> {
-        Some(EntradaApp {
+        if taildesk_platform::x11::sessao_x11() {
+            // Sessão X11: XTest direto, sem portal (XFCE, i3, MATE não têm um).
+            let x = tokio::task::spawn_blocking(taildesk_platform::entrada_x11::EntradaX11::abrir)
+                .await
+                .ok()?
+                .inspect_err(|e| {
+                    eprintln!("taildesk: controle pelo X11 indisponível: {e}");
+                    avisar(format!("Sem controle do mouse e do teclado: {e}"));
+                })
+                .ok()?;
+            return Some(EntradaApp::X11 {
+                x: Arc::new(std::sync::Mutex::new(x)),
+                presos: Default::default(),
+            });
+        }
+        Some(EntradaApp::Portal {
             portal: self.portal().await?,
             presos: Default::default(),
         })
@@ -356,9 +398,21 @@ impl Maquina for MaquinaApp {
         MidiaApp::new(canal, fonte, monitores)
     }
 
-    /// Os monitores só se sabem depois do diálogo do portal: saem num `DisplaysChanged`.
+    /// Wayland: os monitores só se sabem depois do diálogo do portal e saem num
+    /// `DisplaysChanged`. X11: já foram no `HelloAck`.
     #[cfg(target_os = "linux")]
     async fn midia(&self, canal: CanalMidia) -> MidiaApp {
+        if taildesk_platform::x11::sessao_x11() {
+            let monitores = tokio::task::spawn_blocking(monitores)
+                .await
+                .unwrap_or_default();
+            let fonte = if monitores.is_empty() {
+                Fonte::Nenhuma
+            } else {
+                Fonte::X11
+            };
+            return MidiaApp::new(canal, fonte, monitores);
+        }
         let Some(portal) = self.portal().await else {
             return MidiaApp::new(canal, Fonte::Nenhuma, Vec::new());
         };
@@ -499,9 +553,37 @@ impl Entrada for EntradaApp {
 }
 
 #[cfg(target_os = "linux")]
-pub struct EntradaApp {
-    portal: Arc<taildesk_platform::wayland::SessaoPortal>,
-    presos: taildesk_platform::mouse::BotoesPresos,
+pub enum EntradaApp {
+    /// Wayland (e X11 com portal, se um dia for escolhido): portal RemoteDesktop.
+    Portal {
+        portal: Arc<taildesk_platform::wayland::SessaoPortal>,
+        presos: taildesk_platform::mouse::BotoesPresos,
+    },
+    /// Sessão X11 sem portal: XTest. O X11 responde rápido; as chamadas vão numa thread de
+    /// bloqueio para não segurar a tarefa da sessão se o servidor travar.
+    X11 {
+        x: Arc<std::sync::Mutex<taildesk_platform::entrada_x11::EntradaX11>>,
+        presos: taildesk_platform::mouse::BotoesPresos,
+    },
+}
+
+#[cfg(target_os = "linux")]
+impl EntradaApp {
+    async fn no_x11(
+        x: &Arc<std::sync::Mutex<taildesk_platform::entrada_x11::EntradaX11>>,
+        f: impl FnOnce(&mut taildesk_platform::entrada_x11::EntradaX11) -> std::io::Result<()>
+        + Send
+        + 'static,
+    ) {
+        let x = x.clone();
+        let r = tokio::task::spawn_blocking(move || {
+            f(&mut x.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+        })
+        .await;
+        if let Ok(Err(e)) = r {
+            eprintln!("taildesk: entrada X11: {e}");
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -512,9 +594,17 @@ impl Entrada for EntradaApp {
     }
 
     async fn teclas(&mut self, eventos: &[Inject]) {
-        let injetor = taildesk_platform::teclado::portal::InjetorPortal::new(&self.portal);
-        if let Err(e) = injetor.injetar(eventos).await {
-            eprintln!("taildesk: teclado: {e}");
+        match self {
+            EntradaApp::Portal { portal, .. } => {
+                let injetor = taildesk_platform::teclado::portal::InjetorPortal::new(portal);
+                if let Err(e) = injetor.injetar(eventos).await {
+                    eprintln!("taildesk: teclado: {e}");
+                }
+            }
+            EntradaApp::X11 { x, .. } => {
+                let eventos = eventos.to_vec();
+                Self::no_x11(x, move |x| x.teclas(&eventos)).await;
+            }
         }
     }
 
@@ -523,16 +613,33 @@ impl Entrada for EntradaApp {
         let Some(ev) = EventoMouse::de_msg(msg) else {
             return;
         };
-        if self.presos.registrar(&ev)
-            && let Err(e) = portal::injetar(&self.portal, &ev).await
-        {
-            eprintln!("taildesk: mouse: {e}");
+        match self {
+            EntradaApp::Portal { portal: p, presos } => {
+                if presos.registrar(&ev)
+                    && let Err(e) = portal::injetar(p, &ev).await
+                {
+                    eprintln!("taildesk: mouse: {e}");
+                }
+            }
+            EntradaApp::X11 { x, presos } => {
+                if presos.registrar(&ev) {
+                    Self::no_x11(x, move |x| x.mouse(&ev)).await;
+                }
+            }
         }
     }
 
     async fn soltar_mouse(&mut self) {
-        for ev in self.presos.soltar_todos() {
-            let _ = taildesk_platform::mouse::portal::injetar(&self.portal, &ev).await;
+        match self {
+            EntradaApp::Portal { portal, presos } => {
+                for ev in presos.soltar_todos() {
+                    let _ = taildesk_platform::mouse::portal::injetar(portal, &ev).await;
+                }
+            }
+            EntradaApp::X11 { x, presos } => {
+                let evs: Vec<_> = presos.soltar_todos().collect();
+                Self::no_x11(x, move |x| evs.iter().try_for_each(|ev| x.mouse(ev))).await;
+            }
         }
     }
 }

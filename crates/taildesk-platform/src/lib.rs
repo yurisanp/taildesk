@@ -1,7 +1,6 @@
-//! Código específico de SO. Hoje: instância única do app ([`instancia`]), detecção da bandeja
-//! do sistema e abrir links. Nas próximas etapas da fase 1 entram captura (DXGI/WGC,
-//! portal+PipeWire, XShm), injeção de input (SendInput, portal/libei, XTest), cursor e segredos
-//! (`docs/context/10-plano-windows-linux.md`).
+//! Código específico de SO: instância única, bandeja, captura (DXGI, portal + PipeWire, XShm no
+//! X11), injeção de input (SendInput, portal, XTest no X11), área de transferência, som e
+//! segredos (`docs/context/10-plano-windows-linux.md`).
 
 pub mod area;
 pub mod area_formatos;
@@ -15,6 +14,10 @@ pub mod captura;
 pub mod captura_dxgi;
 #[cfg(target_os = "linux")]
 pub mod captura_pipewire;
+#[cfg(target_os = "linux")]
+pub mod captura_x11;
+#[cfg(target_os = "linux")]
+pub mod entrada_x11;
 mod forma_cursor_dxgi;
 pub mod inicio;
 pub mod instancia;
@@ -29,6 +32,8 @@ pub mod som;
 pub mod teclado;
 #[cfg(target_os = "linux")]
 pub mod wayland;
+#[cfg(target_os = "linux")]
+pub mod x11;
 
 use std::io;
 use std::process::{Command, Stdio};
