@@ -304,9 +304,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let token = unsafe { taildesk_platform::tomar_token_de_ativacao() };
 
     let mut oculto = false;
-    for arg in std::env::args().skip(1) {
+    let mut args = std::env::args().skip(1);
+    // `--agente` (Windows) lê o argumento seguinte dentro do laço.
+    #[cfg_attr(not(windows), allow(clippy::while_let_on_iterator))]
+    while let Some(arg) = args.next() {
         match arg.as_str() {
             "--oculto" | "--hidden" => oculto = true,
+            // Agente da tela de entrada (lançado pelo serviço como SYSTEM quando ninguém está
+            // logado): host sem interface com a identidade do último usuário.
+            #[cfg(windows)]
+            "--agente" => {
+                let perfil = args.next().ok_or("uso: taildesk --agente <perfil>")?;
+                return Ok(host::rodar_agente(std::path::PathBuf::from(perfil))?);
+            }
             // Serviço do Windows ("Iniciar com o sistema"): o Gerenciador de Serviços roda
             // `--servico`; o app se chama como administrador para instalar e remover.
             #[cfg(windows)]

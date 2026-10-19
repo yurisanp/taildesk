@@ -77,11 +77,14 @@ fn texto(a: &Acesso) -> String {
                 Some(Via::Senha) => "Entrou com a senha",
                 None => "Entrou",
             };
-            if a.permissoes.is_empty() {
-                como.to_owned()
-            } else {
-                format!("{como} · {}", permissoes(&a.permissoes))
+            let mut t = como.to_owned();
+            if a.tela_de_entrada {
+                t.push_str(" pela tela de entrada do Windows");
             }
+            if !a.permissoes.is_empty() {
+                t.push_str(&format!(" · {}", permissoes(&a.permissoes)));
+            }
+            t
         }
         Evento::Saiu => {
             let mut t = match a.duracao_s {
@@ -193,6 +196,14 @@ mod tests {
                 ..Permissions::default()
             });
         assert_eq!(texto(&entrou), "Entrou com a senha · ver a tela, controlar");
+        let na_entrada = Acesso {
+            tela_de_entrada: true,
+            ..entrou.clone()
+        };
+        assert_eq!(
+            texto(&na_entrada),
+            "Entrou com a senha pela tela de entrada do Windows · ver a tela, controlar"
+        );
         let saiu = a(Evento::Saiu)
             .com_motivo("por_host")
             .com_duracao(Duration::from_secs(3725));
