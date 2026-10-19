@@ -6,7 +6,8 @@
 //! `pedir_sempre\t1`, `confiavel\t<node_stable_id>\t<nome>`, `host\t<node_stable_id>\t<sha256>`,
 //! `atualizar_auto\t1`, `canal\testavel|pre`, `codec\tauto|h264|hevc|av1|pyrowave`,
 //! `taxa_kbps\t<n>` (0 = automática), `senha_hash\t<argon2 PHC>` ("Acesso com senha": só o
-//! hash, nunca a senha).
+//! hash, nunca a senha), `monitores\tabas|janelas|todos\t<seguir 0|1>` e
+//! `monitores_host\t<node_stable_id>\t<modo>\t<seguir>` (o último usado com aquele computador).
 
 use std::collections::BTreeMap;
 use std::io;
@@ -23,6 +24,61 @@ pub struct Config {
     pub hosts: BTreeMap<String, Fingerprint>,
     pub atualizacao: PrefsAtualizacao,
     pub video: PrefsVideo,
+    /// Configurações → Sessão: como abrir os monitores do host.
+    pub monitores: PrefsMonitores,
+    /// O que foi usado por último com cada host (`node_stable_id`), por cima do padrão.
+    pub monitores_host: BTreeMap<String, PrefsMonitores>,
+}
+
+/// Como a sessão mostra os monitores do host ao conectar (`13-multimonitor.md` §2.2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ModoMonitores {
+    /// Um por vez, em abas.
+    #[default]
+    Abas,
+    /// Cada monitor do host numa janela própria.
+    Janelas,
+    /// "Usar todos os meus monitores": cada um em tela cheia num monitor local.
+    Todos,
+}
+
+impl ModoMonitores {
+    /// Na ordem da lista das Configurações.
+    pub const TODOS: [ModoMonitores; 3] = [
+        ModoMonitores::Abas,
+        ModoMonitores::Janelas,
+        ModoMonitores::Todos,
+    ];
+
+    fn nome(self) -> &'static str {
+        match self {
+            ModoMonitores::Abas => "abas",
+            ModoMonitores::Janelas => "janelas",
+            ModoMonitores::Todos => "todos",
+        }
+    }
+
+    fn de(nome: &str) -> ModoMonitores {
+        Self::TODOS
+            .into_iter()
+            .find(|m| m.nome() == nome)
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PrefsMonitores {
+    pub modo: ModoMonitores,
+    pub seguir_mouse: bool,
+}
+
+impl Config {
+    /// Preferência de monitores para o host `node` (a lembrada, ou o padrão).
+    pub fn monitores_de(&self, node: Option<&str>) -> PrefsMonitores {
+        node.and_then(|n| self.monitores_host.get(n))
+            .copied()
+            .unwrap_or(self.monitores)
+    }
 }
 
 /// Configurações → Sessão: vídeo pedido ao host em toda sessão nova (o seletor da janela da
@@ -111,6 +167,21 @@ fn analisar(texto: &str) -> Config {
                     .unwrap_or(0)
                     .min(taildesk_proto::control::limits::VIDEO_KBPS);
             }
+            ["monitores", modo, seguir] => {
+                c.monitores = PrefsMonitores {
+                    modo: ModoMonitores::de(modo),
+                    seguir_mouse: *seguir == "1",
+                };
+            }
+            ["monitores_host", id, modo, seguir] if !id.is_empty() => {
+                c.monitores_host.insert(
+                    (*id).to_owned(),
+                    PrefsMonitores {
+                        modo: ModoMonitores::de(modo),
+                        seguir_mouse: *seguir == "1",
+                    },
+                );
+            }
             ["senha_hash", h] if h.starts_with("$argon2") => {
                 c.host.password_hash = Some((*h).to_owned());
             }
@@ -142,6 +213,19 @@ fn escrever(c: &Config) -> String {
         nome_codec(c.video.codec),
         c.video.taxa_kbps
     );
+    s += &format!(
+        "monitores\t{}\t{}\n",
+        c.monitores.modo.nome(),
+        u8::from(c.monitores.seguir_mouse)
+    );
+    for (id, m) in &c.monitores_host {
+        s += &format!(
+            "monitores_host\t{}\t{}\t{}\n",
+            limpo(id),
+            m.modo.nome(),
+            u8::from(m.seguir_mouse)
+        );
+    }
     if let Some(h) = &c.host.password_hash {
         s += &format!("senha_hash\t{}\n", limpo(h));
     }
@@ -205,8 +289,24 @@ mod tests {
             codec: Codec::Hevc,
             taxa_kbps: 20_000,
         };
+        c.monitores = PrefsMonitores {
+            modo: ModoMonitores::Janelas,
+            seguir_mouse: true,
+        };
+        c.monitores_host.insert(
+            "nXYZ".into(),
+            PrefsMonitores {
+                modo: ModoMonitores::Todos,
+                seguir_mouse: false,
+            },
+        );
         let texto = escrever(&c);
         let volta = analisar(&texto);
+        assert_eq!(volta.monitores, c.monitores);
+        assert_eq!(volta.monitores_host, c.monitores_host);
+        assert_eq!(volta.monitores_de(Some("nXYZ")).modo, ModoMonitores::Todos);
+        assert_eq!(volta.monitores_de(Some("outro")), c.monitores);
+        assert_eq!(volta.monitores_de(None), c.monitores);
         assert!(!volta.host.ask_always);
         assert_eq!(volta.atualizacao, c.atualizacao);
         assert_eq!(volta.video, c.video);
@@ -226,6 +326,16 @@ mod tests {
         assert!(analisar("").host.ask_always);
         assert_eq!(analisar("").atualizacao, PrefsAtualizacao::default());
         assert_eq!(analisar("").video, PrefsVideo::default());
+        assert_eq!(analisar("").monitores.modo, ModoMonitores::Abas);
+        assert!(!analisar("").monitores.seguir_mouse);
+        // Modo de uma versão futura cai em abas.
+        assert_eq!(
+            analisar("monitores\tmosaico\t1\n").monitores,
+            PrefsMonitores {
+                modo: ModoMonitores::Abas,
+                seguir_mouse: true
+            }
+        );
         // Codec desconhecido (de uma versão futura) e taxa absurda voltam ao automático/teto.
         let v = analisar("codec\tvvc\ntaxa_kbps\t99999999999\n").video;
         assert_eq!(v.codec, Codec::Unspecified);

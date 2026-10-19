@@ -236,6 +236,69 @@ impl UmPorVez {
         }));
     }
 
+    /// "Usar todos os meus monitores" (`13-multimonitor.md` §2.2): os primeiros `locais`
+    /// monitores liberados do host, na ordem das abas, vão um para cada monitor local. A janela
+    /// da sessão fica com o que já mostra (se ele entra) e os outros são destacados; destacados
+    /// que não entram voltam às abas. Nenhum vídeo que já sai é reiniciado. Devolve os monitores
+    /// do host na ordem dos monitores locais (vazio = nada a fazer).
+    pub fn usar_todos(&mut self, locais: usize, out: &mut Vec<Msg>) -> Vec<u32> {
+        let alvo: Vec<u32> = self
+            .monitores
+            .iter()
+            .filter(|m| m.shared)
+            .map(|m| m.id)
+            .take(locais)
+            .collect();
+        let Some(&primeiro) = alvo.first() else {
+            return alvo;
+        };
+        let sobrando: Vec<u32> = self
+            .destacados
+            .iter()
+            .copied()
+            .filter(|d| !alvo.contains(d))
+            .collect();
+        for d in sobrando {
+            self.recolocar(d, out);
+        }
+        if self.ativo.is_none_or(|a| !alvo.contains(&a)) {
+            // Um destacado que entra volta para a sessão sem reiniciar.
+            let sessao = alvo
+                .iter()
+                .copied()
+                .find(|&d| self.destacado(d))
+                .unwrap_or(primeiro);
+            self.trocar(sessao, out);
+        }
+        for &d in &alvo {
+            if self.ativo != Some(d) {
+                self.destacar(d, out);
+            }
+        }
+        alvo
+    }
+
+    /// Todos os outros monitores liberados em janelas próprias; a sessão fica com o que mostra
+    /// (modo "janelas separadas" ao conectar).
+    pub fn destacar_todos(&mut self, out: &mut Vec<Msg>) {
+        let outros: Vec<u32> = self
+            .monitores
+            .iter()
+            .filter(|m| m.shared && Some(m.id) != self.ativo)
+            .map(|m| m.id)
+            .collect();
+        for d in outros {
+            self.destacar(d, out);
+        }
+    }
+
+    /// Fecha as janelas de todos os destacados: tudo volta às abas.
+    pub fn recolocar_todos(&mut self, out: &mut Vec<Msg>) {
+        for d in self.destacados.clone() {
+            self.recolocar(d, out);
+        }
+    }
+
     /// A janela da sessão (`janela = None`) ou a do destacado `Some(id)` ganhou o foco. Também
     /// serve para acertar as prioridades depois de trocar, destacar ou recolocar um monitor
     /// (chamar com a janela que tem o foco). Manda `SetPriority` só para o que mudou: o monitor
@@ -565,6 +628,79 @@ mod tests {
             display_id: id,
             priority: p as i32,
         })
+    }
+
+    #[test]
+    fn usar_todos_os_meus_monitores() {
+        // Host com 5 (esquerda), 7 (principal) e 3 (não liberado); dois monitores locais.
+        let (mut u, _) = tres();
+        let mut out = Vec::new();
+        assert_eq!(u.usar_todos(2, &mut out), [5, 7]);
+        // A sessão fica com o 7 e o 5 abre numa janela.
+        assert_eq!(out, [visivel(5)]);
+        out.clear();
+        assert_eq!(u.ativo(), Some(7));
+        assert_eq!(u.destacados(), [5]);
+        // De novo não muda nada.
+        assert_eq!(u.usar_todos(2, &mut out), [5, 7]);
+        assert!(out.is_empty(), "{out:?}");
+        // Sair devolve às abas: o 5 para.
+        u.recolocar_todos(&mut out);
+        assert_eq!(out, [stop(5)]);
+        assert!(u.destacados().is_empty());
+        // Um monitor local só: o mais à esquerda (5) vai para a sessão.
+        out.clear();
+        assert_eq!(u.usar_todos(1, &mut out), [5]);
+        assert_eq!(out, [stop(7), start(5)]);
+        assert_eq!(u.usar_todos(0, &mut out), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn usar_todos_com_destacado_que_sobra() {
+        let mut u = UmPorVez::new();
+        let mut out = Vec::new();
+        u.atualizar(
+            &[
+                mon(1, 0, false, true),
+                mon(2, 1920, true, true),
+                mon(3, 3840, false, true),
+            ],
+            &mut out,
+        );
+        // Sessão no 2, o 3 destacado; com dois locais vão o 1 e o 2.
+        u.destacar(3, &mut out);
+        out.clear();
+        assert_eq!(u.usar_todos(2, &mut out), [1, 2]);
+        assert_eq!(out, [stop(3), visivel(1)]);
+        assert_eq!(u.ativo(), Some(2));
+        assert_eq!(u.destacados(), [1]);
+        // Com a sessão num monitor que não entra, um destacado que entra volta para ela.
+        let mut u = UmPorVez::new();
+        u.atualizar(
+            &[
+                mon(1, 0, false, true),
+                mon(2, 1920, true, true),
+                mon(3, 3840, false, true),
+            ],
+            &mut out,
+        );
+        u.trocar(3, &mut out);
+        u.destacar(1, &mut out);
+        out.clear();
+        assert_eq!(u.usar_todos(2, &mut out), [1, 2]);
+        assert_eq!(out, [stop(3), visivel(2)]);
+        assert_eq!(u.ativo(), Some(1));
+        assert_eq!(u.destacados(), [2]);
+    }
+
+    #[test]
+    fn destacar_todos_abre_os_outros() {
+        let (mut u, _) = tres();
+        let mut out = Vec::new();
+        u.destacar_todos(&mut out);
+        assert_eq!(out, [visivel(5)]);
+        assert_eq!(u.ativo(), Some(7));
+        assert_eq!(u.destacados(), [5]);
     }
 
     #[test]

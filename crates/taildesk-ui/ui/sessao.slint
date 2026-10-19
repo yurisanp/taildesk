@@ -418,6 +418,13 @@ export component JanelaSessao inherits Window {
     in property <bool> tela-cheia: false;
     in-out property <bool> dica-tela-cheia: false;
     callback mudar-tela-cheia(bool);
+    // "Usar todos os meus monitores" (`13-multimonitor.md` §2.2): cada monitor do host em tela
+    // cheia num monitor local. Sair da tela cheia em qualquer janela sai do modo.
+    in property <bool> todos-monitores: false;
+    callback usar-todos-monitores();
+    // "Seguir o mouse": a aba acompanha o cursor do host entre os monitores.
+    in-out property <bool> seguir-mouse: false;
+    callback seguir-mouse-mudou(bool);
 
     callback desconectar();
     callback entrar-com-senha(string, bool);
@@ -539,6 +546,23 @@ export component JanelaSessao inherits Window {
                         root.diagnostico-aberto = false;
                         if root.chat-aberto { root.chat-nao-lidas = 0; }
                     }
+                }
+                if root.ao-vivo && root.abas.length >= 2: Botao {
+                    y: 4px;
+                    altura: 32px;
+                    texto: @tr("🖱 Seguir o mouse");
+                    discreto: !root.seguir-mouse;
+                    clicado => {
+                        root.seguir-mouse = !root.seguir-mouse;
+                        root.seguir-mouse-mudou(root.seguir-mouse);
+                    }
+                }
+                if root.ao-vivo && root.abas.length >= 2: Botao {
+                    y: 4px;
+                    altura: 32px;
+                    texto: @tr("🖥 Todos os monitores");
+                    discreto: true;
+                    clicado => { root.usar-todos-monitores(); }
                 }
                 Botao {
                     y: 4px;
