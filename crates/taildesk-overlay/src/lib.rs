@@ -6,6 +6,8 @@
 //! - [`SystemOverlay`]: `tailscaled` ≥ 1.102 + LocalAPI (`taildesk-tsapi`), dá caminho, usuário
 //!   e app caps. É o único em produção.
 //! - `LanOverlay`: sockets do SO, só para desenvolvimento e testes.
+//! - [`MobileVpnOverlay`]: o app oficial do Tailscale no celular, sem LocalAPI (estado pelo
+//!   Android, nomes pelo MagicDNS, lista pelo desktop pareado).
 //!
 //! A identidade do peer vem sempre de [`Overlay::identify`], nunca do conteúdo das mensagens.
 
@@ -40,8 +42,10 @@ pub struct PeerIdentity {
 
 pub use taildesk_proto::net::PathKind;
 
+pub mod mobile;
 mod system;
 
+pub use mobile::MobileVpnOverlay;
 pub use system::{SystemOverlay, SystemSocket, path_from};
 
 /// Caminho de rede até um peer (`14-selecao-adaptativa.md` §1.1). É pista para a seleção

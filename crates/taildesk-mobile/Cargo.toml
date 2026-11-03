@@ -1,0 +1,47 @@
+[package]
+name = "taildesk-mobile"
+description = "App Android do TailDesk: casca Rust (gestos, faixa de teclas, telas Slint, ponte JNI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+# `libtaildesk_mobile.so` para o Gradle (cargo-ndk) e rlib para os testes no Linux.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Abre as telas numa janela no desktop (desenvolvimento): `cargo run -p taildesk-mobile
+# --example janela --features janela`.
+janela = ["slint/backend-winit", "slint/renderer-femtovg"]
+
+[dependencies]
+taildesk-proto.workspace = true
+taildesk-overlay.workspace = true
+taildesk-keyboard.workspace = true
+taildesk-session.workspace = true
+taildesk-transport.workspace = true
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros", "net"] }
+# Leitor de QR em Rust ((MIT OR Apache-2.0) AND ISC), no lugar do ML Kit proprietário.
+rqrr = { version = "0.11", default-features = false }
+# Software renderer: as capturas e os testes de tela rodam sem GPU nem janela.
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-software", "software-renderer-systemfonts"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Backend Android do Slint (NativeActivity + renderer Skia), JNI e NDK (MIT/Apache-2.0).
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-android-activity-06"] }
+jni = "0.22"
+ndk = { version = "0.9", default-features = false, features = ["media", "api-level-29"] }
+ndk-context = "0.1"
+
+[build-dependencies]
+slint-build = "=1.18.1"
+
+[dev-dependencies]
+# Gera QRs nos testes da leitura, como o desktop.
+qrcode = { version = "0.14", default-features = false }
+
+[lints]
+workspace = true

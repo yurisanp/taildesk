@@ -105,7 +105,7 @@ pub fn path_from(peer: Option<&PeerStatus>, ping: Option<&PingResult>) -> PathIn
 
 /// Socket UDP do SO preso ao IP da tailnet.
 #[derive(Debug)]
-pub struct SystemSocket(tokio::net::UdpSocket);
+pub struct SystemSocket(pub(crate) tokio::net::UdpSocket);
 
 impl SystemSocket {
     pub fn into_inner(self) -> tokio::net::UdpSocket {

@@ -10,7 +10,10 @@ license.workspace = true
 [dependencies]
 taildesk-proto.workspace = true
 taildesk-tsapi.workspace = true
-tokio = { version = "1", features = ["net"] }
+tokio = { version = "1", features = ["net", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["net", "time", "rt", "macros"] }
 
 
 [lints]
