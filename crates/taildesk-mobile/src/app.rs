@@ -171,6 +171,8 @@ struct Estado {
     detalhe: Option<IpAddr>,
     busca: String,
     teste: Option<IpAddr>,
+    /// Tela presa (lista de exemplo dos testes e capturas): o estado do Tailscale não a troca.
+    tela_fixa: bool,
 }
 
 /// O app inteiro (um por processo, na thread da interface).
@@ -361,6 +363,7 @@ impl App {
                 detalhe: None,
                 busca: String::new(),
                 teste: None,
+                tela_fixa: false,
             }),
             relogio: slint::Timer::default(),
             relogio_lento: slint::Timer::default(),
@@ -421,6 +424,9 @@ impl App {
         });
         ui.set_versao_ts(versao.into());
         ui.set_versao_ts_antiga(antiga);
+        if self.estado.borrow().tela_fixa {
+            return;
+        }
         // Quem já passou pelo onboarding vai direto à lista quando o Tailscale está bem.
         let feito = self.estado.borrow().config.onboarding_feito;
         if ui.get_tela() == Tela::Onboarding && feito && e == EstadoTailscale::Conectado {
@@ -1531,6 +1537,7 @@ impl App {
                 None,
             );
             e.config.onboarding_feito = true;
+            e.tela_fixa = true;
         }
         self.mostrar_lista();
     }

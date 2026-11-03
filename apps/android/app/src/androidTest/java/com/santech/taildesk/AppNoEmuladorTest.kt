@@ -31,17 +31,25 @@ class AppNoEmuladorTest {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         instr.targetContext.startActivity(intent)
         assertTrue("o app não abriu", device.wait(Until.hasObject(By.pkg(pacote).depth(0)), 20_000))
-        // O Slint desenha no primeiro quadro depois de subir a biblioteca.
-        Thread.sleep(4_000)
     }
 
+    /**
+     * Espera o Slint desenhar (no emulador sem GPU, a primeira tela depois de subir a biblioteca
+     * pode levar vários segundos) e guarda a captura.
+     */
     private fun capturar(nome: String) {
         val pasta = File(instr.targetContext.getExternalFilesDir(null), "capturas").apply { mkdirs() }
         val arquivo = File(pasta, "$nome.png")
-        assertTrue("captura $nome", device.takeScreenshot(arquivo))
-        val bmp = android.graphics.BitmapFactory.decodeFile(arquivo.path)
-        assertNotNull(bmp)
-        assertTrue("tela vazia em $nome", temCores(bmp))
+        val limite = System.currentTimeMillis() + 30_000
+        var desenhou = false
+        while (!desenhou && System.currentTimeMillis() < limite) {
+            Thread.sleep(1_000)
+            assertTrue("captura $nome", device.takeScreenshot(arquivo))
+            val bmp = android.graphics.BitmapFactory.decodeFile(arquivo.path)
+            assertNotNull(bmp)
+            desenhou = temCores(bmp)
+        }
+        assertTrue("tela vazia em $nome", desenhou)
     }
 
     /** Uma tela desenhada tem mais de uma cor (tela preta ou branca = o Slint não desenhou). */
