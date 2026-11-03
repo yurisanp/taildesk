@@ -48,6 +48,12 @@
 | ADR-007 | PyroWave como modo LAN opcional | Só codecs inter | Latência sub-ms de codec quando há banda |
 | ADR-008 | Não reutilizar código do RustDesk | Fork AGPL | Licença AGPL-3.0 |
 | ADR-009 (15/10/2026, substitui ADR-002) | **Só o Tailscale instalado na máquina** (`tailscaled` ≥ 1.102 + LocalAPI); sem nó embutido, crate `tailscale` fora do projeto. A trait `Overlay` fica, com `SystemOverlay` em produção e `LanOverlay` em dev | Embutido como padrão (ADR-002) | Decisão do Yuri. Ganha `whois` com usuário e caps, caminho informado, conexão direta madura e uma dependência pre-1.0 a menos; custa exigir o Tailscale instalado |
+| ADR-M1 (03/11/2026, #104) | Overlay do celular sem LocalAPI (`taildesk_overlay::MobileVpnOverlay`): estado pelo Android (`ConnectivityManager` + DNS da tailnet), identidade do host = IP 100.x + nome reverso no MagicDNS (ou o nome pareado), caminho pelo `PathInfo` do host, UDP em `0.0.0.0`. Quem autoriza é sempre o host, pelo `whois` do celular | Token da API do Tailscale no celular | O app do Tailscale não expõe a LocalAPI a outros apps; mantém a regra 3 |
+| ADR-M2 (03/11/2026, #104) | Lista de dispositivos vinda de um desktop pareado por QR (`PeerListRequest`/`PeerList` em conexão de serviço, só para o mesmo usuário da tailnet ou celular pareado) | API do Tailscale com token; varrer a faixa 100.x | Sem `status` no celular; nada de segredo extra no aparelho |
+| ADR-M3 (03/11/2026, #104; amplia a proposta do iOS) | **Sem openh264 no build da Play** (e no iOS): o decode é do sistema (MediaCodec no Android, VideoToolbox no iOS). openh264 e Opus viraram features opcionais de `taildesk-codec`/`taildesk-media` (ligadas no desktop) | Compilar o openh264 do código-fonte no APK | A Play proíbe baixar código executável (o binário da Cisco), e o compilado perde a cobertura de patente; todo Android tem H.264 por hardware |
+| ADR-M4 (03/11/2026, #104; gate S1 pendente) | Casca nativa mínima (Kotlin) + núcleo e telas em Rust/Slint (`crates/taildesk-mobile`), na **NativeActivity** do backend `android-activity` do Slint 1.18 (renderer Skia), não na GameActivity proposta no detalhamento. Plano B se o S1 reprovar: Compose + `uniffi` com o vídeo num `SurfaceView` | Compose desde o começo | Uma interface só para desktop e celular; o Slint 1.18 só traz o backend Android com NativeActivity |
+| ADR-M5 (a abrir na M4) | Host Android exige pareamento prévio | — | Sem `whois` no celular |
+| ADR-M6 (03/11/2026, decisão do Yuri) | Host Android só entra no build da Play depois que o Google aprovar a declaração de Accessibility; o APK do GitHub Releases sai em toda versão | Mandar o host junto e esperar a revisão | Política da Play |
 
 ## 3. Riscos
 
@@ -60,7 +66,9 @@
 | Drivers de encoder HW instáveis | Alta | Médio | Probe isolado com timeout + cache + blacklist + fallback SW |
 | Patentes HEVC/H.264 em distribuição comercial | Média | Alto | OpenH264 binário Cisco; HEVC só via HW do SO; parecer jurídico; AV1/VP9 royalty-free |
 | Wayland fragmentado | Alta | Médio | Portal + libei como caminho oficial; uinput como opção avançada |
-| Políticas de loja (Accessibility no Android, App Store) | Média | Médio | Declarações de uso; distribuição fora da loja p/ host desktop |
+| Políticas de loja (Accessibility no Android, App Store) | Média | Médio | Declarações de uso; distribuição fora da loja p/ host desktop; ADR-M6 |
+| Slint no Android abaixo de 55 fps ou IME falhando (S1) | Média | Alto | Gate S1 (`mobile/m0-resultados.md`); plano B do ADR-M4 |
+| Multitoque no Slint só pelo reconhecedor de pinça | Certo (1.18) | Baixo | Rolagem, pinça e toque com dois dedos pelo `ScaleRotateGestureHandler`; troca de monitor por ◀ ▶ em vez de três dedos |
 | PyroWave API/ABI mudando | Baixa (C API v1.0) | Baixo | `pyrowave-sys` com versão do submódulo fixada |
 
 ## 4. Perguntas em aberto

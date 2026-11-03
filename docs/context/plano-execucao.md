@@ -60,13 +60,20 @@ Issue guarda-chuva: #96; trabalho do controlador e da publicação: #104. Sugest
 
 | # | O que | Onde | Pronto quando |
 |---|---|---|---|
-| 3.1 | Esqueleto `apps/android` + `crates/taildesk-mobile` + CI Android (APK de debug nos artefatos) | repo taildesk | CI verde em PR, APK instala e abre uma tela Slint vazia |
-| 3.2 | Spikes do M0 Android (S1 Slint+wgpu, S3 QUIC pela VPN, S4 detecção do Tailscale, S5 MagicDNS reverso, S6 MediaCodec, S7 inbound) | branch própria | `mobile/m0-resultados.md` com os gates; ADR-M1..M4 no `08-roadmap.md` |
-| 3.3 | Protocolo mobile: `Hello.client_kind`/`viewport`, `PathInfo`, `PeerList*`, `Pair*`, `KeyboardInfo.source` | `taildesk-proto` + `07-protocolo.md` | Round-trip de todas; host desktop respeita `viewport` |
-| 3.4 | Desktop: "Configurações → Celulares → Conectar um celular" (QR) e resposta ao `PeerList` | app desktop | QR lido pelo celular pareia; lista só vai para o mesmo usuário da tailnet |
-| 3.5 | M1 controlador Android (onboarding, dispositivos, pareamento, sessão touchpad/toque direto, faixa de teclas, monitores, HUD) | `apps/android` | Roteiros R-mobile-1 (Rafael) e A-mobile-1 (Ana Paula) passam num aparelho real |
-| 3.6 | Publicação no modelo do babylock: workflow "Versão para a Play", ficha da loja, política de privacidade, capturas pelo CI, guia `PLAY_STORE.md` | `.github/workflows/android*.yml`, `apps/android/` | `.aab` assinado sobe para o teste interno; APK assinado para baixar no GitHub Releases em toda versão |
+| 3.1 ✅ 03/11 | Esqueleto `apps/android` + `crates/taildesk-mobile` + CI Android (APK de debug nos artefatos) | repo taildesk | CI verde em PR, APK instala e abre uma tela Slint vazia |
+| 3.2 🟡 03/11 (código pronto, medições pendentes) | Spikes do M0 Android (S1 Slint+wgpu, S3 QUIC pela VPN, S4 detecção do Tailscale, S5 MagicDNS reverso, S6 MediaCodec, S7 inbound) | branch própria | `mobile/m0-resultados.md` com os gates; ADR-M1..M4 no `08-roadmap.md` |
+| 3.3 ✅ 03/11 | Protocolo mobile: `Hello.client_kind`/`viewport`, `PathInfo`, `PeerList*`, `Pair*`, `KeyboardInfo.source` | `taildesk-proto` + `07-protocolo.md` | Round-trip de todas; host desktop respeita `viewport` |
+| 3.4 ✅ 03/11 | Desktop: "Configurações → Celulares → Conectar um celular" (QR) e resposta ao `PeerList` | app desktop | QR lido pelo celular pareia; lista só vai para o mesmo usuário da tailnet |
+| 3.5 🟡 03/11 (implementado; falta o roteiro em aparelho) | M1 controlador Android (onboarding, dispositivos, pareamento, sessão touchpad/toque direto, faixa de teclas, monitores, HUD) | `apps/android` | Roteiros R-mobile-1 (Rafael) e A-mobile-1 (Ana Paula) passam num aparelho real |
+| 3.6 🟡 03/11 (workflows e ficha prontos; falta a conta, §3 item 5) | Publicação no modelo do babylock: workflow "Versão para a Play", ficha da loja, política de privacidade, capturas pelo CI, guia `PLAY_STORE.md` | `.github/workflows/android*.yml`, `apps/android/` | `.aab` assinado sobe para o teste interno; APK assinado para baixar no GitHub Releases em toda versão |
 | 3.7 | Teste fechado (12 testadores por 14 dias) e pedido de produção | Play Console (Yuri) | App publicado na Play |
+
+**Estado da etapa 3 em 03/11/2026 (#104).** Tudo o que não precisa de aparelho nem da conta da
+Play está no repositório: protocolo mobile com round-trip, pareamento por QR e `PeerList` no
+desktop, `MobileVpnOverlay`, o app (`crates/taildesk-mobile` + `apps/android`), CI Android,
+"Versão para a Play", Pages, ficha da loja e `apps/android/PLAY_STORE.md`. Falta: medir os gates
+do M0 (`mobile/m0-resultados.md`), o zero-copy do S6, os roteiros R-mobile-1 e A-mobile-1 num
+celular e os passos da conta (§3 item 5).
 
 ### Etapa 4 — Pós-MVP
 

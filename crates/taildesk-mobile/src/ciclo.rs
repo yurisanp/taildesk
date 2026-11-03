@@ -106,6 +106,8 @@ pub struct Hud {
     pub decode_hw: bool,
     /// Perda de datagramas no último segundo (0..=1).
     pub perda: f32,
+    /// Tempo médio de decode do último relatório, em µs (0 = sem medida).
+    pub decode_us: u32,
 }
 
 impl Hud {
@@ -126,6 +128,9 @@ impl Hud {
         partes.push(format!("{:.0} fps", self.fps));
         if self.decode_hw {
             partes.push("HW".to_owned());
+        }
+        if self.decode_us > 0 {
+            partes.push(format!("decode {:.1} ms", self.decode_us as f32 / 1000.0));
         }
         partes.join(" · ")
     }
@@ -227,8 +232,15 @@ mod tests {
             fps: 59.8,
             decode_hw: true,
             perda: 0.0,
+            decode_us: 0,
         };
         assert_eq!(h.linha(Idioma::Pt), "18 ms · direto · 60 fps · HW");
+        h.decode_us = 4_200;
+        assert_eq!(
+            h.linha(Idioma::Pt),
+            "18 ms · direto · 60 fps · HW · decode 4.2 ms"
+        );
+        h.decode_us = 0;
         assert!(!h.mostrar_sozinho());
         h.caminho = Some(PathInfo {
             kind: PathKind::Relayed as u32,

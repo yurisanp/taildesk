@@ -7,6 +7,39 @@
 > `app/build.gradle.kts`, `fastlane/`, `distribution/whatsnew/`), lido em 03/11/2026.
 > O que precisa ser medido ou conferido está marcado **(validar)**.
 
+## 0. Estado da implementação (03/11/2026, #104)
+
+| PR | Estado | Onde |
+|---|---|---|
+| A1 | ✅ | `crates/taildesk-mobile`, `apps/android`, `cargo xtask mobile-check`, `.github/workflows/android.yml` |
+| A2 (S1) | 🟡 ferramenta pronta, medir | modo `s1` do app; `m0-resultados.md` |
+| A3 (S3/S4/S5) | 🟡 lógica testada, medir | `taildesk_overlay::mobile`, teste de conexão com `bench-net`; `m0-resultados.md` |
+| A4 (S6) | 🟡 decoder com uma cópia; zero-copy pendente | `taildesk_codec::mediacodec`, `crates/taildesk-mobile/src/video.rs` |
+| A5 | ✅ | `taildesk-proto` (`client_kind`, `viewport`, `KeyboardInfo.source`, tags 120–124, `pair`), `07-protocolo.md` §3.4; o host limita o vídeo ao viewport |
+| A6 | ✅ | `taildesk_session::pareamento`, `conexao::servico`, Configurações → Celulares no desktop |
+| A7 | ✅ (roteiro em aparelho pendente) | `MobileVpnOverlay`, onboarding, dispositivos, pareamento |
+| A8 | ✅ | `gestos.rs`, `zoom.rs`, `controle.rs`, tela da sessão |
+| A9 | ✅ | `taildesk_keyboard::virtual_kb` + casos na matriz ("ação", Ctrl+C) |
+| A10 | ✅ | monitores (◀ ▶ e lista), HUD, `ciclo.rs`, `rede.rs` |
+| A11 | ✅ (conta da Play pendente) | `android-release.yml`, `android-pages.yml`, `fastlane/`, `distribution/whatsnew`, `site/`, `marca/`, `PLAY_STORE.md`, modo demonstração |
+
+Desvios do que está escrito abaixo, decididos na implementação:
+- **NativeActivity, não GameActivity** (ADR-M4): o backend Android do Slint 1.18 usa a
+  NativeActivity (e renderer Skia). A `MainActivity` estende `NativeActivity`.
+- **Telas em `crates/taildesk-mobile/ui/`**, não em `taildesk-ui/ui/mobile/`: o celular usa outras
+  features do Slint (backend Android, estilo Material) e não pode herdar as do desktop.
+- **Multitoque**: o Slint entrega só o primeiro dedo à `TouchArea`; rolagem, pinça e toque com dois
+  dedos vêm do `ScaleRotateGestureHandler`. A troca de monitor fica nos botões ◀ ▶ da barra (o
+  §6 já permitia); a máquina de gestos aceita três dedos para quando houver multitoque completo.
+- **Capturas da Play** saem das mesmas telas Slint desenhadas pelo software renderer
+  (`examples/capturas.rs`, job `capturas`), em pt-BR e en-US; o job do emulador também guarda
+  capturas do app rodando (lista de exemplo e demonstração).
+- **Ponta a ponta no emulador** usa o modo demonstração; o host de teste com `LanOverlay` do §8
+  fica para quando o `LanOverlay` existir (hoje só há o `SystemOverlay`).
+- **openh264 e Opus** são features opcionais (ADR-M3): o build do Android não leva nenhum dos dois.
+- **Pareamento sem câmera**: nome do computador + código, com o certificado do primeiro contato
+  conferido contra o `PairResult` (`conexao::servico::parear_com_codigo`).
+
 ## 1. Resumo
 
 - **O que é**: app Android que **controla** os computadores Windows e Linux da tailnet (ver a tela,

@@ -1196,6 +1196,10 @@ impl App {
             if let Some(Alvo::Rede(Some(s))) = &e.alvo {
                 rel = s.relatorios();
                 e.hud.rtt_ms = s.rtt_ms();
+                if let Some(Msg::ReceiverReport(r)) = rel.first() {
+                    e.hud.decode_us = r.decode_us;
+                    e.hud.perda = r.loss_ppm as f32 / 1_000_000.0;
+                }
             }
             (
                 rel,
@@ -1233,6 +1237,7 @@ impl App {
                 fps: 60.0,
                 decode_hw: true,
                 perda: 0.0,
+                decode_us: 0,
             };
         }
         if let Some(ui) = self.ui() {
@@ -1250,6 +1255,7 @@ impl App {
             fps: 60.0,
             decode_hw: true,
             perda: 0.0,
+            decode_us: 0,
         };
     }
 

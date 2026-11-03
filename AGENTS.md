@@ -1,7 +1,8 @@
 # AGENTS.md — TailDesk
 
 Instruções para agentes de código. Antes de mudar arquitetura, leia `docs/context/10-plano-windows-linux.md`
-(vale por cima de `00`–`09` no MVP) e o documento da área (`06`, `07`, `11`).
+(vale por cima de `00`–`09` no MVP) e o documento da área (`06`, `07`, `11`; Android:
+`mobile/android-detalhado.md`).
 
 ## Produto
 Desktop remoto + troca de arquivos em Rust, **Windows x64 e Linux x64 (Ubuntu/Debian, Fedora, Arch)** no MVP, rede e identidade pela tailnet do Tailscale.
@@ -31,7 +32,8 @@ Desktop remoto + troca de arquivos em Rust, **Windows x64 e Linux x64 (Ubuntu/De
 
 ## Comandos
 ```bash
-cargo xtask check   # fmt + clippy -D warnings + testes
+cargo xtask check          # fmt + clippy -D warnings + testes
+cargo xtask mobile-check   # o mesmo para o app Android (+ clippy dos alvos Android com cargo-ndk)
 ```
 
 ## Pronto quando
