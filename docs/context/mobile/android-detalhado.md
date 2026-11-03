@@ -133,7 +133,7 @@ xtask: `cargo xtask mobile-check` (fmt + clippy dos targets Android + testes hos
 
 Build Rust dentro do Gradle: uma task `cargoBuild` roda
 `cargo ndk -t arm64-v8a -t x86_64 -o app/src/main/jniLibs build --release -p taildesk-mobile`
-antes de `mergeJniLibFolders`. Em debug, `--profile dev-android` (otimizado nível 1, para o vídeo
+antes de `mergeJniLibFolders`. Em debug, perfil `dev` com `CARGO_PROFILE_DEV_OPT_LEVEL=1` (otimizado nível 1, para o vídeo
 não ficar inutilizável no emulador). Os `.so` vão sem strip para o AGP extrair os símbolos para a
 Play (`debugSymbolLevel`).
 

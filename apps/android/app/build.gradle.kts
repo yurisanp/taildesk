@@ -102,22 +102,25 @@ kotlin {
 }
 
 // Biblioteca Rust (crates/taildesk-mobile) pelo cargo-ndk, antes de juntar as libs nativas.
-fun cargoNdk(nome: String, perfil: String) = tasks.register<Exec>(nome) {
+fun cargoNdk(nome: String, release: Boolean) = tasks.register<Exec>(nome) {
     group = "rust"
-    description = "Compila libtaildesk_mobile.so ($perfil) para $abis"
+    description = "Compila libtaildesk_mobile.so (${if (release) "release" else "debug"}) para $abis"
     workingDir = repoRoot
     val saida = layout.buildDirectory.dir("rustJniLibs").get().asFile
     val args = mutableListOf("cargo", "ndk", "--platform", "29", "-o", saida.absolutePath)
     abis.forEach { args += listOf("-t", it) }
-    args += listOf("build", "--profile", perfil, "-p", "taildesk-mobile")
+    args += listOf("build", "-p", "taildesk-mobile")
+    if (release) args += "--release"
+    // Debug otimizado o bastante para o vídeo ser usável no emulador (android-detalhado §4.2).
+    if (!release) environment("CARGO_PROFILE_DEV_OPT_LEVEL", "1")
     commandLine(args)
     inputs.dir(File(repoRoot, "crates"))
     inputs.file(File(repoRoot, "Cargo.lock"))
     outputs.dir(saida)
 }
 
-val cargoDebug = cargoNdk("cargoBuildDebug", "dev-android")
-val cargoRelease = cargoNdk("cargoBuildRelease", "release")
+val cargoDebug = cargoNdk("cargoBuildDebug", release = false)
+val cargoRelease = cargoNdk("cargoBuildRelease", release = true)
 
 tasks.configureEach {
     when {
