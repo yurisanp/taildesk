@@ -17,6 +17,10 @@ class MainActivity : NativeActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         tailscale = TailscaleState(this)
+        // A NativeActivity abre a biblioteca por conta própria, e a JVM só procura as funções
+        // nativas (Ponte) em bibliotecas carregadas pelo System.loadLibrary. Carregar aqui não
+        // abre outra cópia: é o mesmo arquivo, aberto uma vez pelo processo.
+        System.loadLibrary("taildesk_mobile")
         super.onCreate(savedInstanceState)
         Ponte.carregada = true
     }
