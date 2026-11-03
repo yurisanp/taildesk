@@ -18,6 +18,8 @@ use std::time::Duration;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerInfo {
     pub hostname: String,
+    /// Nome MagicDNS completo, sem o ponto final; vazio sem MagicDNS.
+    pub dns_name: String,
     pub addr: IpAddr,
     pub os: Option<String>,
     pub online: bool,
@@ -107,6 +109,10 @@ pub trait Overlay: Send + Sync + 'static {
     fn identify(&self, remote: SocketAddr)
     -> impl Future<Output = io::Result<PeerIdentity>> + Send;
     fn path(&self, remote: IpAddr) -> impl Future<Output = PathInfo> + Send;
+    /// Login do usuário dono deste nó, quando o backend sabe (o celular, por exemplo, não sabe).
+    fn self_user(&self) -> impl Future<Output = Option<String>> + Send {
+        std::future::ready(None)
+    }
 }
 
 #[cfg(test)]

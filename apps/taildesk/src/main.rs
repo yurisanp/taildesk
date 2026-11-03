@@ -23,6 +23,7 @@ mod host;
 mod midia_host;
 mod modelo;
 mod preferencias;
+mod qr;
 mod som;
 mod video;
 

@@ -6,7 +6,8 @@
 //! - [`ReverseMap`]: no host, descobre quais teclas do layout local produzem um caractere;
 //! - [`Controller`]: no controlador, transforma eventos de tecla em [`KeyMsg`] (teclas mortas já
 //!   resolvidas);
-//! - [`Host`]: no host, transforma [`KeyMsg`] em teclas a injetar ([`Inject`]) no layout local.
+//! - [`Host`]: no host, transforma [`KeyMsg`] em teclas a injetar ([`Inject`]) no layout local;
+//! - [`virtual_kb`]: teclado na tela do celular (texto pronto, faixa de teclas com travas).
 
 use std::collections::HashMap;
 
@@ -16,6 +17,7 @@ mod dump;
 pub mod fixtures;
 mod host;
 mod msg;
+pub mod virtual_kb;
 mod wire;
 
 pub use controller::Controller;

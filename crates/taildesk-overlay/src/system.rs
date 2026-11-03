@@ -159,6 +159,7 @@ impl Overlay for SystemOverlay {
             .filter_map(|p| {
                 Some(PeerInfo {
                     hostname: p.short_name().to_owned(),
+                    dns_name: p.dns_name.trim_end_matches('.').to_owned(),
                     addr: preferred_ip(p)?,
                     os: Some(p.os.clone()).filter(|o| !o.is_empty()),
                     online: p.online,
@@ -186,6 +187,11 @@ impl Overlay for SystemOverlay {
             tags,
             app_caps: Vec::new(),
         })
+    }
+
+    async fn self_user(&self) -> Option<String> {
+        let status = self.api.status().await.ok()?;
+        status.self_login().map(str::to_owned)
     }
 
     async fn path(&self, remote: IpAddr) -> PathInfo {

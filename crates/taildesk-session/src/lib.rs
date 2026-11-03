@@ -7,6 +7,7 @@
 //! - [`monitores`]: monitores um por vez (abas, atalhos, mouse por monitor).
 //! - [`cursor`]: cursor separado (posição e forma à parte do vídeo).
 //! - [`clipboard`]: área de transferência compartilhada (oferta, pedido e pedaços).
+//! - [`pareamento`]: celulares pareados por QR e quem pode pedir a lista de dispositivos.
 //! - [`acessos`]: registro de quem acessou este computador (auditoria).
 //! - [`conexao`]: tudo isso sobre QUIC (stream de controle, streams uni, arquivos).
 //!
@@ -20,6 +21,7 @@ pub mod controller;
 pub mod cursor;
 pub mod host;
 pub mod monitores;
+pub mod pareamento;
 pub mod policy;
 pub mod senha;
 
@@ -30,4 +32,5 @@ pub use host::{
     Need, need,
 };
 pub use monitores::{Aba, Atalho, UmPorVez, atalho, atalho_tela_cheia};
+pub use pareamento::{PairedPhone, Pareamento};
 pub use policy::{Decision, HostSettings, TrustedDevice};

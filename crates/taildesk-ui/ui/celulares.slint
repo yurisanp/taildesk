@@ -1,0 +1,151 @@
+// Configurações → Celulares: o QR que o app Android lê para parear com este computador
+// (`docs/context/mobile/android-detalhado.md` §7, mockup 03) e a lista de celulares pareados.
+import { Tema } from "tema.slint";
+import { Botao, Cartao, PontoStatus, Estado, Separador } from "componentes.slint";
+import { Switch } from "std-widgets.slint";
+
+export struct InfoCelulares {
+    // "Permitir celulares": aceita pareamento.
+    permitir: bool,
+    // Celulares pareados ("Pixel do Rafael · pixel-8").
+    nomes: [string],
+    // A área do QR está aberta.
+    mostrando-qr: bool,
+    qr: image,
+    // Código em dois grupos ("K7P-2QX"), para digitar sem câmera.
+    codigo: string,
+    // Nome e endereço deste computador na tailnet, para digitar junto com o código.
+    endereco: string,
+    // Segundos até o código vencer.
+    restante: int,
+    // Por que não dá para mostrar o QR (Tailscale desconectado, por exemplo).
+    erro: string,
+}
+
+component LinhaCelular inherits HorizontalLayout {
+    in property <string> nome;
+    callback remover();
+    spacing: 8px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    VerticalLayout { alignment: center; PontoStatus { estado: Estado.online; } }
+    Text { horizontal-stretch: 1; text: root.nome; color: Tema.texto; font-size: Tema.fonte; vertical-alignment: center; overflow: elide; }
+    Botao { texto: @tr("Remover"); discreto: true; perigo: true; altura: 26px; clicado => { root.remover(); } }
+}
+
+export component CartaoCelulares inherits Cartao {
+    in property <InfoCelulares> info;
+    callback permitir-mudou(bool);
+    callback conectar();
+    callback cancelar();
+    callback remover(int);
+
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        HorizontalLayout {
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 16px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 3px;
+                Text { text: @tr("Permitir celulares"); color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+                Text {
+                    text: @tr("O app TailDesk para Android lê um QR desta tela e passa a ver os computadores da sua tailnet. Para controlar este computador, o celular pede acesso como qualquer outro dispositivo.");
+                    color: Tema.texto-2;
+                    font-size: Tema.fonte-pequena;
+                    wrap: word-wrap;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Switch {
+                    checked: root.info.permitir;
+                    toggled => { root.permitir-mudou(self.checked); }
+                }
+            }
+        }
+        if root.info.permitir: Separador { }
+        if root.info.permitir && !root.info.mostrando-qr: HorizontalLayout {
+            padding-top: 10px;
+            padding-bottom: 10px;
+            alignment: start;
+            Botao { texto: @tr("Conectar um celular"); primario: true; clicado => { root.conectar(); } }
+        }
+        if root.info.permitir && root.info.mostrando-qr: HorizontalLayout {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            spacing: 20px;
+            if root.info.erro == "": Rectangle {
+                width: 200px;
+                height: 200px;
+                background: white;
+                border-radius: Tema.raio;
+                Image {
+                    width: 184px;
+                    height: 184px;
+                    source: root.info.qr;
+                    image-rendering: pixelated;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 8px;
+                alignment: center;
+                if root.info.erro != "": Text { text: root.info.erro; color: Tema.perigo; font-size: Tema.fonte; wrap: word-wrap; }
+                if root.info.erro == "": Text {
+                    text: @tr("No celular, abra o TailDesk e toque em “Parear com um computador”. Aponte a câmera para o QR.");
+                    color: Tema.texto;
+                    font-size: Tema.fonte;
+                    wrap: word-wrap;
+                }
+                if root.info.erro == "": Text {
+                    text: @tr("Sem câmera? Digite {} e o código:", root.info.endereco);
+                    color: Tema.texto-2;
+                    font-size: Tema.fonte-pequena;
+                    wrap: word-wrap;
+                }
+                if root.info.erro == "": Text {
+                    text: root.info.codigo;
+                    color: Tema.texto;
+                    font-size: 28px;
+                    font-weight: 700;
+                    letter-spacing: 4px;
+                }
+                if root.info.erro == "": Text {
+                    text: root.info.restante > 0
+                        ? @tr("Vale uma vez, por mais {} s.", root.info.restante)
+                        : @tr("Código vencido. Gere outro.");
+                    color: Tema.texto-2;
+                    font-size: Tema.fonte-pequena;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 6px;
+                    Botao { texto: @tr("Fechar"); discreto: true; clicado => { root.cancelar(); } }
+                    if root.info.erro == "" && root.info.restante <= 0: Botao {
+                        texto: @tr("Gerar outro código");
+                        clicado => { root.conectar(); }
+                    }
+                }
+            }
+        }
+        Separador { }
+        VerticalLayout {
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 2px;
+            Text { text: @tr("Celulares pareados"); font-size: Tema.fonte-pequena; color: Tema.texto-2; }
+            if root.info.nomes.length == 0: Text {
+                text: @tr("Nenhum.");
+                font-size: Tema.fonte;
+                color: Tema.texto;
+            }
+            for nome[i] in root.info.nomes: LinhaCelular {
+                nome: nome;
+                remover => { root.remover(i); }
+            }
+        }
+    }
+}

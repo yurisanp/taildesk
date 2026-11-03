@@ -66,6 +66,9 @@ pub struct PeerStatus {
     pub tags: Option<Vec<String>>,
     /// Última vez visto pelo servidor de controle (RFC 3339; ano 1 quando nunca).
     pub last_seen: String,
+    /// Dono do nó (chave de [`Status::user`]).
+    #[serde(rename = "UserID")]
+    pub user_id: u64,
 }
 
 impl PeerStatus {
@@ -93,6 +96,16 @@ pub struct Status {
     pub self_node: PeerStatus,
     /// Peers, indexados pela chave pública.
     pub peer: Option<std::collections::BTreeMap<String, PeerStatus>>,
+    /// Perfis dos usuários, pelo `UserID` em texto.
+    pub user: Option<std::collections::BTreeMap<String, UserProfile>>,
+}
+
+/// Perfil de um usuário da tailnet (subconjunto de `tailcfg.UserProfile`).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase", default)]
+pub struct UserProfile {
+    pub login_name: String,
+    pub display_name: String,
 }
 
 /// Tailnet atual (subconjunto de `ipnstate.TailnetStatus`).
@@ -111,6 +124,18 @@ impl Status {
         let maior = partes.next()?.parse().ok()?;
         let menor = partes.next()?.parse().ok()?;
         Some((maior, menor))
+    }
+
+    /// Login do dono deste nó (`None` em nó com tag ou sem login).
+    pub fn self_login(&self) -> Option<&str> {
+        if self.self_node.tags.as_ref().is_some_and(|t| !t.is_empty()) {
+            return None;
+        }
+        self.user
+            .as_ref()?
+            .get(&self.self_node.user_id.to_string())
+            .map(|u| u.login_name.as_str())
+            .filter(|l| !l.is_empty())
     }
 
     pub fn peers(&self) -> impl Iterator<Item = &PeerStatus> {
@@ -288,7 +313,8 @@ mod tests {
       "CurrentTailnet": {"Name": "yuri@github", "MagicDNSSuffix": "tail1234.ts.net", "MagicDNSEnabled": true},
       "Self": {"ID": "nSelf", "HostName": "notebook-yuri", "DNSName": "notebook-yuri.tail1234.ts.net.",
                "OS": "linux", "TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"], "Online": true,
-               "CurAddr": "", "Relay": "sao"},
+               "CurAddr": "", "Relay": "sao", "UserID": 42},
+      "User": {"42": {"ID": 42, "LoginName": "yuri@example.com", "DisplayName": "Yuri"}},
       "Peer": {
         "nodekey:aa": {"ID": "nA", "HostName": "DESKTOP-CASA", "DNSName": "desktop-casa.tail1234.ts.net.",
                        "OS": "windows", "TailscaleIPs": ["100.64.0.2"], "Addrs": ["192.168.0.20:41641"],
@@ -311,6 +337,7 @@ mod tests {
             "2026-10-14T21:03:00Z"
         );
         assert_eq!(s.self_node.short_name(), "notebook-yuri");
+        assert_eq!(s.self_login(), Some("yuri@example.com"));
         assert_eq!(s.peers().count(), 2);
         let casa = s.peer_by_name("desktop-casa").unwrap();
         assert_eq!(casa.cur_addr, "192.168.0.20:41641");

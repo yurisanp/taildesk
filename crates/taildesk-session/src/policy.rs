@@ -28,6 +28,10 @@ pub struct HostSettings {
     /// "Acesso com senha": hash argon2 (PHC) de [`crate::senha::gerar_hash`]. Com a senha
     /// certa no `Hello`, entra sem o diálogo.
     pub password_hash: Option<String>,
+    /// "Permitir celulares": aceita pareamento por QR (Configurações → Celulares).
+    pub allow_phones: bool,
+    /// Celulares pareados: podem pedir a lista de dispositivos desta tailnet.
+    pub phones: Vec<crate::pareamento::PairedPhone>,
 }
 
 impl Default for HostSettings {
@@ -39,6 +43,8 @@ impl Default for HostSettings {
             allow_audio: true,
             allow_files: true,
             password_hash: None,
+            allow_phones: true,
+            phones: Vec::new(),
         }
     }
 }

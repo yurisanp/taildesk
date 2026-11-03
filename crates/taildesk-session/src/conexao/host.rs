@@ -9,7 +9,7 @@
 
 use std::future::Future;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -18,10 +18,12 @@ use std::time::Instant;
 use taildesk_files::audit::AuditLog;
 use taildesk_files::service::{Config, Event, Files, SharedRoot, Side};
 use taildesk_keyboard::{Inject, KeyMsg, Keymap, Locks};
-use taildesk_overlay::{Overlay, PeerIdentity};
+use taildesk_overlay::{Overlay, PeerIdentity, PeerInfo};
 use taildesk_proto::control::{
-    AudioStopReason, AudioStopped, ChatMessage, Close, CloseReason, Consent, DisplayInfo, HelloAck,
-    KeyboardInfo, Msg, PROTO_VERSION, Permissions, Platform, Pong,
+    AudioStopReason, AudioStopped, ChatMessage, ClientKind, Close, CloseReason, Consent,
+    DisplayInfo, HelloAck, KeyboardInfo, Msg, PROTO_VERSION, PairError, PairRequest, PairResult,
+    PathInfo, PeerEntry, PeerList, PeerListRequest, Permissions, Platform, Pong, TaildeskPresence,
+    limits,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -31,6 +33,7 @@ use crate::acessos::{
     Acesso, Evento, MOTIVO_FORA_DA_TAILNET, MOTIVO_QUEDA, RegistroAcessos, nome_motivo,
 };
 use crate::host::{ConsentAnswer, ConsentPrompt, HelloReply, HostSession, HostState};
+use crate::pareamento::{Pareamento, pode_listar};
 use crate::policy::HostSettings;
 
 /// Quem está do outro lado, segundo a tailnet. Em produção é o `SystemOverlay`.
@@ -39,11 +42,50 @@ pub trait Identificador: Send + Sync + 'static {
         &self,
         remoto: SocketAddr,
     ) -> impl Future<Output = io::Result<PeerIdentity>> + Send;
+
+    /// Login do dono deste computador na tailnet (quem pode pedir a lista de dispositivos sem
+    /// parear). O padrão não sabe.
+    fn dono(&self) -> impl Future<Output = Option<String>> + Send {
+        std::future::ready(None)
+    }
+
+    /// Dispositivos da tailnet, para a `PeerList` do celular. O padrão não tem nenhum.
+    fn dispositivos(&self) -> impl Future<Output = io::Result<Vec<PeerInfo>>> + Send {
+        std::future::ready(Ok(Vec::new()))
+    }
+
+    /// Caminho até o controlador, para o `PathInfo` do celular. `None` = não sabe.
+    fn caminho(&self, _remoto: IpAddr) -> impl Future<Output = Option<PathInfo>> + Send {
+        std::future::ready(None)
+    }
 }
 
 impl<O: Overlay> Identificador for O {
     async fn identificar(&self, remoto: SocketAddr) -> io::Result<PeerIdentity> {
         self.identify(remoto).await
+    }
+
+    async fn dono(&self) -> Option<String> {
+        self.self_user().await
+    }
+
+    async fn dispositivos(&self) -> io::Result<Vec<PeerInfo>> {
+        self.peers().await
+    }
+
+    async fn caminho(&self, remoto: IpAddr) -> Option<PathInfo> {
+        let c = self.path(remoto).await;
+        Some(PathInfo {
+            kind: c.kind as u32,
+            relay_region: if c.kind == taildesk_overlay::PathKind::Relayed {
+                c.derp_region.unwrap_or_default()
+            } else {
+                String::new()
+            },
+            rtt_ms: c
+                .rtt
+                .map_or(0, |r| u32::try_from(r.as_millis()).unwrap_or(u32::MAX)),
+        })
     }
 }
 
@@ -161,6 +203,10 @@ pub struct ConfigHost {
     pub acessos: Option<Arc<RegistroAcessos>>,
     /// Host do agente do serviço do Windows na tela de entrada: cada acesso fica marcado.
     pub tela_de_entrada: bool,
+    /// Código do QR em vigor (Configurações → Celulares); a interface gera e cancela.
+    pub pareamento: Arc<Mutex<Pareamento>>,
+    /// SHA-256 do certificado deste host, devolvido no `PairResult`.
+    pub fingerprint: [u8; 32],
 }
 
 impl ConfigHost {
@@ -203,6 +249,10 @@ pub enum EventoHost {
     Arquivos {
         sessao: IdSessao,
         evento: Event,
+    },
+    /// Um celular acabou de parear: grave as configurações e atualize a lista de celulares.
+    Pareado {
+        peer: PeerIdentity,
     },
     /// Acabou (e o diálogo, se aberto, deve sumir).
     Fim {
@@ -286,6 +336,21 @@ async fn atender<I: Identificador, M: Maquina>(
     };
     let hello = match tokio::time::timeout(ESPERA_HELLO, leitor.proxima()).await {
         Ok(Ok(Msg::Hello(h))) => h,
+        // Conexões de serviço do celular: uma pergunta, uma resposta, e fecha.
+        Ok(Ok(Msg::PeerListRequest(r))) => {
+            let resposta = lista(identificador, config, &peer, r).await;
+            encerrar(&conn, saida, tarefa, Some(resposta)).await;
+            return;
+        }
+        Ok(Ok(Msg::PairRequest(r))) => {
+            let resposta = parear(config, &peer, &r, Instant::now());
+            let ok = resposta.ok;
+            encerrar(&conn, saida, tarefa, Some(Msg::PairResult(resposta))).await;
+            if ok {
+                let _ = eventos.send(EventoHost::Pareado { peer }).await;
+            }
+            return;
+        }
         _ => {
             encerrar(
                 &conn,
@@ -367,6 +432,7 @@ async fn atender<I: Identificador, M: Maquina>(
             .com_via(sessao.via())
             .com_permissoes(sessao.permissions()),
     );
+    let celular = matches!(hello.client_kind(), ClientKind::Phone | ClientKind::Tablet);
     let motivo = ao_vivo(
         &conn,
         hello.decode_caps.clone(),
@@ -380,7 +446,20 @@ async fn atender<I: Identificador, M: Maquina>(
         eventos,
         &saida,
         &mut leitor,
-    )
+    );
+    // O celular não tem LocalAPI: o host diz o caminho (direto/relay) enquanto a sessão dura.
+    let caminho = async {
+        if celular {
+            informar_caminho(identificador, remoto.ip(), &saida).await;
+        }
+        std::future::pending::<()>().await
+    };
+    let motivo = async {
+        tokio::select! {
+            m = motivo => m,
+            () = caminho => unreachable!(),
+        }
+    }
     .await;
     let close = match motivo {
         FimHost::Fechada(CloseReason::ByHost) => Some(Msg::Close(sessao.end())),
@@ -395,6 +474,139 @@ async fn atender<I: Identificador, M: Maquina>(
             .com_duracao(inicio.elapsed()),
     );
     let _ = eventos.send(fim(motivo)).await;
+}
+
+/// De quanto em quanto tempo o host confere o caminho até um celular.
+const INTERVALO_CAMINHO: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Manda `PathInfo` agora e a cada mudança, até a fila de saída fechar.
+async fn informar_caminho<I: Identificador>(
+    identificador: &I,
+    remoto: IpAddr,
+    saida: &mpsc::Sender<taildesk_proto::control::Control>,
+) {
+    let mut ultimo: Option<PathInfo> = None;
+    loop {
+        if let Some(c) = identificador.caminho(remoto).await {
+            // RTT oscila: só reenvia se o tipo ou a região mudarem, ou o RTT andar 20 ms.
+            let mudou = ultimo.as_ref().is_none_or(|u| {
+                u.kind != c.kind
+                    || u.relay_region != c.relay_region
+                    || u.rtt_ms.abs_diff(c.rtt_ms) >= 20
+            });
+            if mudou {
+                if saida
+                    .send(controle(Msg::PathInfo(c.clone())))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                ultimo = Some(c);
+            }
+        }
+        tokio::time::sleep(INTERVALO_CAMINHO).await;
+    }
+}
+
+/// Uma página da lista de dispositivos, só para o dono ou um celular pareado.
+async fn lista<I: Identificador>(
+    identificador: &I,
+    config: &ConfigHost,
+    peer: &PeerIdentity,
+    pedido: PeerListRequest,
+) -> Msg {
+    let dono = identificador.dono().await;
+    let pode = {
+        let settings = config.settings.lock().unwrap_or_else(|e| e.into_inner());
+        pode_listar(&settings, peer, dono.as_deref())
+    };
+    if !pode {
+        return Msg::Close(Close {
+            reason: CloseReason::NotAllowed.into(),
+            message: String::new(),
+        });
+    }
+    let todos = identificador.dispositivos().await.unwrap_or_default();
+    Msg::PeerList(pagina_de_dispositivos(&todos, pedido.start as usize))
+}
+
+/// Corta o texto em até `max` bytes sem quebrar um caractere.
+fn cortar(s: &str, max: usize) -> String {
+    let mut fim = s.len().min(max);
+    while !s.is_char_boundary(fim) {
+        fim -= 1;
+    }
+    s[..fim].to_owned()
+}
+
+/// Monta a página que começa em `inicio` (online primeiro, depois por nome).
+pub fn pagina_de_dispositivos(todos: &[PeerInfo], inicio: usize) -> PeerList {
+    let mut ordem: Vec<&PeerInfo> = todos.iter().take(limits::PEER_TOTAL).collect();
+    ordem.sort_by(|a, b| {
+        b.online
+            .cmp(&a.online)
+            .then_with(|| a.hostname.to_lowercase().cmp(&b.hostname.to_lowercase()))
+    });
+    let entries: Vec<PeerEntry> = ordem
+        .iter()
+        .skip(inicio)
+        .take(limits::PEER_PAGE)
+        .map(|p| PeerEntry {
+            name: cortar(&p.hostname, limits::PEER_NAME_LEN),
+            dns_name: cortar(&p.dns_name, limits::DNS_NAME_LEN),
+            ip: p.addr.to_string(),
+            os: cortar(p.os.as_deref().unwrap_or_default(), limits::SHORT_TEXT_LEN),
+            online: p.online,
+            // O host não sonda os outros nós; o celular descobre ao tentar conectar.
+            taildesk: TaildeskPresence::Unknown.into(),
+        })
+        .collect();
+    let more = inicio + entries.len() < ordem.len();
+    PeerList { entries, more }
+}
+
+/// Confere o código do QR e pareia o celular (identificado pelo `whois`, não pelo pedido).
+fn parear(
+    config: &ConfigHost,
+    peer: &PeerIdentity,
+    pedido: &PairRequest,
+    agora: Instant,
+) -> PairResult {
+    let recusa = |e: PairError| PairResult {
+        ok: false,
+        cert_fingerprint: Vec::new(),
+        error: e.into(),
+    };
+    if !config
+        .settings
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .allow_phones
+    {
+        return recusa(PairError::Disabled);
+    }
+    let conferido = config
+        .pareamento
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .conferir(&pedido.code, &peer.node_stable_id, agora);
+    if let Err(e) = conferido {
+        return recusa(e);
+    }
+    let agora_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    config
+        .settings
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pair(peer, &pedido.device_name, agora_ms);
+    PairResult {
+        ok: true,
+        cert_fingerprint: config.fingerprint.to_vec(),
+        error: PairError::Unspecified.into(),
+    }
 }
 
 fn motivo_de(m: FimHost) -> &'static str {
