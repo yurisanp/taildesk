@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use slint::{CloseRequestResponse, ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use taildesk_keyboard::{Inject, Keymap, Locks};
 use taildesk_overlay::{Overlay, SystemOverlay};
-use taildesk_proto::control::{KeyboardInfo, Msg, Permissions, Platform};
+use taildesk_proto::control::{
+    ClientKind, KeyboardInfo, KeyboardSource, Msg, Permissions, Platform,
+};
 use taildesk_session::conexao::PORTA;
 use taildesk_session::conexao::host::{
     CanalMidia, ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, IdSessao, Maquina, servir,
@@ -459,6 +461,7 @@ impl Maquina for MaquinaApp {
                 layout_tag: taildesk_keyboard::layout_tag(&os_layout_id),
                 os_layout_id,
                 extra_hid: Vec::new(),
+                source: KeyboardSource::Hardware.into(),
             },
             encode_caps: crate::midia_host::encode_caps(),
             keymap,
@@ -908,6 +911,12 @@ impl Ui {
         let p = &prompt.peer;
         janela.set_peer(p.hostname.as_str().into());
         let mut detalhe = Vec::new();
+        // Dito pelo próprio controlador no `Hello`: só ajuda a reconhecer o pedido.
+        match prompt.client_kind {
+            ClientKind::Phone => detalhe.push("Celular".to_owned()),
+            ClientKind::Tablet => detalhe.push("Tablet".to_owned()),
+            ClientKind::Unspecified | ClientKind::Desktop => {}
+        }
         if let Some(u) = &p.user_login {
             detalhe.push(format!("Usuário: {u}"));
         }

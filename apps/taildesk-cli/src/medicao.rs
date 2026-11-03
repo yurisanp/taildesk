@@ -67,6 +67,7 @@ impl Video {
             ConfigEnvio {
                 stream_id,
                 fps_max: 60.0,
+                viewport: None,
             },
             Box::new(encoder),
             Box::new(Loopback(recepcao.clone())),

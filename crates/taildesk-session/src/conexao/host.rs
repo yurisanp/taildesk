@@ -72,6 +72,8 @@ pub struct CanalMidia {
     pub saida: mpsc::Sender<taildesk_proto::control::Control>,
     /// Codecs que o controlador decodifica (`Hello.decode_caps`; vazio = só H.264).
     pub decode_caps: Vec<taildesk_proto::control::CodecCap>,
+    /// Tela útil do celular (`Hello.viewport`): o vídeo não sai maior que isso (MF-82).
+    pub viewport: Option<taildesk_proto::control::Viewport>,
 }
 
 impl CanalMidia {
@@ -368,6 +370,7 @@ async fn atender<I: Identificador, M: Maquina>(
     let motivo = ao_vivo(
         &conn,
         hello.decode_caps.clone(),
+        hello.viewport,
         &mut sessao,
         id,
         maquina,
@@ -496,6 +499,7 @@ impl<E: Entrada> Teclado<E> {
 async fn ao_vivo<M: Maquina>(
     conn: &quinn::Connection,
     decode_caps: Vec<taildesk_proto::control::CodecCap>,
+    viewport: Option<taildesk_proto::control::Viewport>,
     sessao: &mut HostSession,
     id: IdSessao,
     maquina: &M,
@@ -522,6 +526,7 @@ async fn ao_vivo<M: Maquina>(
                 conn: conn.clone(),
                 saida: saida.clone(),
                 decode_caps,
+                viewport,
             })
             .await;
         let area = if permissoes.clipboard {

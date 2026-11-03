@@ -19,10 +19,10 @@ use taildesk_keyboard::{Controller, Hid, KeyMsg, Keymap, Level, Mode, Mods, Tran
 use taildesk_media::video::RecepcaoVideo;
 use taildesk_overlay::{Overlay, SystemOverlay};
 use taildesk_proto::control::{
-    AbsPos, AudioPrefs, AudioProfile, AudioSelected, AudioStopReason, Button, Codec, CodecCap,
-    CodecSelected, Control, ErrorCode, Feature, Hello, KeyboardInfo, MouseButton, MouseMove, Msg,
-    Platform, QualityPrefs, RequestKeyframe, Scroll, SetVideoQuality, StartAudio, StopAudio,
-    mouse_move,
+    AbsPos, AudioPrefs, AudioProfile, AudioSelected, AudioStopReason, Button, ClientKind, Codec,
+    CodecCap, CodecSelected, Control, ErrorCode, Feature, Hello, KeyboardInfo, KeyboardSource,
+    MouseButton, MouseMove, Msg, Platform, QualityPrefs, RequestKeyframe, Scroll, SetVideoQuality,
+    StartAudio, StopAudio, mouse_move,
 };
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
 
@@ -1534,6 +1534,7 @@ impl Controlador {
             layout_tag: tag_local.clone(),
             os_layout_id,
             extra_hid: Vec::new(),
+            source: KeyboardSource::Hardware.into(),
         };
         let (fechar_tx, fechar_rx) = oneshot::channel();
         let (video, monitores) = {
@@ -1738,6 +1739,7 @@ async fn rodar(
         decode_caps,
         keyboard: Some(teclado),
         password: senha,
+        client_kind: ClientKind::Desktop.into(),
         ..Hello::default()
     };
     let falhou = |texto: String| {

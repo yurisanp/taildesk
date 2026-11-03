@@ -86,6 +86,7 @@ mod tests {
             ConfigEnvio {
                 stream_id: 2,
                 fps_max: 1000.0,
+                viewport: None,
             },
             Box::new(
                 EncoderOpenH264::novo(ConfigEncoder {
@@ -168,6 +169,7 @@ mod tests {
             ConfigEnvio {
                 stream_id: 0,
                 fps_max: 1000.0,
+                viewport: None,
             },
             Box::new(
                 EncoderOpenH264::novo(ConfigEncoder {

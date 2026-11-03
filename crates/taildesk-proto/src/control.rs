@@ -15,6 +15,7 @@
 //! | 90–99    | QoS e seleção adaptativa (`14-selecao-adaptativa.md` §4) |
 //! | 100–109  | Áudio (`15-audio.md` §6.5; reservado, sem implementação) |
 //! | 110–119  | Chat                                                     |
+//! | 120–129  | Celular: caminho, lista de dispositivos e pareamento     |
 //!
 //! No fio cada [`Control`] vai precedido do tamanho em varint ([`encode_frame`], [`decode_frame`]).
 //! Tag desconhecida no `oneof` chega como `msg: None`: quem recebe ignora e loga. Campos novos
@@ -74,6 +75,20 @@ pub mod limits {
     pub const CLIP_FORMATS: usize = 8;
     /// Arquivos e pastas copiados listados numa `ClipboardOffer` (o resto não vai).
     pub const CLIP_FILES: usize = 256;
+    /// Dispositivos da tailnet numa página de `PeerList` (cabe folgado num frame).
+    pub const PEER_PAGE: usize = 64;
+    /// Dispositivos no total de uma `PeerList` (`android-detalhado.md` §7).
+    pub const PEER_TOTAL: usize = 256;
+    /// Nome de um dispositivo na `PeerList`.
+    pub const PEER_NAME_LEN: usize = 128;
+    /// Nome DNS completo (MagicDNS) de um dispositivo.
+    pub const DNS_NAME_LEN: usize = 253;
+    /// Código de pareamento como digitado (o normalizado tem `crate::pair::CODE_LEN`).
+    pub const PAIR_CODE_LEN: usize = 16;
+    /// SHA-256 do certificado do host.
+    pub const FINGERPRINT_LEN: usize = 32;
+    /// Lado do viewport do celular em pixels (8K cobre qualquer tablet).
+    pub const VIEWPORT_PX: u32 = 8192;
     /// Bytes de um pedaço de `ClipboardData` (cabe folgado num frame de controle).
     pub const CLIP_CHUNK: usize = 32 * 1024;
     /// Maior conteúdo de um formato (uma captura de tela 4K em PNG passa com folga).
@@ -89,7 +104,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 56, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104, 110"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 56, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104, 110, 120, 121, 122, 123, 124"
     )]
     pub msg: Option<Msg>,
 }
@@ -220,6 +235,19 @@ pub enum Msg {
     // direção da conexão (`Overlay::identify()`), nunca do conteúdo.
     #[prost(message, tag = "110")]
     ChatMessage(ChatMessage),
+
+    // Celular (`mobile/android-detalhado.md` §7). `PathInfo` vai na sessão; `PeerListRequest` e
+    // `PairRequest` abrem uma conexão de serviço curta, sem `Hello`: o host responde e fecha.
+    #[prost(message, tag = "120")]
+    PathInfo(PathInfo),
+    #[prost(message, tag = "121")]
+    PeerListRequest(PeerListRequest),
+    #[prost(message, tag = "122")]
+    PeerList(PeerList),
+    #[prost(message, tag = "123")]
+    PairRequest(PairRequest),
+    #[prost(message, tag = "124")]
+    PairResult(PairResult),
 }
 
 impl From<Msg> for Control {
@@ -259,6 +287,43 @@ pub struct Hello {
     /// host conferido; o host guarda só o hash (argon2).
     #[prost(string, tag = "9")]
     pub password: String,
+    /// Que tipo de controlador é (o diálogo do host mostra "celular"). `Unspecified` = desktop
+    /// antigo.
+    #[prost(enumeration = "ClientKind", tag = "10")]
+    pub client_kind: i32,
+    /// Área útil da tela do celular: o host não codifica acima disso (MF-82).
+    #[prost(message, optional, tag = "11")]
+    pub viewport: Option<Viewport>,
+}
+
+/// Tamanho útil da tela de um controlador móvel, em pixels físicos, e a densidade.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct Viewport {
+    #[prost(uint32, tag = "1")]
+    pub w_px: u32,
+    #[prost(uint32, tag = "2")]
+    pub h_px: u32,
+    #[prost(uint32, tag = "3")]
+    pub dpi: u32,
+}
+
+impl Viewport {
+    /// Maior tamanho que cabe no viewport mantendo a proporção de `w`×`h`, com lados pares (o
+    /// encoder H.264 em 4:2:0 exige). Viewport sem tamanho, ou maior que a imagem, não reduz.
+    pub fn fit(&self, w: u32, h: u32) -> (u32, u32) {
+        if self.w_px == 0 || self.h_px == 0 || w == 0 || h == 0 {
+            return (w, h);
+        }
+        // A tela do celular gira: compara o lado maior com o maior.
+        let (vmax, vmin) = (self.w_px.max(self.h_px), self.w_px.min(self.h_px));
+        let (imax, imin) = (w.max(h), w.min(h));
+        if imax <= vmax && imin <= vmin {
+            return (w, h);
+        }
+        let escala = (f64::from(vmax) / f64::from(imax)).min(f64::from(vmin) / f64::from(imin));
+        let par = |x: u32| ((f64::from(x) * escala) as u32 & !1).max(2);
+        (par(w), par(h))
+    }
 }
 
 impl std::fmt::Debug for Hello {
@@ -273,6 +338,8 @@ impl std::fmt::Debug for Hello {
             .field("clock_ns", &self.clock_ns)
             .field("keyboard", &self.keyboard)
             .field("password", &(!self.password.is_empty()).then_some("***"))
+            .field("client_kind", &self.client_kind())
+            .field("viewport", &self.viewport)
             .finish()
     }
 }
@@ -679,6 +746,10 @@ pub struct KeyboardInfo {
     /// Teclas físicas que existem além do básico (0x87 e 0x85 no ABNT2).
     #[prost(uint32, repeated, tag = "3")]
     pub extra_hid: Vec<u32>,
+    /// Teclado físico ou virtual. No virtual (celular) não há layout físico: tudo que é
+    /// imprimível chega como `KeyChar`.
+    #[prost(enumeration = "KeyboardSource", tag = "4")]
+    pub source: i32,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -1111,7 +1182,145 @@ pub struct ChatMessage {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Celular (`mobile/android-detalhado.md` §7)
+
+/// H→C: caminho até o controlador, medido pelo host na LocalAPI (o celular não tem LocalAPI).
+/// Só para o HUD e como pista do adaptador; a classe de rede sai sempre da medição.
+#[derive(Clone, PartialEq, Message)]
+pub struct PathInfo {
+    /// [`crate::net::PathKind`] no fio.
+    #[prost(uint32, tag = "1")]
+    pub kind: u32,
+    /// Região DERP quando o caminho é relay (`"sao"`); vazio = nenhuma.
+    #[prost(string, tag = "2")]
+    pub relay_region: String,
+    /// RTT do `ping` disco do `tailscaled`; 0 = sem medida.
+    #[prost(uint32, tag = "3")]
+    pub rtt_ms: u32,
+}
+
+impl PathInfo {
+    pub fn path_kind(&self) -> crate::net::PathKind {
+        crate::net::PathKind::from_wire(self.kind)
+    }
+
+    /// Caminho direto (LAN ou internet), sem relay.
+    pub fn direct(&self) -> bool {
+        matches!(
+            self.path_kind(),
+            crate::net::PathKind::DirectLan | crate::net::PathKind::DirectWan
+        )
+    }
+}
+
+/// C→H: primeira (e única) mensagem de uma conexão de serviço pedindo os dispositivos da
+/// tailnet a partir de `start`. O host só responde ao mesmo usuário da tailnet (`whois`) ou a um
+/// celular pareado; para os outros, `Close(NOT_ALLOWED)`.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct PeerListRequest {
+    #[prost(uint32, tag = "1")]
+    pub start: u32,
+}
+
+/// H→C: uma página da lista de dispositivos. É só sugestão para o celular: quem conecta é
+/// identificado de novo pela tailnet.
+#[derive(Clone, PartialEq, Message)]
+pub struct PeerList {
+    #[prost(message, repeated, tag = "1")]
+    pub entries: Vec<PeerEntry>,
+    /// Há mais a partir de `start + entries.len()`.
+    #[prost(bool, tag = "2")]
+    pub more: bool,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct PeerEntry {
+    /// Nome curto do nó (`HostName` do Tailscale).
+    #[prost(string, tag = "1")]
+    pub name: String,
+    /// Nome MagicDNS completo, sem o ponto final; vazio sem MagicDNS.
+    #[prost(string, tag = "2")]
+    pub dns_name: String,
+    /// IP 100.x (ou IPv6 da tailnet) em texto.
+    #[prost(string, tag = "3")]
+    pub ip: String,
+    /// `"windows"`, `"linux"`, `"android"`... como o `OS` do Tailscale.
+    #[prost(string, tag = "4")]
+    pub os: String,
+    #[prost(bool, tag = "5")]
+    pub online: bool,
+    #[prost(enumeration = "TaildeskPresence", tag = "6")]
+    pub taildesk: i32,
+}
+
+/// C→H: primeira (e única) mensagem de uma conexão de serviço de pareamento, com o código de
+/// uso único mostrado no QR do desktop.
+#[derive(Clone, PartialEq, Message)]
+pub struct PairRequest {
+    #[prost(string, tag = "1")]
+    pub code: String,
+    /// Nome do celular, só para exibir na lista de celulares pareados (quem é vem do `whois`).
+    #[prost(string, tag = "2")]
+    pub device_name: String,
+}
+
+/// H→C: resultado do pareamento. Com `ok`, `cert_fingerprint` é o SHA-256 do certificado do
+/// host (o mesmo do QR), que o celular fixa.
+#[derive(Clone, PartialEq, Message)]
+pub struct PairResult {
+    #[prost(bool, tag = "1")]
+    pub ok: bool,
+    #[prost(bytes = "vec", tag = "2")]
+    pub cert_fingerprint: Vec<u8>,
+    #[prost(enumeration = "PairError", tag = "3")]
+    pub error: i32,
+}
+
+// ---------------------------------------------------------------------------------------------
 // Enums (0 = não especificado; valor desconhecido = tratar como 0)
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum ClientKind {
+    Unspecified = 0,
+    Desktop = 1,
+    Phone = 2,
+    Tablet = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum KeyboardSource {
+    /// Desktop antigo: o mesmo que `Hardware`.
+    Unspecified = 0,
+    /// Teclado na tela do celular: sem layout físico, só texto.
+    Virtual = 1,
+    /// Teclado físico (USB, Bluetooth ou o do computador).
+    Hardware = 2,
+}
+
+/// Se um dispositivo da `PeerList` tem o TailDesk aceitando conexões.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum TaildeskPresence {
+    Unknown = 0,
+    Yes = 1,
+    No = 2,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum PairError {
+    Unspecified = 0,
+    /// Código errado ou já usado.
+    BadCode = 1,
+    /// Passou dos 5 minutos do QR.
+    Expired = 2,
+    /// Códigos errados demais deste peer: o host não confere por um tempo.
+    TooManyAttempts = 3,
+    /// O host não aceita celulares (desligado nas configurações).
+    Disabled = 4,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
 #[repr(i32)]
@@ -1544,6 +1753,18 @@ impl Control {
                 keyboard(m.keyboard.as_ref())?;
                 platform(m.platform.as_ref())?;
                 at_most("decode_caps", m.decode_caps.len(), limits::CODEC_CAPS)?;
+                if let Some(v) = &m.viewport {
+                    at_most(
+                        "viewport.w_px",
+                        v.w_px as usize,
+                        limits::VIEWPORT_PX as usize,
+                    )?;
+                    at_most(
+                        "viewport.h_px",
+                        v.h_px as usize,
+                        limits::VIEWPORT_PX as usize,
+                    )?;
+                }
                 at_most("features", m.features.len(), limits::FEATURES)
             }
             Msg::HelloAck(m) => {
@@ -1556,6 +1777,28 @@ impl Control {
             Msg::Close(m) => at_most("message", m.message.len(), limits::MESSAGE_LEN),
             Msg::Error(m) => at_most("message", m.message.len(), limits::MESSAGE_LEN),
             Msg::ChatMessage(m) => at_most("chat_text", m.text.len(), limits::CHAT_TEXT_LEN),
+            Msg::PathInfo(m) => {
+                at_most("relay_region", m.relay_region.len(), limits::SHORT_TEXT_LEN)
+            }
+            Msg::PeerList(m) => {
+                at_most("entries", m.entries.len(), limits::PEER_PAGE)?;
+                for e in &m.entries {
+                    at_most("peer.name", e.name.len(), limits::PEER_NAME_LEN)?;
+                    at_most("peer.dns_name", e.dns_name.len(), limits::DNS_NAME_LEN)?;
+                    at_most("peer.ip", e.ip.len(), limits::SHORT_TEXT_LEN)?;
+                    at_most("peer.os", e.os.len(), limits::SHORT_TEXT_LEN)?;
+                }
+                Ok(())
+            }
+            Msg::PeerListRequest(m) => at_most("start", m.start as usize, limits::PEER_TOTAL),
+            Msg::PairRequest(m) => {
+                at_most("code", m.code.len(), limits::PAIR_CODE_LEN)?;
+                at_most("device_name", m.device_name.len(), limits::SHORT_TEXT_LEN)
+            }
+            Msg::PairResult(m) => {
+                let want = if m.ok { limits::FINGERPRINT_LEN } else { 0 };
+                exactly("cert_fingerprint", m.cert_fingerprint.len(), want)
+            }
             Msg::DisplaysChanged(m) => displays(&m.displays),
             Msg::CodecSelected(m) => video_stream(m.stream_id),
             Msg::VideoStats(m) => {
@@ -1753,6 +1996,7 @@ mod tests {
                 os_layout_id: id.into(),
                 layout_tag: tag.into(),
                 extra_hid: extra,
+                source: KeyboardSource::Unspecified.into(),
             })
         };
         let perms = Permissions {
@@ -1777,6 +2021,30 @@ mod tests {
                 clock_ns: 1_234_567_890,
                 keyboard: teclado("00020409", "us-intl", vec![]),
                 password: "correta cavalo bateria".into(),
+                client_kind: ClientKind::Desktop.into(),
+                viewport: None,
+            }),
+            Msg::Hello(Hello {
+                proto_version: PROTO_VERSION,
+                app_version: "0.3.0".into(),
+                platform: Some(Platform {
+                    os: "android".into(),
+                    arch: "aarch64".into(),
+                    device_model: "Pixel 8".into(),
+                }),
+                keyboard: Some(KeyboardInfo {
+                    os_layout_id: "android:gboard".into(),
+                    layout_tag: "pt-br".into(),
+                    extra_hid: vec![],
+                    source: KeyboardSource::Virtual.into(),
+                }),
+                client_kind: ClientKind::Phone.into(),
+                viewport: Some(Viewport {
+                    w_px: 2400,
+                    h_px: 1080,
+                    dpi: 420,
+                }),
+                ..Hello::default()
             }),
             Msg::HelloAck(HelloAck {
                 proto_version: PROTO_VERSION,
@@ -2086,6 +2354,47 @@ mod tests {
             Msg::ChatMessage(ChatMessage {
                 text: "oi, tudo bem? 👋".into(),
             }),
+            Msg::PathInfo(PathInfo {
+                kind: crate::net::PathKind::Relayed as u32,
+                relay_region: "sao".into(),
+                rtt_ms: 38,
+            }),
+            Msg::PeerListRequest(PeerListRequest { start: 64 }),
+            Msg::PeerList(PeerList {
+                entries: vec![
+                    PeerEntry {
+                        name: "servidor-homelab".into(),
+                        dns_name: "servidor-homelab.tail1234.ts.net".into(),
+                        ip: "100.101.102.103".into(),
+                        os: "linux".into(),
+                        online: true,
+                        taildesk: TaildeskPresence::Yes.into(),
+                    },
+                    PeerEntry {
+                        name: "pc-mae".into(),
+                        dns_name: String::new(),
+                        ip: "fd7a:115c:a1e0::1".into(),
+                        os: "windows".into(),
+                        online: false,
+                        taildesk: TaildeskPresence::Unknown.into(),
+                    },
+                ],
+                more: true,
+            }),
+            Msg::PairRequest(PairRequest {
+                code: "K7P-2QX".into(),
+                device_name: "Pixel do Rafael".into(),
+            }),
+            Msg::PairResult(PairResult {
+                ok: true,
+                cert_fingerprint: vec![0x5a; 32],
+                error: PairError::Unspecified.into(),
+            }),
+            Msg::PairResult(PairResult {
+                ok: false,
+                cert_fingerprint: Vec::new(),
+                error: PairError::Expired.into(),
+            }),
         ]
     }
 
@@ -2103,6 +2412,106 @@ mod tests {
             resto = &resto[n..];
         }
         assert!(resto.is_empty());
+    }
+
+    #[test]
+    fn limites_do_celular() {
+        let pagina = |n: usize, nome: usize| {
+            Msg::PeerList(PeerList {
+                entries: (0..n)
+                    .map(|_| PeerEntry {
+                        name: "n".repeat(nome),
+                        dns_name: "d".repeat(limits::DNS_NAME_LEN),
+                        ip: "f".repeat(39),
+                        os: "o".repeat(16),
+                        online: true,
+                        taildesk: TaildeskPresence::Yes.into(),
+                    })
+                    .collect(),
+                more: true,
+            })
+        };
+        let cheia = Control::from(pagina(limits::PEER_PAGE, limits::PEER_NAME_LEN));
+        assert!(cheia.validate().is_ok());
+        assert!(cheia.encoded_len() <= limits::FRAME_LEN);
+        assert_eq!(invalida(pagina(limits::PEER_PAGE + 1, 1)).field, "entries");
+        assert_eq!(
+            invalida(pagina(1, limits::PEER_NAME_LEN + 1)).field,
+            "peer.name"
+        );
+        assert_eq!(
+            invalida(Msg::PeerListRequest(PeerListRequest {
+                start: limits::PEER_TOTAL as u32 + 1
+            }))
+            .field,
+            "start"
+        );
+        assert_eq!(
+            invalida(Msg::PairRequest(PairRequest {
+                code: "x".repeat(limits::PAIR_CODE_LEN + 1),
+                device_name: String::new(),
+            }))
+            .field,
+            "code"
+        );
+        // `ok` exige o fingerprint completo; recusa vai sem nenhum.
+        for (ok, n) in [(true, 31), (true, 0), (false, 32)] {
+            let e = invalida(Msg::PairResult(PairResult {
+                ok,
+                cert_fingerprint: vec![1; n],
+                error: 0,
+            }));
+            assert_eq!(e.field, "cert_fingerprint");
+        }
+        let e = invalida(Msg::Hello(Hello {
+            proto_version: PROTO_VERSION,
+            viewport: Some(Viewport {
+                w_px: limits::VIEWPORT_PX + 1,
+                h_px: 1,
+                dpi: 0,
+            }),
+            ..Hello::default()
+        }));
+        assert_eq!(e.field, "viewport.w_px");
+    }
+
+    #[test]
+    fn viewport_reduz_mantendo_proporcao() {
+        let v = Viewport {
+            w_px: 2400,
+            h_px: 1080,
+            dpi: 420,
+        };
+        // 4K 16:9 num celular 2400x1080 (20:9): o lado menor manda.
+        assert_eq!(v.fit(3840, 2160), (1920, 1080));
+        // Celular em pé dá o mesmo resultado (a tela gira).
+        let em_pe = Viewport {
+            w_px: 1080,
+            h_px: 2400,
+            dpi: 420,
+        };
+        assert_eq!(em_pe.fit(3840, 2160), (1920, 1080));
+        // Imagem menor que o viewport não muda.
+        assert_eq!(v.fit(1366, 768), (1366, 768));
+        // Viewport vazio não reduz; lados sempre pares.
+        assert_eq!(Viewport::default().fit(3840, 2160), (3840, 2160));
+        let (w, h) = v.fit(2561, 1601);
+        assert!(
+            w % 2 == 0 && h % 2 == 0 && w <= 2400 && h <= 1080,
+            "{w}x{h}"
+        );
+    }
+
+    #[test]
+    fn caminho_direto_ou_relay() {
+        let p = |k: crate::net::PathKind| PathInfo {
+            kind: k as u32,
+            ..PathInfo::default()
+        };
+        assert!(p(crate::net::PathKind::DirectLan).direct());
+        assert!(p(crate::net::PathKind::DirectWan).direct());
+        assert!(!p(crate::net::PathKind::Relayed).direct());
+        assert!(!p(crate::net::PathKind::Unknown).direct());
     }
 
     #[test]
@@ -2330,6 +2739,7 @@ mod tests {
                 os_layout_id: String::new(),
                 layout_tag: String::new(),
                 extra_hid: vec![0x87; limits::EXTRA_HID + 1],
+                source: 0,
             }),
         }));
         assert_eq!(e.field, "keyboard.extra_hid");

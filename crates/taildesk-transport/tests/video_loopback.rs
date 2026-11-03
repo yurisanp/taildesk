@@ -56,6 +56,7 @@ async fn video_sobre_quic_chega_decodificado() {
         ConfigEnvio {
             stream_id: 0,
             fps_max: 60.0,
+            viewport: None,
         },
         Box::new(
             EncoderOpenH264::novo(ConfigEncoder {

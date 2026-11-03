@@ -45,6 +45,9 @@ pub struct ConfigEnvio {
     pub stream_id: u8,
     /// Teto de quadros por segundo; a captura pode entregar mais.
     pub fps_max: f32,
+    /// Tela útil do controlador móvel (`Hello.viewport`): a imagem nunca sai maior que ela,
+    /// em qualquer degrau do laço lento (MF-82).
+    pub viewport: Option<taildesk_proto::control::Viewport>,
 }
 
 /// Contadores do envio, para a aba de teste de conexão e para a CLI.
@@ -197,6 +200,17 @@ impl Drop for EnvioVideo {
     }
 }
 
+/// Tamanho que vai ao encoder: o degrau do laço lento e, por cima, o viewport do celular.
+fn tamanho_saida(
+    largura: u32,
+    altura: u32,
+    altura_max: u32,
+    viewport: Option<taildesk_proto::control::Viewport>,
+) -> (u32, u32) {
+    let (l, a) = escalar(largura, altura, altura_max);
+    viewport.map_or((l, a), |v| v.fit(l, a))
+}
+
 fn laco(
     config: ConfigEnvio,
     mut encoder: Box<dyn VideoEncoder>,
@@ -264,7 +278,7 @@ fn laco(
             continue;
         }
         e.captura.store(juntar(largura, altura), Ordering::Relaxed);
-        let (l, a) = escalar(largura, altura, altura_max);
+        let (l, a) = tamanho_saida(largura, altura, altura_max, config.viewport);
         let dados: &[u8] = if (l, a) == (largura, altura) {
             &imagem
         } else {
@@ -344,5 +358,20 @@ mod tests {
         assert_eq!(taxa_do_encoder(4_000_000, 30.0, 60.0), 8_000_000);
         assert_eq!(taxa_do_encoder(4_000_000, 90.0, 60.0), 4_000_000);
         assert_eq!(taxa_do_encoder(u32::MAX, 1.0, 60.0), u32::MAX);
+    }
+
+    #[test]
+    fn viewport_do_celular_limita_em_qualquer_degrau() {
+        let celular = Some(taildesk_proto::control::Viewport {
+            w_px: 2400,
+            h_px: 1080,
+            dpi: 420,
+        });
+        // Nativo: 4K vira o que cabe no celular.
+        assert_eq!(tamanho_saida(3840, 2160, 0, celular), (1920, 1080));
+        // Degrau do laço lento menor que o viewport: vale o degrau.
+        assert_eq!(tamanho_saida(3840, 2160, 720, celular), (1280, 720));
+        // Sem viewport (desktop), só o degrau.
+        assert_eq!(tamanho_saida(3840, 2160, 0, None), (3840, 2160));
     }
 }

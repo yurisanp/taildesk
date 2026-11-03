@@ -6,6 +6,7 @@
 //! - [`probe`]: payload dos datagramas de sondagem de banda (`14-selecao-adaptativa.md` §3.2).
 //! - [`net`]: mensagens e limites da seleção adaptativa (`14-selecao-adaptativa.md` §4).
 //! - [`cursor`]: formas do cursor no stream uni de cursor (`07-protocolo.md` §1).
+//! - [`pair`]: URI do QR de pareamento do celular (`mobile/android-detalhado.md` §7).
 //! - [`files`]: cabeçalho do stream de dados e limites da troca de arquivos (`10-plano` §3).
 
 pub mod control;
@@ -13,6 +14,7 @@ pub mod cursor;
 pub mod files;
 pub mod media;
 pub mod net;
+pub mod pair;
 pub mod probe;
 
 /// ALPN do QUIC para a versão 1 do protocolo.

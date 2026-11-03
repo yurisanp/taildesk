@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use taildesk_overlay::PeerIdentity;
 use taildesk_proto::control::{
-    Close, CloseReason, Consent, ConsentResult, Hello, Msg, PROTO_VERSION, Permissions,
+    ClientKind, Close, CloseReason, Consent, ConsentResult, Hello, Msg, PROTO_VERSION, Permissions,
 };
 
 use crate::policy::{Decision, HostSettings, clamp, decide, offer};
@@ -31,6 +31,8 @@ pub struct ConsentPrompt {
     pub peer: PeerIdentity,
     pub offer: Permissions,
     pub deadline: Instant,
+    /// Desktop, celular ou tablet, como o controlador disse no `Hello` (só para exibir).
+    pub client_kind: ClientKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -132,7 +134,14 @@ pub fn need(msg: &Msg) -> Need {
         | Msg::FsListing(_)
         | Msg::AudioSelected(_)
         | Msg::AudioStopped(_)
-        | Msg::ChatMessage(_) => Need::Nothing,
+        | Msg::ChatMessage(_)
+        // Celular: `PathInfo` e as respostas só vão do host; os pedidos de lista e pareamento
+        // abrem uma conexão de serviço (`conexao::host`), e no meio de uma sessão são ignorados.
+        | Msg::PathInfo(_)
+        | Msg::PeerListRequest(_)
+        | Msg::PeerList(_)
+        | Msg::PairRequest(_)
+        | Msg::PairResult(_) => Need::Nothing,
     }
 }
 
@@ -213,6 +222,7 @@ impl HostSession {
                     peer: self.peer.clone(),
                     offer,
                     deadline: now + CONSENT_TIMEOUT,
+                    client_kind: hello.client_kind(),
                 });
                 HelloReply::Ack(AckFields {
                     consent: Consent::Required,
@@ -381,6 +391,22 @@ mod tests {
             down: true,
             locks: None,
         })
+    }
+
+    #[test]
+    fn pedido_de_celular_aparece_como_celular() {
+        let settings = HostSettings::default();
+        let mut s = HostSession::new(peer());
+        let h = Hello {
+            client_kind: ClientKind::Phone.into(),
+            ..hello(&[])
+        };
+        s.on_hello(&h, &settings, Instant::now());
+        assert_eq!(s.prompt().unwrap().client_kind, ClientKind::Phone);
+        // Desktop antigo (sem o campo) continua desktop.
+        let mut s = HostSession::new(peer());
+        s.on_hello(&hello(&[]), &settings, Instant::now());
+        assert_eq!(s.prompt().unwrap().client_kind, ClientKind::Unspecified);
     }
 
     #[test]
