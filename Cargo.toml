@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
+# O app Android é um projeto Gradle; a parte Rust dele é crates/taildesk-mobile.
+exclude = ["apps/android"]
 
 [workspace.package]
 version = "0.2.0"
@@ -37,3 +39,10 @@ undocumented_unsafe_blocks = "deny"
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+# Debug do app Android: otimizado o bastante para o vídeo ser usável no emulador
+# (`android-detalhado.md` §4.2).
+[profile.dev-android]
+inherits = "dev"
+opt-level = 1
+debug = "line-tables-only"

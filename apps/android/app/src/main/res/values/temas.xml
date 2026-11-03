@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fundo">#F3F4F7</color>
+    <color name="primaria">#2C5FE0</color>
+    <color name="icone_fundo">#1F2937</color>
+    <style name="Tema.TailDesk" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/fundo</item>
+        <item name="android:colorAccent">@color/primaria</item>
+        <item name="android:statusBarColor">@color/fundo</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

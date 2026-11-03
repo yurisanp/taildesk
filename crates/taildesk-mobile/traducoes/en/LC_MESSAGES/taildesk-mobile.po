@@ -1,4 +1,262 @@
+# Inglês das telas do app Android (crates/taildesk-mobile/ui). Sem contexto: o build usa
+# DefaultTranslationContext::None. Ao acrescentar um @tr, acrescente aqui (o teste
+# `traducoes_completas` confere).
 msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: en\n"
+
+msgid "Dispositivos"
+msgstr "Devices"
+
+msgid "Configurações"
+msgstr "Settings"
+
+msgid "Documento"
+msgstr "Document"
+
+msgid "Arquivos"
+msgstr "Files"
+
+msgid "Esperando a imagem…"
+msgstr "Waiting for the screen…"
+
+msgid "Recolher a barra"
+msgstr "Hide the bar"
+
+msgid "Monitor anterior"
+msgstr "Previous display"
+
+msgid "Monitores"
+msgstr "Displays"
+
+msgid "Próximo monitor"
+msgstr "Next display"
+
+msgid "Teclado"
+msgstr "Keyboard"
+
+msgid "Touchpad"
+msgstr "Touchpad"
+
+msgid "Toque direto"
+msgstr "Direct touch"
+
+msgid "Informações da conexão"
+msgstr "Connection info"
+
+msgid "Encerrar"
+msgstr "End"
+
+msgid "Abrir a barra da sessão"
+msgstr "Show the session bar"
+
+msgid "Esquerda"
+msgstr "Left"
+
+msgid "Cima"
+msgstr "Up"
+
+msgid "Baixo"
+msgstr "Down"
+
+msgid "Direita"
+msgstr "Right"
+
+msgid "Instale o Tailscale"
+msgstr "Install Tailscale"
+
+msgid "Ligue o Tailscale"
+msgstr "Turn on Tailscale"
+
+msgid "Outra VPN está ativa"
+msgstr "Another VPN is on"
+
+msgid "O Tailscale está deixando o TailDesk de fora"
+msgstr "Tailscale is leaving TailDesk out"
+
+msgid "Tudo pronto"
+msgstr "All set"
+
+msgid "Verificando o Tailscale…"
+msgstr "Checking Tailscale…"
+
+msgid "O TailDesk só conecta aparelhos da sua rede Tailscale. Instale o app oficial do Tailscale e entre na mesma conta dos seus computadores."
+msgstr "TailDesk only connects devices on your Tailscale network. Install the official Tailscale app and sign in with the same account as your computers."
+
+msgid "O TailDesk só conecta aparelhos da sua rede Tailscale. O app do Tailscale está instalado, mas desligado."
+msgstr "TailDesk only connects devices on your Tailscale network. The Tailscale app is installed but turned off."
+
+msgid "O Android só deixa uma VPN ligada por vez. Desligue a outra VPN e ligue o Tailscale (para sair pela internet de outro lugar, use um exit node do Tailscale)."
+msgstr "Android allows only one VPN at a time. Turn off the other VPN and turn on Tailscale (to browse from somewhere else, use a Tailscale exit node)."
+
+msgid "No app do Tailscale, em Configurações → Split tunneling (aplicativos excluídos), tire o TailDesk da lista."
+msgstr "In the Tailscale app, under Settings → Split tunneling (excluded apps), remove TailDesk from the list."
+
+msgid "Este celular está na sua tailnet."
+msgstr "This phone is on your tailnet."
+
+msgid "Tailscale instalado"
+msgstr "Tailscale installed"
+
+msgid "(atualize)"
+msgstr "(update it)"
+
+msgid "Conectado à tailnet"
+msgstr "Connected to the tailnet"
+
+msgid "TailDesk dentro do túnel"
+msgstr "TailDesk inside the tunnel"
+
+msgid "Continuar"
+msgstr "Continue"
+
+msgid "Instalar o Tailscale"
+msgstr "Install Tailscale"
+
+msgid "Abrir o Tailscale"
+msgstr "Open Tailscale"
+
+msgid "Já liguei, verificar de novo"
+msgstr "I turned it on, check again"
+
+msgid "Ver como funciona (demonstração)"
+msgstr "See how it works (demo)"
+
+msgid "Encontre seus computadores"
+msgstr "Find your computers"
+
+msgid "Sem acesso à API do Tailscale no celular, a lista vem de um computador com o TailDesk. No computador, abra Configurações → Celulares → Conectar um celular."
+msgstr "Phones cannot use the Tailscale API, so the list comes from a computer running TailDesk. On the computer, open Settings → Phones → Connect a phone."
+
+msgid "Ler o QR do computador"
+msgstr "Scan the computer's QR code"
+
+msgid "Digitar o nome e o código"
+msgstr "Type the name and the code"
+
+msgid "Nome do computador ou IP 100.x"
+msgstr "Computer name or 100.x IP"
+
+msgid "Código de 6 caracteres"
+msgstr "6-character code"
+
+msgid "Voltar"
+msgstr "Back"
+
+msgid "Pareando…"
+msgstr "Pairing…"
+
+msgid "Parear"
+msgstr "Pair"
+
+msgid "Agora não"
+msgstr "Not now"
+
+msgid "Conectar"
+msgstr "Connect"
+
+msgid "Buscar dispositivos"
+msgstr "Search devices"
+
+msgid "Dados móveis: economizando dados (até 1 Mbit/s)."
+msgstr "Mobile data: saving data (up to 1 Mbit/s)."
+
+msgid "Nenhum computador ainda"
+msgstr "No computers yet"
+
+msgid "Leia o QR de um computador com o TailDesk (Configurações → Celulares) ou toque em + para digitar o nome."
+msgstr "Scan the QR code of a computer running TailDesk (Settings → Phones) or tap + to type its name."
+
+msgid "via {}"
+msgstr "via {}"
+
+msgid "Testar conexão"
+msgstr "Test connection"
+
+msgid "Copiar endereço"
+msgstr "Copy address"
+
+msgid "Tirar dos favoritos"
+msgstr "Remove from favorites"
+
+msgid "Favoritar"
+msgstr "Add to favorites"
+
+msgid "Esquecer"
+msgstr "Forget"
+
+msgid "A pessoa no computador tem {} s para aceitar."
+msgstr "The person at the computer has {} s to accept."
+
+msgid "Tentar de novo"
+msgstr "Try again"
+
+msgid "Cancelar"
+msgstr "Cancel"
+
+msgid "Teste de conexão"
+msgstr "Connection test"
+
+msgid "Testando…"
+msgstr "Testing…"
+
+msgid "Testar de novo"
+msgstr "Test again"
+
+msgid "SESSÃO"
+msgstr "SESSION"
+
+msgid "Modo de toque padrão"
+msgstr "Default touch mode"
+
+msgid "Qualidade"
+msgstr "Quality"
+
+msgid "Automática"
+msgstr "Automatic"
+
+msgid "Nitidez"
+msgstr "Sharpness"
+
+msgid "Fluidez"
+msgstr "Smoothness"
+
+msgid "Economizar dados"
+msgstr "Save data"
+
+msgid "Economizar dados em dados móveis"
+msgstr "Save data on mobile data"
+
+msgid "COMPUTADORES PAREADOS"
+msgstr "PAIRED COMPUTERS"
+
+msgid "Nenhum."
+msgstr "None."
+
+msgid "Remover"
+msgstr "Remove"
+
+msgid "BATERIA"
+msgstr "BATTERY"
+
+msgid "Alguns celulares (Samsung, Xiaomi) fecham o Tailscale e o TailDesk em segundo plano. Deixe os dois fora da otimização de bateria."
+msgstr "Some phones (Samsung, Xiaomi) close Tailscale and TailDesk in the background. Keep both out of battery optimization."
+
+msgid "Abrir otimização de bateria"
+msgstr "Open battery optimization"
+
+msgid "SOBRE"
+msgstr "ABOUT"
+
+msgid "TailDesk {}"
+msgstr "TailDesk {}"
+
+msgid "Código aberto, MIT OR Apache-2.0. Sem anúncios e sem telemetria."
+msgstr "Open source, MIT OR Apache-2.0. No ads and no telemetry."
+
+msgid "Código no GitHub"
+msgstr "Code on GitHub"
+
+msgid "Privacidade"
+msgstr "Privacy"

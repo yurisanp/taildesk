@@ -137,8 +137,7 @@ pub async fn parear_com_codigo(
     nome_do_aparelho: &str,
 ) -> Result<(PairResult, [u8; 32]), ErroServico> {
     let conn = connect(endpoint, remoto, Pin::FirstContact).await?;
-    let visto = taildesk_transport::peer_fingerprint(&conn)
-        .ok_or(ErroServico::Protocolo)?;
+    let visto = taildesk_transport::peer_fingerprint(&conn).ok_or(ErroServico::Protocolo)?;
     conn.close(0u32.into(), b"fim");
     let mut nome = nome_do_aparelho.to_owned();
     while nome.len() > limits::SHORT_TEXT_LEN {

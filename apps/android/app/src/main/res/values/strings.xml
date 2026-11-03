@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Português (Brasil) é o idioma padrão da ficha (android-detalhado.md §11); inglês em values-en. -->
+<resources>
+    <string name="app_name">TailDesk</string>
+    <string name="qr_titulo">Aponte para o QR do computador</string>
+    <string name="qr_ajuda">No computador: Configurações → Celulares → Conectar um celular.</string>
+    <string name="qr_sem_camera">Sem permissão da câmera. Digite o nome do computador e o código.</string>
+    <string name="qr_cancelar">Cancelar</string>
+    <string name="sem_navegador">Nenhum app abre esse endereço.</string>
+</resources>

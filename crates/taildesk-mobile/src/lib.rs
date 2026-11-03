@@ -15,6 +15,8 @@
 //! Kotlin (estado do Tailscale, QR, abrir o app do Tailscale). Código de SO fica no overlay
 //! (`MobileVpnOverlay`) e no backend MediaCodec do `taildesk-codec`, como manda a regra 8.
 
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod app;
 #[cfg(not(target_os = "android"))]
 pub mod captura;

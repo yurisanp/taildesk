@@ -1,0 +1,132 @@
+# "Versão para a Play" (android-detalhado.md §9.2), no modelo do release.yml do babylock-android.
+#
+# - Run workflow (o caminho normal: sessões não conseguem dar push de tag): escolha a faixa
+#   (internal = teste interno, alpha = teste fechado, beta, production). Gera o .aab assinado,
+#   sobe um rascunho na Play (com PLAY_SERVICE_ACCOUNT_JSON) e cria a release android-vX.Y.Z no
+#   GitHub com o APK assinado (entrada github_release, padrão sim).
+# - Tag android-vX.Y.Z: o mesmo, na faixa interna. A tag v* continua sendo só do desktop.
+#
+# Secrets: TAILDESK_ANDROID_KEYSTORE_BASE64, TAILDESK_ANDROID_KEYSTORE_PASSWORD,
+# TAILDESK_ANDROID_KEY_ALIAS, TAILDESK_ANDROID_KEY_PASSWORD e (opcional) PLAY_SERVICE_ACCOUNT_JSON.
+# Passo a passo em apps/android/PLAY_STORE.md.
+name: Versão para a Play
+
+on:
+  push:
+    tags: ["android-v*"]
+  workflow_dispatch:
+    inputs:
+      track:
+        description: "Faixa da Play (internal, alpha = teste fechado, beta, production)"
+        default: internal
+        required: true
+        type: choice
+        options: [internal, alpha, beta, production]
+      github_release:
+        description: "Criar a release android-vX.Y.Z no GitHub com o APK assinado"
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  NDK_VERSION: "28.2.13676358"
+
+jobs:
+  release:
+    name: .aab e APK assinados
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/android
+    env:
+      TAILDESK_ANDROID_VERSION_CODE: ${{ github.run_number }}
+      HAS_KEYSTORE: ${{ secrets.TAILDESK_ANDROID_KEYSTORE_BASE64 != '' }}
+      HAS_PLAY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Toolchain Rust
+        working-directory: .
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-release
+      - name: Chave de envio
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TAILDESK_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          echo "TAILDESK_ANDROID_KEYSTORE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+      - name: Sem chave de envio
+        if: env.HAS_KEYSTORE != 'true'
+        run: |
+          echo "::warning::Sem TAILDESK_ANDROID_KEYSTORE_BASE64 o .aab sai sem assinatura e a Play não aceita (apps/android/PLAY_STORE.md)."
+      - name: Testes, .aab e APK
+        env:
+          TAILDESK_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.TAILDESK_ANDROID_KEYSTORE_PASSWORD }}
+          TAILDESK_ANDROID_KEY_ALIAS: ${{ secrets.TAILDESK_ANDROID_KEY_ALIAS }}
+          TAILDESK_ANDROID_KEY_PASSWORD: ${{ secrets.TAILDESK_ANDROID_KEY_PASSWORD }}
+        # Só arm64 na loja; o APK do GitHub também (o emulador usa o APK de debug do CI).
+        run: ./gradlew --no-daemon -Ptaildesk.abis=arm64-v8a testDebugUnitTest bundleRelease assembleRelease
+      - name: Versão
+        id: v
+        run: |
+          nome=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          echo "nome=$nome" >> "$GITHUB_OUTPUT"
+          echo "tag=android-v$nome" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taildesk-android-play-${{ github.run_number }}
+          path: |
+            apps/android/app/build/outputs/bundle/release/*.aab
+            apps/android/app/build/outputs/mapping/release/mapping.txt
+            apps/android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
+            apps/android/app/build/outputs/apk/release/*.apk
+      - name: Rascunho na Play
+        if: env.HAS_PLAY == 'true' && env.HAS_KEYSTORE == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.santech.taildesk
+          releaseFiles: apps/android/app/build/outputs/bundle/release/*.aab
+          track: ${{ inputs.track || 'internal' }}
+          status: draft
+          whatsNewDirectory: apps/android/distribution/whatsnew
+          mappingFile: apps/android/app/build/outputs/mapping/release/mapping.txt
+          debugSymbols: apps/android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
+      - name: Release no GitHub com o APK assinado
+        if: >
+          env.HAS_KEYSTORE == 'true' &&
+          (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.github_release))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || steps.v.outputs.tag }}
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/TailDesk-${{ steps.v.outputs.nome }}.apk"
+          (cd dist && sha256sum * > SHA256SUMS)
+          cat > notas.md <<'NOTAS'
+          App TailDesk para Android (controlador). Precisa do app oficial do Tailscale no celular.
+
+          **Atenção:** este APK é assinado com a chave de envio, e o da Play com a chave da Play. Um não atualiza o outro: para trocar de canal, desinstale antes.
+          NOTAS
+          cat distribution/whatsnew/whatsnew-pt-BR >> notas.md
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "TailDesk Android $TAG" \
+            --notes-file notas.md --target "$GITHUB_SHA" --latest=false

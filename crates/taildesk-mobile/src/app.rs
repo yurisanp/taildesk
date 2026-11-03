@@ -69,6 +69,9 @@ impl Plataforma for SemPlataforma {
     fn aparelho(&self) -> Aparelho {
         self.0.clone()
     }
+    fn idioma(&self) -> String {
+        self.0.idioma_teclado.clone()
+    }
 }
 
 /// Preferências guardadas (Configurações, MF-100).

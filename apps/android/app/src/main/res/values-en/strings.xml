@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TailDesk</string>
+    <string name="qr_titulo">Point at the computer\'s QR code</string>
+    <string name="qr_ajuda">On the computer: Settings → Phones → Connect a phone.</string>
+    <string name="qr_sem_camera">No camera permission. Type the computer name and the code.</string>
+    <string name="qr_cancelar">Cancel</string>
+    <string name="sem_navegador">No app can open that address.</string>
+</resources>

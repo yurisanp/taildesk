@@ -1,0 +1,170 @@
+# App Android (docs/context/mobile/android-detalhado.md §9.1), no modelo do babylock-android:
+# compila a cada push na main e em PR que mexe no Android ou nos crates, guarda o APK de teste,
+# roda os testes JVM (Robolectric), o lint e os testes no emulador, e tira as capturas da loja.
+name: Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/android/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "apps/android/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  NDK_VERSION: "28.2.13676358"
+
+jobs:
+  build:
+    name: APK, testes JVM e lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: NDK (16 KB por padrão a partir do r28)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Toolchain Rust com os alvos Android
+        working-directory: .
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - name: Dependências do sistema (testes Rust no Linux)
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev nasm cmake
+      - name: cargo xtask mobile-check
+        working-directory: .
+        env:
+          TAILDESK_EXIGIR_ANDROID: "1"
+        run: cargo xtask mobile-check
+      - name: APK de debug
+        run: ./gradlew --no-daemon assembleDebug
+      - name: Release sem assinatura (pega erro de R8 e lint de release cedo)
+        run: ./gradlew --no-daemon bundleRelease assembleRelease
+      - name: Bibliotecas nativas alinhadas em 16 KB (exigência da Play)
+        run: |
+          zipalign=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)zipalign
+          for apk in app/build/outputs/apk/*/*.apk; do
+            "$zipalign" -c -P 16 -v 4 "$apk" | tail -1
+          done
+      - name: Testes JVM e lint
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug
+      - name: Resumo dos testes
+        if: always()
+        working-directory: .
+        run: python3 .github/scripts/resumo_testes.py apps/android/app/build/test-results >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taildesk-android-debug-apk
+          path: apps/android/app/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relatorios-android
+          path: |
+            apps/android/app/build/reports/
+            apps/android/app/build/test-results/
+
+  emulador:
+    name: Emulador API ${{ matrix.api }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [30, 34]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: KVM liberado para o emulador
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Toolchain Rust
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add x86_64-linux-android
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-emulador
+      - name: Testes no emulador (modo demonstração)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          working-directory: apps/android
+          script: |
+            ./gradlew --no-daemon connectedDebugAndroidTest -Ptaildesk.abis=x86_64
+            adb pull /sdcard/Android/data/com.santech.taildesk.debug/files/capturas capturas-emulador || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulador-api-${{ matrix.api }}
+          path: |
+            apps/android/app/build/reports/androidTests/
+            apps/android/capturas-emulador/
+
+  # Capturas da ficha da Play (pt-BR e en-US): as mesmas telas Slint do app, desenhadas pelo
+  # software renderer, no tamanho que a Play pede (1080×1920 e 1920×1080), em modo demonstração.
+  capturas:
+    name: Capturas da Play
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependências do sistema
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev fonts-inter
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: capturas
+      - name: Capturas
+        run: |
+          cargo run -p taildesk-mobile --example capturas -- capturas-play/pt-BR pt-BR
+          cargo run -p taildesk-mobile --example capturas -- capturas-play/en-US en-US
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capturas-play
+          path: capturas-play/
