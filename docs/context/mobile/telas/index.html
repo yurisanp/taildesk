@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TailDesk Mobile · Telas</title>
+<style>
+:root{
+  --bg:#f3f4f6; --surface:#ffffff; --surface-2:#f1f2f5; --line:#e3e5ea; --text:#1d2129; --muted:#6b7280;
+  --primary:#2f5fe0; --primary-text:#fff; --ok:#1f9d55; --warn:#d48806; --off:#9aa0aa; --danger:#d93838;
+  --remote:#1e3a5f;
+}
+.dark{
+  --bg:#0f1115; --surface:#181b21; --surface-2:#20242c; --line:#2c313b; --text:#e8eaee; --muted:#9aa1ad;
+  --primary:#5b84ff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#dfe3ea;font:14px/1.4 Inter,"Segoe UI",Roboto,system-ui,sans-serif;color:#1d2129;padding:24px}
+h1{font-size:22px;margin:0 0 4px} .lead{color:#555;margin:0 0 24px;max-width:900px}
+.grid{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0} figcaption{font-size:13px;color:#444;margin-top:8px;max-width:380px}
+figcaption b{display:block;color:#111}
+
+/* aparelhos */
+.dev{background:#111;border-radius:38px;padding:10px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.scr{background:var(--bg);color:var(--text);border-radius:30px;overflow:hidden;position:relative;display:flex;flex-direction:column}
+.phone .scr{width:360px;height:760px}
+.land .scr{width:780px;height:360px}
+.tab{border-radius:26px}.tab .scr{width:1024px;height:700px;border-radius:18px}
+.status{height:30px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:12px;font-weight:600;flex:none}
+.status .r{display:flex;gap:6px;align-items:center}
+.vpn{font-size:10px;border:1.5px solid currentColor;border-radius:3px;padding:0 3px;line-height:12px}
+
+/* comuns */
+.appbar{display:flex;align-items:center;gap:10px;padding:8px 18px 10px;flex:none}
+.appbar h2{font-size:24px;margin:0;flex:1}
+.logo{width:28px;height:28px;border-radius:7px;background:var(--primary);color:#fff;display:grid;place-items:center;font-weight:700}
+.icon-btn{width:36px;height:36px;border-radius:18px;display:grid;place-items:center;background:var(--surface-2);font-size:16px}
+.search{margin:0 18px 10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 14px;color:var(--muted)}
+.body{flex:1;overflow:hidden;padding:0 18px}
+.sec{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:14px 2px 6px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.os{width:36px;height:36px;border-radius:9px;background:var(--surface-2);display:grid;place-items:center;font-size:17px;flex:none}
+.grow{flex:1;min-width:0}.name{font-weight:600}.sub{font-size:12px;color:var(--muted)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:4px;margin-right:5px;vertical-align:1px}
+.ok{background:var(--ok)}.warn{background:var(--warn)}.off{background:var(--off)}.bad{background:var(--danger)}
+.btn{display:inline-flex;align-items:center;justify-content:center;border-radius:10px;padding:9px 14px;font-weight:600;font-size:14px;border:1px solid var(--line);background:var(--surface);color:var(--text)}
+.btn.p{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.d{color:var(--danger)}
+.btn.block{display:flex;width:100%;padding:13px}
+.btn.sm{padding:6px 11px;font-size:13px}
+.star{color:#d4a20b}
+.nav{display:flex;justify-content:space-around;border-top:1px solid var(--line);background:var(--surface);padding:8px 0 18px;flex:none}
+.nav div{text-align:center;font-size:11px;color:var(--muted)} .nav div.on{color:var(--primary);font-weight:600}
+.nav i{display:block;font-style:normal;font-size:18px}
+.banner{margin:0 18px 8px;padding:10px 12px;border-radius:12px;background:#fff6e0;color:#7a5200;font-size:13px;display:flex;gap:8px}
+.dark .banner{background:#3a2e10;color:#f3cf7a}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--surface);border-radius:20px 20px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.18);padding:10px 18px 22px}
+.grab{width:40px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 12px}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.35)}
+.kv{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.kv:last-child{border:0} .kv span:first-child{color:var(--muted)}
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 30px}
+.big-ic{width:84px;height:84px;border-radius:24px;display:grid;place-items:center;font-size:40px;background:var(--surface-2);margin-bottom:18px}
+.steps{display:flex;gap:6px;justify-content:center;margin:14px 0}
+.steps i{width:22px;height:5px;border-radius:3px;background:var(--line)} .steps i.on{background:var(--primary)}
+.toggle{width:42px;height:24px;border-radius:12px;background:var(--line);position:relative;flex:none}
+.toggle::after{content:"";position:absolute;width:20px;height:20px;border-radius:10px;background:#fff;top:2px;left:2px;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.toggle.on{background:var(--primary)} .toggle.on::after{left:20px}
+.seg{display:flex;background:var(--surface-2);border-radius:10px;padding:3px;gap:3px}
+.seg div{flex:1;text-align:center;padding:6px 4px;border-radius:8px;font-size:12px;color:var(--muted)}
+.seg div.on{background:var(--surface);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.1)}
+
+/* tela remota simulada */
+.remote{position:absolute;inset:0;background:linear-gradient(135deg,#24476f,#16304d);overflow:hidden}
+.rwin{position:absolute;background:#fff;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.35);overflow:hidden;color:#222;font-size:9px}
+.rwin .tb{height:16px;background:#e9ecf1;display:flex;align-items:center;padding:0 6px;gap:3px;font-size:8px;color:#555}
+.rwin .ln{height:5px;background:#dfe3e8;border-radius:2px;margin:5px 8px}
+.rterm{background:#1b1e24;color:#9fe39f;font:9px/1.5 ui-monospace,monospace;padding:6px 8px}
+.taskbar{position:absolute;left:0;right:0;bottom:0;height:18px;background:rgba(10,15,25,.8)}
+.cursor{position:absolute;width:0;height:0;border-left:7px solid #fff;border-right:7px solid transparent;border-bottom:12px solid transparent;filter:drop-shadow(0 0 1px #000);transform:skewX(-8deg)}
+.cursor.big{border-left-width:11px;border-bottom-width:18px}
+.sbar{position:absolute;top:8px;left:50%;transform:translateX(-50%);display:flex;gap:4px;align-items:center;background:rgba(20,24,31,.88);color:#fff;border-radius:14px;padding:5px 6px;font-size:12px;white-space:nowrap}
+.sbar .c{padding:5px 9px;border-radius:9px} .sbar .c.on{background:rgba(255,255,255,.16)}
+.sbar .x{background:#d93838;border-radius:9px;padding:5px 10px;font-weight:600}
+.handle{position:absolute;top:4px;left:50%;transform:translateX(-50%);width:54px;height:6px;border-radius:3px;background:rgba(255,255,255,.7)}
+.hud{position:absolute;right:10px;bottom:26px;background:rgba(20,24,31,.8);color:#fff;font-size:11px;border-radius:8px;padding:4px 8px}
+.toast{position:absolute;left:50%;transform:translateX(-50%);bottom:30px;background:rgba(20,24,31,.9);color:#fff;font-size:12px;border-radius:10px;padding:7px 12px;white-space:nowrap}
+.keys{display:flex;gap:5px;padding:6px 8px;background:#d5d8de;overflow:hidden}
+.keys span{background:#fff;border-radius:6px;padding:6px 9px;font-size:12px;font-weight:600;color:#222;box-shadow:0 1px 0 #9aa}
+.keys span.on{background:var(--primary);color:#fff}
+.kb{background:#cfd3d9;padding:6px 6px 8px}
+.kb .r{display:flex;gap:5px;justify-content:center;margin-bottom:6px}
+.kb .r span{flex:1;max-width:58px;background:#fff;border-radius:5px;height:30px;display:grid;place-items:center;font-size:14px;color:#222;box-shadow:0 1px 0 #999}
+.kb .r span.w{max-width:none;flex:5}.kb .r span.m{background:#adb3bc;max-width:80px;flex:1.5;font-size:12px}
+.mon{display:flex;gap:10px}
+.mon .m{flex:1;border:2px solid var(--line);border-radius:12px;padding:8px;text-align:center;font-size:12px}
+.mon .m.on{border-color:var(--primary)}
+.mon .th{height:56px;border-radius:6px;background:linear-gradient(135deg,#24476f,#16304d);margin-bottom:6px;position:relative}
+.bar{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden}.bar i{display:block;height:100%;background:var(--primary)}
+.qr{width:170px;height:170px;background:
+ repeating-linear-gradient(90deg,#111 0 8px,#fff 8px 13px,#111 13px 17px,#fff 17px 26px),#fff;position:relative;border:10px solid #fff;outline:1px solid #ddd}
+.qr::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.9) 0 6px,transparent 6px 15px)}
+.cam{flex:1;background:radial-gradient(circle at 50% 40%,#4b5563,#111827);position:relative;display:grid;place-items:center}
+.viewfinder{width:220px;height:220px;border:3px solid #fff;border-radius:22px;box-shadow:0 0 0 2000px rgba(0,0,0,.35)}
+.desk{background:#f3f4f6;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);overflow:hidden;width:900px;color:#1d2129}
+.desk .tt{height:34px;background:#e7e9ee;display:flex;align-items:center;padding:0 14px;font-size:12px;gap:10px;color:#444}
+.chip{display:inline-block;font-size:11px;border-radius:999px;padding:2px 8px;background:var(--surface-2);color:var(--muted)}
+.chip.ok{background:#e3f5ea;color:#16794a}.chip.warn{background:#fff1d6;color:#8a5a00}
+.dark .chip.ok{background:#173726;color:#7bd8a3}
+.notif{margin:8px 10px;background:var(--surface);border-radius:16px;padding:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);font-size:13px}
+</style>
+</head>
+<body>
+<h1>TailDesk Mobile · modelos de telas</h1>
+<p class="lead">Mockups estáticos (HTML) para Android e iOS, no visual do protótipo desktop (<code>design/12-levantamento-ux.md</code>). IDs <b>MF-*</b> são os requisitos de <code>mobile/requisitos.md</code>. Os mesmos layouts servem aos dois SOs; diferenças de plataforma estão nas legendas.</p>
+<div class="grid">
+
+<!-- 01 Onboarding: Tailscale -->
+<figure id="s01"><div class="dev phone"><div class="scr">
+  <div class="status"><span>09:41</span><span class="r">5G ▮▮▮ 82%</span></div>
+  <div class="steps"><i class="on"></i><i></i><i></i></div>
+  <div class="center">
+    <div class="big-ic">🔌</div>
+    <h2 style="margin:0 0 8px;font-size:22px">Ligue o Tailscale</h2>
+    <p style="color:var(--muted);margin:0 0 18px">O TailDesk só conecta aparelhos da sua rede Tailscale. O app do Tailscale está instalado, mas desligado.</p>
+    <div class="card" style="width:100%;text-align:left">
+      <div class="row"><span class="dot ok"></span><div class="grow">Tailscale instalado <span class="sub">· 1.104.1</span></div></div>
+      <div class="row"><span class="dot bad"></span><div class="grow">Conectado à tailnet</div></div>
+      <div class="row"><span class="dot off"></span><div class="grow">TailDesk dentro do túnel</div></div>
+    </div>
+  </div>
+  <div style="padding:0 22px 30px;display:grid;gap:10px">
+    <div class="btn p block">Abrir o Tailscale</div>
+    <div class="btn block">Já liguei, verificar de novo</div>
+  </div>
+</div></div><figcaption><b>01 · Primeira execução: checagem do Tailscale (MF-01)</b>Estados de requisitos §4.3. Variantes: "Instale o Tailscale" (botão para a loja), "Outra VPN está ativa" e "O Tailscale está deixando o TailDesk de fora" (split tunneling). No iOS a versão não é lida.</figcaption></figure>
+
+<!-- 02 Encontrar computadores -->
+<figure id="s02"><div class="dev phone"><div class="scr">
+  <div class="status"><span>09:42</span><span class="r"><span class="vpn">VPN</span> 5G 82%</span></div>
+  <div class="steps"><i class="on"></i><i class="on"></i><i></i></div>
+  <div class="center" style="justify-content:flex-start;padding-top:20px">
+    <div class="big-ic">🖥️</div>
+    <h2 style="margin:0 0 8px;font-size:22px">Encontre seus computadores</h2>
+    <p style="color:var(--muted);margin:0 0 20px">No computador, abra TailDesk → Configurações → Celulares → <b>Conectar um celular</b> e leia o código.</p>
+    <div style="display:grid;gap:10px;width:100%">
+      <div class="btn p block">📷 Ler código QR</div>
+      <div class="btn block">Digitar o código de 6 letras</div>
+      <div class="btn block">Digitar o nome do computador</div>
+    </div>
+    <p class="sub" style="margin-top:18px">Por que parear? O celular não consegue ver a lista da tailnet sozinho. Um computador pareado mostra quais máquinas têm TailDesk.</p>
+  </div>
+  <div style="padding:0 22px 30px;text-align:center" class="sub">Pular por enquanto</div>
+</div></div><figcaption><b>02 · Encontrar computadores (MF-11, MF-20/21)</b>Pareamento é o caminho principal; nome MagicDNS ou IP 100.x é a alternativa. Token da API do Tailscale fica em Configurações → Avançado.</figcaption></figure>
+
+<!-- 03 Leitor de QR + QR no desktop -->
+<figure id="s03"><div style="display:flex;gap:18px;align-items:flex-start">
+<div class="dev phone"><div class="scr" style="background:#000;color:#fff">
+  <div class="status" style="color:#fff"><span>09:42</span><span class="r"><span class="vpn">VPN</span> 82%</span></div>
+  <div class="cam"><div class="viewfinder"></div>
+    <div style="position:absolute;bottom:90px;left:0;right:0;text-align:center;font-size:14px">Aponte para o código no computador</div>
+    <div style="position:absolute;bottom:30px;left:22px;right:22px;background:rgba(255,255,255,.14);border-radius:12px;padding:10px 12px;font-size:13px">✓ desktop-casa · 100.101.12.4<br><span style="opacity:.7">Pareando…</span></div>
+  </div>
+</div></div>
+<div class="desk" style="width:420px;margin-top:120px">
+  <div class="tt">TailDesk · Conectar um celular</div>
+  <div style="padding:20px;display:flex;gap:18px;align-items:center">
+    <div class="qr"></div>
+    <div><div class="name" style="font-size:16px">Leia com o app TailDesk</div>
+      <p class="sub">Ou digite o código no celular:</p>
+      <div style="font:600 26px ui-monospace,monospace;letter-spacing:4px">K7Q-4MZ</div>
+      <p class="sub">Vale por 4:52. Só celulares da sua tailnet conseguem usar.</p></div>
+  </div>
+</div></div><figcaption><b>03 · Pareamento por QR (MF-20/21)</b>À direita, a tela nova do desktop. O QR leva nome MagicDNS, IP, porta, impressão digital do certificado e código de uso único.</figcaption></figure>
+
+<!-- 04 Dispositivos -->
+<figure id="s04"><div class="dev phone"><div class="scr">
+  <div class="status"><span>09:45</span><span class="r"><span class="vpn">VPN</span> 4G ▮▮▮ 80%</span></div>
+  <div class="appbar"><div class="logo">T</div><h2>Dispositivos</h2><div class="icon-btn">＋</div></div>
+  <div class="search">🔍 Buscar dispositivos</div>
+  <div class="banner">📶 Dados móveis: economizando dados (até 3 Mbit/s).</div>
+  <div class="body">
+    <div class="sec">Favoritos</div>
+    <div class="card">
+      <div class="row"><div class="os">⊞</div><div class="grow"><div class="name"><span class="star">★</span> desktop-casa</div><div class="sub"><span class="dot ok"></span>online · Windows 11</div></div><div class="btn p sm">Conectar</div></div>
+      <div class="row"><div class="os">🐧</div><div class="grow"><div class="name"><span class="star">★</span> servidor-homelab</div><div class="sub"><span class="dot ok"></span>online · Ubuntu 24.04</div></div><div class="btn p sm">Conectar</div></div>
+    </div>
+    <div class="sec">Na tailnet (via desktop-casa)</div>
+    <div class="card">
+      <div class="row"><div class="os">⊞</div><div class="grow"><div class="name">pc-mae</div><div class="sub"><span class="dot ok"></span>online · Windows 10</div></div><div class="btn p sm">Conectar</div></div>
+      <div class="row"><div class="os">🐧</div><div class="grow"><div class="name">notebook-trabalho</div><div class="sub"><span class="dot off"></span>sem TailDesk aberto</div></div></div>
+      <div class="row"><div class="os">🐧</div><div class="grow"><div class="name">fedora-kde</div><div class="sub"><span class="dot off"></span>offline · há 2 dias</div></div></div>
+    </div>
+  </div>
+  <div class="nav"><div class="on"><i>▦</i>Dispositivos</div><div><i>⇅</i>Transferências</div><div><i>⚙</i>Configurações</div></div>
+</div></div><figcaption><b>04 · Dispositivos, tela inicial (MF-10..14)</b>Favoritos com probe leve de estado; o restante vem do desktop pareado (rótulo "via desktop-casa"). Um toque em Conectar; tocar na linha abre o detalhe.</figcaption></figure>
+
+<!-- 05 Detalhe -->
+<figure id="s05"><div class="dev phone"><div class="scr">
+  <div class="status"><span>09:45</span><span class="r"><span class="vpn">VPN</span> 4G 80%</span></div>
+  <div class="appbar"><div class="logo">T</div><h2>Dispositivos</h2></div>
+  <div class="search">🔍 Buscar dispositivos</div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px"><div class="os">⊞</div><div class="grow"><div class="name" style="font-size:18px">desktop-casa</div><div class="sub"><span class="dot ok"></span>online · Windows 11 · último caminho: direto</div></div><span class="star" style="font-size:20px">★</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px"><div class="btn p">Conectar</div><div class="btn">Testar conexão</div></div>
+    <div class="btn block" style="margin-bottom:12px">Enviar arquivo</div>
+    <div class="kv"><span>Endereço na tailnet</span><span>100.101.12.4 · Copiar</span></div>
+    <div class="kv"><span>MagicDNS</span><span>desktop-casa.tail4f2a.ts.net</span></div>
+    <div class="kv"><span>Teclado do computador</span><span>US-Intl</span></div>
+    <div class="kv"><span>Monitores</span><span>2</span></div>
+    <div class="kv"><span>Pareado</span><span>sim · fonte da lista</span></div>
+    <div style="margin-top:10px" class="btn d block">Esquecer este computador</div>
+  </div>
+</div></div><figcaption><b>05 · Detalhe do dispositivo (MF-13)</b>Folha inferior com as ações rápidas do desktop (12 §5.2). "Último caminho" vem do PathInfo informado pelo host.</figcaption></figure>
+
+<!-- 06 Conectando -->
+<figure id="s06"><div class="dev phone"><div class="scr">
+  <div class="status"><span>09:46</span><span class="r"><span class="vpn">VPN</span> 4G 80%</span></div>
+  <div class="center">
+    <div class="big-ic">⊞</div>
+    <h2 style="margin:0 0 6px;font-size:20px">pc-mae</h2>
+    <div class="sub" style="margin-bottom:22px">Windows 10 · 100.88.3.21</div>
+    <div class="card" style="width:100%;text-align:left">
+      <div class="row"><span class="dot ok"></span><div class="grow">Encontrei pc-mae</div><span class="sub">0,4 s</span></div>
+      <div class="row"><span class="dot warn"></span><div class="grow"><b>Esperando pc-mae aceitar…</b><div class="sub">Peça para quem está no computador clicar em Permitir.</div></div></div>
+      <div class="row"><span class="dot off"></span><div class="grow" style="color:var(--muted)">Abrir a tela</div></div>
+    </div>
+  </div>
+  <div style="padding:0 22px 34px"><div class="btn block">Cancelar</div></div>
+</div></div><figcaption><b>06 · Conectando (MF-30/31)</b>Etapas com texto. O consentimento acontece no computador, igual ao desktop; em 60 s diz se recusou ou não respondeu. O diálogo do host mostra "celular-ana (Android)" via whois.</figcaption></figure>
+
+<!-- 07 Sessão touchpad -->
+<figure id="s07"><div class="dev land"><div class="scr">
+  <div class="remote">
+    <div class="rwin" style="left:60px;top:40px;width:420px;height:230px"><div class="tb">● ● ● &nbsp; Documento - Word</div><div style="padding:6px 10px;font-size:11px;color:#333">Prezada Ana,<br>segue o relatório de ação do mês…</div><div class="ln" style="width:80%"></div><div class="ln" style="width:70%"></div><div class="ln" style="width:85%"></div><div class="ln" style="width:60%"></div></div>
+    <div class="rwin" style="left:500px;top:70px;width:220px;height:150px"><div class="tb">Explorador</div><div class="ln"></div><div class="ln" style="width:60%"></div><div class="ln" style="width:75%"></div></div>
+    <div class="taskbar"></div>
+    <div class="cursor big" style="left:330px;top:150px"></div>
+  </div>
+  <div class="sbar"><span class="c">pc-mae</span><span class="c">🖥 1/2</span><span class="c">⌨</span><span class="c on">👆 Touchpad</span><span class="c">📁</span><span class="c">🔊</span><span class="c">⋯</span><span class="x">Encerrar</span></div>
+  <div class="hud">18 ms · direto · Rápida</div>
+</div></div><figcaption><b>07 · Sessão em paisagem, modo touchpad (MF-40..42, 48)</b>Cursor ampliado; 1 dedo move, toque clica, 2 dedos = direito/rolagem, pinça = zoom local. A barra recolhe para uma alça no topo.</figcaption></figure>
+
+<!-- 08 Sessão com teclado -->
+<figure id="s08"><div class="dev land"><div class="scr">
+  <div style="flex:1;position:relative">
+    <div class="remote">
+      <div class="rwin rterm" style="left:40px;top:12px;width:700px;height:120px;background:#1b1e24">rafael@homelab:~$ journalctl -u nginx -n 3<br>out 15 09:47 homelab nginx[811]: worker process exited<br>rafael@homelab:~$ sudo systemctl restart ngi<span style="background:#9fe39f;color:#1b1e24">n</span></div>
+    </div>
+    <div class="handle"></div>
+    <div class="toast">⌨ Toque → US · Auto</div>
+  </div>
+  <div class="keys"><span>Esc</span><span>Tab</span><span class="on">Ctrl</span><span>Alt</span><span>⊞</span><span>⇧</span><span>←</span><span>↑</span><span>↓</span><span>→</span><span>Home</span><span>End</span><span>PgUp</span><span>F1</span><span>F2</span><span>F5</span><span>…</span></div>
+  <div class="kb">
+    <div class="r"><span>q</span><span>w</span><span>e</span><span>r</span><span>t</span><span>y</span><span>u</span><span>i</span><span>o</span><span>p</span></div>
+    <div class="r"><span class="m">123</span><span class="w">espaço</span><span class="m">↵</span></div>
+  </div>
+</div></div><figcaption><b>08 · Teclado virtual + faixa de teclas (MF-43..46)</b>Texto vai como <code>KeyChar</code> (acentos e IME funcionam, 11-teclado.md); Ctrl aceso + "c" vira <code>KeyShortcut</code>. Toque longo na faixa fixa o modificador.</figcaption></figure>
+
+<!-- 09 Monitores -->
+<figure id="s09"><div class="dev phone"><div class="scr" style="background:#000">
+  <div style="flex:1;position:relative">
+    <div class="remote" style="top:220px;bottom:300px"><div class="rwin" style="left:20px;top:20px;width:200px;height:90px"><div class="tb">Grafana</div><div class="ln"></div><div class="ln" style="width:60%"></div></div><div class="cursor" style="left:150px;top:80px"></div></div>
+  </div>
+  <div class="sheet" style="--surface:#fff;color:#1d2129">
+    <div class="grab"></div>
+    <div class="name" style="font-size:17px;margin-bottom:4px">Monitores de servidor-homelab</div>
+    <div class="sub" style="margin-bottom:12px">No celular, um monitor por vez. Deslize com 3 dedos para trocar.</div>
+    <div class="mon">
+      <div class="m"><div class="th"></div>1 · DELL<div class="sub">2560×1440</div></div>
+      <div class="m on"><div class="th"></div>2 · LG ★<div class="sub">vendo agora</div></div>
+      <div class="m"><div class="th"></div>3 · TV<div class="sub">1920×1080</div></div>
+    </div>
+    <div class="sub" style="margin-top:12px">Wayland: só aparecem os monitores que a pessoa no computador liberou.</div>
+  </div>
+</div></div><figcaption><b>09 · Trocar de monitor (MF-47)</b>Em retrato a tela remota fica centralizada. Escolher outro monitor faz <code>StopVideo</code> + <code>StartVideo</code> (13-multimonitor.md); só um decodificado por vez.</figcaption></figure>
+
+<!-- 10 Arquivos -->
+<figure id="s10"><div class="dev phone"><div class="scr">
+  <div class="status"><span>10:02</span><span class="r"><span class="vpn">VPN</span> Wi-Fi 76%</span></div>
+  <div style="height:150px;position:relative;flex:none"><div class="remote"><div class="rwin" style="left:40px;top:20px;width:240px;height:100px"><div class="tb">Explorador</div><div class="ln"></div><div class="ln" style="width:50%"></div></div></div></div>
+  <div style="flex:1;background:var(--surface);border-radius:20px 20px 0 0;margin-top:-14px;position:relative;padding:10px 18px">
+    <div class="grab"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><div class="name grow" style="font-size:17px">Arquivos em desktop-casa</div><div class="btn p sm">↑ Enviar</div></div>
+    <div class="seg" style="margin-bottom:10px"><div class="on">Navegar</div><div>Transferências (2)</div></div>
+    <div class="sub" style="margin-bottom:6px">Documentos › Contratos</div>
+    <div class="card">
+      <div class="row"><div class="os">📁</div><div class="grow"><div class="name">2026</div><div class="sub">pasta</div></div></div>
+      <div class="row"><div class="os">📄</div><div class="grow"><div class="name">contrato-aluguel.pdf</div><div class="sub">1,2 MB · ontem</div></div><div class="btn sm">↓</div></div>
+      <div class="row"><div class="os">📊</div><div class="grow"><div class="name">orcamento.xlsx</div><div class="sub">84 KB · 12/10</div></div><div class="btn sm">↓</div></div>
+    </div>
+    <div class="sec">Em andamento</div>
+    <div class="card"><div class="row"><div class="os">🎞</div><div class="grow"><div class="name">video-festa.mp4 → desktop-casa</div><div class="bar" style="margin:6px 0 3px"><i style="width:62%"></i></div><div class="sub">62% · 410 de 660 MB · 18 MB/s</div></div><div class="sub">✕</div></div></div>
+  </div>
+</div></div><figcaption><b>10 · Arquivos na sessão (MF-60..62)</b>Folha sobre a tela remota. Enviar abre o seletor do sistema (SAF / Arquivos do iOS); baixados vão para a pasta TailDesk. Retomada, BLAKE3 e nunca sobrescrever, como no desktop.</figcaption></figure>
+
+<!-- 11 Compartilhar -->
+<figure id="s11"><div class="dev phone"><div class="scr">
+  <div class="status"><span>10:10</span><span class="r"><span class="vpn">VPN</span> 4G 74%</span></div>
+  <div style="flex:1;background:#2b2f36"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><div class="os">🖼</div><div class="grow"><div class="name">3 fotos · 8,4 MB</div><div class="sub">Enviar com TailDesk para…</div></div></div>
+    <div class="card">
+      <div class="row"><div class="os">⊞</div><div class="grow"><div class="name">desktop-casa</div><div class="sub"><span class="dot ok"></span>online · cai em Downloads\TailDesk</div></div><div class="btn p sm">Enviar</div></div>
+      <div class="row"><div class="os">🐧</div><div class="grow"><div class="name">servidor-homelab</div><div class="sub"><span class="dot ok"></span>online · pede aceite</div></div><div class="btn sm">Enviar</div></div>
+      <div class="row"><div class="os">⊞</div><div class="grow"><div class="name">pc-mae</div><div class="sub"><span class="dot off"></span>offline</div></div></div>
+    </div>
+    <div class="banner" style="margin:12px 0 0">📶 Dados móveis: 8,4 MB. Arquivos acima de 50 MB pedem confirmação.</div>
+  </div>
+</div></div><figcaption><b>11 · Compartilhar com TailDesk (MF-63/64)</b>Entrada pelo menu de compartilhar do sistema (Android share target / iOS Share Extension). Envia sem abrir sessão.</figcaption></figure>
+
+<!-- 12 Teste de conexão -->
+<figure id="s12"><div class="dev phone"><div class="scr">
+  <div class="status"><span>10:15</span><span class="r"><span class="vpn">VPN</span> 4G 72%</span></div>
+  <div class="appbar"><div class="icon-btn">‹</div><h2 style="font-size:20px">Teste de conexão</h2></div>
+  <div class="body">
+    <div class="sub" style="margin-bottom:8px">celular-yuri → desktop-casa</div>
+    <div class="card" style="padding:4px 14px">
+      <div class="kv"><span>Caminho</span><span><span class="dot warn"></span>Via relay (São Paulo)*</span></div>
+      <div class="kv"><span>Latência</span><span>48 ms · p95 71</span></div>
+      <div class="kv"><span>Variação / perda</span><span>9 ms · 0,8 %</span></div>
+      <div class="kv"><span>Banda</span><span>↓ 11 Mbit/s · ↑ 4 Mbit/s</span></div>
+      <div class="kv"><span>Rede do celular</span><span>4G · tarifada</span></div>
+      <div class="kv"><span>Decodificação</span><span>H.264 por hardware (MediaCodec)</span></div>
+    </div>
+    <div class="card" style="padding:12px 14px;margin-top:10px">
+      <div class="name">Perfil escolhido: Média · economizando dados</div>
+      <div class="sub" style="margin-top:4px">Por quê: relay, 11 Mbit/s medidos e rede tarifada (teto na Média). Até 1080p 30 fps, ~3 Mbit/s. Sessão de 30 min ≈ 670 MB.</div>
+    </div>
+    <div class="sub" style="margin:8px 2px">* Informado pelo desktop-casa: o celular não consegue ver o caminho sozinho.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="btn p">Testar de novo</div><div class="btn">Demonstração ▶</div></div>
+    <div class="btn block" style="margin-top:8px">Copiar relatório</div>
+  </div>
+</div></div><figcaption><b>12 · Teste de conexão (MF-83, 14 §7)</b>Mesmo motor do desktop; caminho vem do host (PathInfo). Mostra estimativa de consumo de dados.</figcaption></figure>
+
+<!-- 13 Configurações -->
+<figure id="s13"><div class="dev phone"><div class="scr">
+  <div class="status"><span>10:20</span><span class="r"><span class="vpn">VPN</span> Wi-Fi 70%</span></div>
+  <div class="appbar"><div class="logo">T</div><h2>Configurações</h2></div>
+  <div class="body">
+    <div class="sec">Sessão</div>
+    <div class="card">
+      <div class="row"><div class="grow">Modo de toque padrão</div><span class="sub">Touchpad ›</span></div>
+      <div class="row"><div class="grow">Teclas da faixa</div><span class="sub">Esc, Tab, Ctrl… ›</span></div>
+      <div class="row"><div class="grow">Qualidade</div><span class="sub">Automática ›</span></div>
+      <div class="row"><div class="grow">Economizar dados em rede móvel</div><div class="toggle on"></div></div>
+    </div>
+    <div class="sec">Arquivos</div>
+    <div class="card">
+      <div class="row"><div class="grow">Pasta de recebimento</div><span class="sub">Download/TailDesk ›</span></div>
+      <div class="row"><div class="grow">Confirmar acima de 50 MB no 4G</div><div class="toggle on"></div></div>
+    </div>
+    <div class="sec">Este celular</div>
+    <div class="card">
+      <div class="row"><div class="grow">Permitir acesso a este celular<div class="sub">Android · ver e controlar</div></div><div class="toggle"></div></div>
+      <div class="row"><div class="grow">Computadores pareados</div><span class="sub">2 ›</span></div>
+      <div class="row"><div class="grow">Tailscale</div><span class="sub"><span class="dot ok"></span>conectado ›</span></div>
+    </div>
+    <div class="sec">Sobre</div>
+    <div class="card"><div class="row"><div class="grow">Diagnóstico, licenças e Slint</div><span class="sub">›</span></div></div>
+  </div>
+  <div class="nav"><div><i>▦</i>Dispositivos</div><div><i>⇅</i>Transferências</div><div class="on"><i>⚙</i>Configurações</div></div>
+</div></div><figcaption><b>13 · Configurações (MF-100)</b>"Permitir acesso a este celular" só existe no Android (M4); no iOS a seção mostra só Tailscale e pareados.</figcaption></figure>
+
+<!-- 14 Tablet -->
+<figure id="s14"><div class="dev tab"><div class="scr">
+  <div class="remote">
+    <div class="rwin" style="left:70px;top:60px;width:560px;height:380px"><div class="tb">● ● ● &nbsp; Visual Studio Code — taildesk</div><div class="rterm" style="height:100%;background:#1e1e1e;color:#d4d4d4">fn main() {<br>&nbsp;&nbsp;let ação = "teclado físico ABNT2 → US-Intl";<br>&nbsp;&nbsp;println!("{ação}");<br>}</div></div>
+    <div class="rwin" style="left:660px;top:100px;width:300px;height:260px"><div class="tb">Firefox</div><div class="ln"></div><div class="ln" style="width:60%"></div><div class="ln" style="width:80%"></div></div>
+    <div class="taskbar" style="height:28px"></div>
+    <div class="cursor" style="left:420px;top:180px"></div>
+  </div>
+  <div class="sbar" style="font-size:13px"><span class="c">desktop-casa</span><span class="c on">1 · DELL</span><span class="c">2 · LG</span><span class="c">⌨ ABNT2 (Bluetooth) → US-Intl · Auto</span><span class="c on">✋ Toque direto</span><span class="c">📁</span><span class="c">🔊</span><span class="c">⋯</span><span class="x">Encerrar</span></div>
+  <div class="hud">3 ms · direto · LAN · 60 fps</div>
+</div></div><figcaption><b>14 · iPad / tablet Android com teclado físico (MF-45, 47)</b>Toque direto por padrão; teclado Bluetooth usa o modo Auto completo (HID usage no iPadOS). Abas de monitor como no desktop; tela dividida com 2 monitores fica para o M3.</figcaption></figure>
+
+<!-- 15 Host Android: ativar -->
+<figure id="s15"><div class="dev phone"><div class="scr">
+  <div class="status"><span>11:00</span><span class="r"><span class="vpn">VPN</span> Wi-Fi 90%</span></div>
+  <div class="appbar"><div class="icon-btn">‹</div><h2 style="font-size:20px">Acesso a este celular</h2></div>
+  <div class="body">
+    <p style="margin:4px 0 14px">Deixe um computador da sua tailnet ver e controlar este celular. Você aprova cada acesso.</p>
+    <div class="card">
+      <div class="row"><div class="os">📺</div><div class="grow"><div class="name">Gravação de tela</div><div class="sub">O Android pergunta a cada acesso.</div></div><span class="chip ok">sempre pergunta</span></div>
+      <div class="row"><div class="os">✋</div><div class="grow"><div class="name">Controle (Acessibilidade)</div><div class="sub">Necessário para tocar e digitar daqui. Sem ele, o computador só vê.</div></div><div class="btn sm">Ativar</div></div>
+      <div class="row"><div class="os">🔊</div><div class="grow"><div class="name">Som dos apps</div><div class="sub">Opcional, Android 10+.</div></div><div class="toggle"></div></div>
+      <div class="row"><div class="os">🔋</div><div class="grow"><div class="name">Sem limite de bateria</div><div class="sub">Para o pedido chegar com a tela apagada.</div></div><div class="btn sm">Ajustar</div></div>
+    </div>
+    <div class="card" style="padding:12px 14px;margin-top:12px;font-size:13px"><b>Como o TailDesk usa a Acessibilidade:</b> só para executar os toques e textos enviados pelo computador que você aprovou, durante a sessão. Nada é lido ou guardado fora da sessão.</div>
+    <div class="btn p block" style="margin-top:14px">Permitir acesso a este celular</div>
+  </div>
+</div></div><figcaption><b>15 · Host Android: ativar (MF-90/92, M4)</b>Divulgação proeminente exigida pela política do Google Play para Accessibility. Desligado por padrão.</figcaption></figure>
+
+<!-- 16 Host Android: pedido + sessão ativa -->
+<figure id="s16"><div style="display:flex;gap:18px">
+<div class="dev phone"><div class="scr" style="background:#fff">
+  <div class="status"><span>11:05</span><span class="r"><span class="vpn">VPN</span> 90%</span></div>
+  <div class="center">
+    <div class="big-ic">⊞</div>
+    <h2 style="margin:0 0 6px;font-size:20px">desktop-casa quer acessar este celular</h2>
+    <div class="sub" style="margin-bottom:16px">100.101.12.4 · pareado em 15/10 · Windows 11</div>
+    <div class="card" style="width:100%;text-align:left">
+      <div class="row"><span>☑</span><div class="grow">Ver a tela</div></div>
+      <div class="row"><span>☑</span><div class="grow">Controlar</div></div>
+      <div class="row"><span>☐</span><div class="grow">Ouvir o som</div></div>
+    </div>
+    <p class="sub" style="margin-top:14px">Nunca aceite pedidos de quem ligou dizendo ser do suporte.</p>
+  </div>
+  <div style="padding:0 22px 30px;display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="btn p">Recusar</div><div class="btn">Permitir</div></div>
+</div></div>
+<div class="dev phone"><div class="scr" style="background:linear-gradient(180deg,#30455f,#1a2433);color:#fff">
+  <div class="status" style="color:#fff"><span>11:06 <span style="color:#ff6b6b">●</span></span><span class="r"><span class="vpn">VPN</span> 89%</span></div>
+  <div class="notif" style="color:var(--text)"><div class="sub">TailDesk · agora</div><b>desktop-casa está controlando este celular</b><div class="sub">Vendo a tela e controlando · 4 min</div><div style="display:flex;gap:8px;margin-top:8px"><div class="btn sm">Pausar controle</div><div class="btn sm d">Encerrar</div></div></div>
+  <div style="flex:1"></div>
+  <div style="position:absolute;top:44px;right:10px;width:12px;height:12px;border-radius:6px;background:#ff6b6b;box-shadow:0 0 0 4px rgba(255,107,107,.3)"></div>
+</div></div></div><figcaption><b>16 · Host Android: pedido e sessão ativa (MF-32, 91)</b>Foco inicial em Recusar (destacado). Depois de Permitir, o diálogo do sistema do MediaProjection. Durante a sessão: notificação fixa e ponto vermelho.</figcaption></figure>
+
+<!-- 17 Desktop controlando Android -->
+<figure id="s17"><div class="desk">
+  <div class="tt">celular-ana (Android 14) · ⌨ US-Intl → texto · 📁 · 🔊 · ⋯ · <span style="color:#d93838;font-weight:600">Encerrar</span></div>
+  <div style="display:flex;justify-content:center;gap:24px;padding:20px;background:#2a2f37">
+    <div class="dev phone" style="transform:scale(.72);transform-origin:top center;margin-bottom:-210px"><div class="scr" style="background:#fff">
+      <div class="status"><span>11:06</span><span class="r">89%</span></div>
+      <div class="appbar"><h2 style="font-size:20px">Configurações</h2></div>
+      <div class="body"><div class="card"><div class="row">Rede e internet</div><div class="row">Dispositivos conectados</div><div class="row">Apps</div><div class="row">Notificações</div><div class="row">Bateria</div></div></div>
+      <div class="cursor" style="left:120px;top:200px"></div>
+    </div></div>
+    <div style="display:flex;flex-direction:column;gap:10px;justify-content:center">
+      <div class="btn">◀ Voltar</div><div class="btn">● Início</div><div class="btn">▢ Recentes</div><div class="btn">⇩ Notificações</div>
+    </div>
+  </div>
+</div><figcaption><b>17 · Desktop controlando um Android (MF-93..95)</b>Janela de sessão do desktop com moldura de celular e botões de navegação (<code>NavAction</code>). Clique/arrasto do mouse viram gestos; o teclado do PC digita no campo focado.</figcaption></figure>
+
+<!-- 18 Escuro -->
+<figure id="s18"><div class="dev phone dark"><div class="scr">
+  <div class="status"><span>22:10</span><span class="r"><span class="vpn">VPN</span> Wi-Fi 41%</span></div>
+  <div class="appbar"><div class="logo">T</div><h2>Dispositivos</h2><div class="icon-btn">＋</div></div>
+  <div class="search">🔍 Buscar dispositivos</div>
+  <div class="banner">⚠ Outra VPN está ativa. O Android só permite uma VPN por vez: desligue-a e ligue o Tailscale.</div>
+  <div class="body">
+    <div class="sec">Favoritos</div>
+    <div class="card">
+      <div class="row"><div class="os">⊞</div><div class="grow"><div class="name"><span class="star">★</span> desktop-casa</div><div class="sub"><span class="dot off"></span>sem conexão com a tailnet</div></div></div>
+      <div class="row"><div class="os">🐧</div><div class="grow"><div class="name"><span class="star">★</span> servidor-homelab</div><div class="sub"><span class="dot off"></span>sem conexão com a tailnet</div></div></div>
+    </div>
+  </div>
+  <div class="nav"><div class="on"><i>▦</i>Dispositivos</div><div><i>⇅</i>Transferências</div><div><i>⚙</i>Configurações</div></div>
+</div></div><figcaption><b>18 · Tema escuro com erro de rede</b>Lista continua visível com os favoritos; o aviso diz a causa e o que fazer (outra VPN ativa).</figcaption></figure>
+
+</div>
+</body>
+</html>
