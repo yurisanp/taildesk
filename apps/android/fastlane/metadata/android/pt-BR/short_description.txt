@@ -1,0 +1,1 @@
+Acesse e controle seus computadores pela sua rede Tailscale.

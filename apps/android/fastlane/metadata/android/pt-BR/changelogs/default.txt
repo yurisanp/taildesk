@@ -1,0 +1,1 @@
+Primeira versão do TailDesk para Android: pareie com um computador pelo QR, veja e controle Windows e Linux pela sua rede Tailscale, com touchpad, toque direto, zoom, teclado com acentos e faixa de teclas, troca de monitor e economia de dados no 4G.
