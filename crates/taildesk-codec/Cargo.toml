@@ -7,14 +7,24 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 
+[features]
+default = ["openh264"]
+# Encoder e decoder H.264 em software. Fica fora do build do Android para a Play
+# (`mobile/android-detalhado.md` §12): lá o MediaCodec decodifica.
+openh264 = ["dep:openh264"]
+
 [dependencies]
 # H.264 em software (BSD-2-Clause). O feature padrão `source` compila o OpenH264 junto (precisa de
 # compilador C++); carregar o binário da Cisco em tempo de execução vem antes da release com vídeo.
-openh264 = "0.9.8"
+openh264 = { version = "0.9.8", optional = true }
 
 [target.'cfg(any(target_os = "linux", windows))'.dependencies]
 # NVENC/NVDEC e VA-API abertos em tempo de execução (ISC).
 libloading = "0.8"
+
+[target.'cfg(target_os = "android")'.dependencies]
+# AMediaCodec (MIT/Apache-2.0); o `api-level-28` dá o formato de cada buffer de saída.
+ndk = { version = "0.9", default-features = false, features = ["media", "api-level-29"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

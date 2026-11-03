@@ -224,7 +224,8 @@ impl Controle {
         self.ajustar_vista();
     }
 
-    fn ajustar_vista(&mut self) {
+    /// Ajusta a vista ao tamanho do monitor atual (depois de trocar de monitor).
+    pub fn ajustar_vista(&mut self) {
         if let Some(d) = self.monitores.atual() {
             self.vista.redimensionar(self.area, (d.width, d.height));
         }
@@ -315,6 +316,13 @@ impl Controle {
                 self.monitores.trocar(passo, self.prefs, out);
                 self.ajustar_vista();
             }
+        }
+    }
+
+    /// Ações que vieram de fora da máquina de gestos (a pinça do Slint).
+    pub fn aplicar(&mut self, acoes: Vec<Acao>, out: &mut Vec<Msg>) {
+        for a in acoes {
+            self.acao(a, out);
         }
     }
 

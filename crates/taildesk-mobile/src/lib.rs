@@ -15,6 +15,9 @@
 //! Kotlin (estado do Tailscale, QR, abrir o app do Tailscale). Código de SO fica no overlay
 //! (`MobileVpnOverlay`) e no backend MediaCodec do `taildesk-codec`, como manda a regra 8.
 
+pub mod app;
+#[cfg(not(target_os = "android"))]
+pub mod captura;
 pub mod ciclo;
 pub mod controle;
 pub mod demo;
@@ -22,5 +25,13 @@ pub mod dispositivos;
 pub mod gestos;
 pub mod qr;
 pub mod rede;
+pub mod sessao;
 pub mod textos;
+pub mod video;
 pub mod zoom;
+
+/// Telas Slint geradas de `ui/app.slint`.
+#[allow(missing_debug_implementations, clippy::all)]
+pub mod ui {
+    slint::include_modules!();
+}

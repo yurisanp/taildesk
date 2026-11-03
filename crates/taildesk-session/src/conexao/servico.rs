@@ -126,3 +126,37 @@ pub async fn parear(
         _ => Err(ErroServico::Protocolo),
     }
 }
+
+/// Pareia só com o código (sem câmera): a pessoa digitou o nome do computador e o código. O
+/// primeiro contato aceita o certificado, e o pareamento só vale se o host devolver o mesmo
+/// fingerprint da conexão. Devolve o resultado e o fingerprint para fixar.
+pub async fn parear_com_codigo(
+    endpoint: &quinn::Endpoint,
+    remoto: SocketAddr,
+    codigo: &str,
+    nome_do_aparelho: &str,
+) -> Result<(PairResult, [u8; 32]), ErroServico> {
+    let conn = connect(endpoint, remoto, Pin::FirstContact).await?;
+    let visto = taildesk_transport::peer_fingerprint(&conn)
+        .ok_or(ErroServico::Protocolo)?;
+    conn.close(0u32.into(), b"fim");
+    let mut nome = nome_do_aparelho.to_owned();
+    while nome.len() > limits::SHORT_TEXT_LEN {
+        nome.pop();
+    }
+    // A pergunta vai fixada no certificado que acabamos de ver.
+    let resposta = perguntar(
+        endpoint,
+        remoto,
+        Pin::Sha256(visto),
+        Msg::PairRequest(PairRequest {
+            code: codigo.to_owned(),
+            device_name: nome,
+        }),
+    )
+    .await?;
+    match resposta {
+        Msg::PairResult(r) if !r.ok || r.cert_fingerprint == visto => Ok((r, visto)),
+        _ => Err(ErroServico::Protocolo),
+    }
+}

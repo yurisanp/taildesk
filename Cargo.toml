@@ -15,8 +15,10 @@ taildesk-proto = { path = "crates/taildesk-proto" }
 taildesk-overlay = { path = "crates/taildesk-overlay" }
 taildesk-tsapi = { path = "crates/taildesk-tsapi" }
 taildesk-transport = { path = "crates/taildesk-transport" }
-taildesk-codec = { path = "crates/taildesk-codec" }
-taildesk-media = { path = "crates/taildesk-media" }
+# openh264 e Opus são opcionais (o build do Android não leva nenhum dos dois): quem precisa liga
+# as features `openh264` e `audio`.
+taildesk-codec = { path = "crates/taildesk-codec", default-features = false }
+taildesk-media = { path = "crates/taildesk-media", default-features = false }
 taildesk-platform = { path = "crates/taildesk-platform" }
 taildesk-render = { path = "crates/taildesk-render" }
 taildesk-files = { path = "crates/taildesk-files" }

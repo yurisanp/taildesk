@@ -230,6 +230,103 @@ impl Gestos {
         }
     }
 
+    /// Dois dedos vistos pelo reconhecedor de pinça do Slint (`ScaleRotateGestureHandler`):
+    /// começo. O Slint só entrega o primeiro dedo à `TouchArea`; o segundo chega por aqui.
+    pub fn pinca_comecou(&mut self, t_ms: u64, cx: f32, cy: f32) {
+        self.ultimo_t = t_ms;
+        // O primeiro dedo, se ainda não fez nada, vira parte do gesto de dois.
+        if matches!(
+            self.estado,
+            Estado::Um { .. } | Estado::Parado | Estado::Esperando
+        ) {
+            self.dedos.clear();
+            self.dedos.push(Dedo {
+                id: -1,
+                x0: cx,
+                y0: cy,
+                x: cx,
+                y: cy,
+            });
+            self.estado = Estado::Dois {
+                t0: t_ms,
+                dist0: 1.0,
+            };
+        }
+    }
+
+    /// Dois dedos: escala acumulada desde o começo e o centro entre eles.
+    pub fn pinca(&mut self, t_ms: u64, escala: f32, cx: f32, cy: f32, out: &mut Vec<Acao>) {
+        self.ultimo_t = t_ms;
+        let Some(d) = self.dedos.first_mut().filter(|d| d.id == -1) else {
+            return;
+        };
+        let (ax, ay) = (d.x, d.y);
+        d.x = cx;
+        d.y = cy;
+        let andou = (cx - d.x0).abs().max((cy - d.y0).abs()) > self.limiares.arrasto_px;
+        match self.estado {
+            Estado::Dois { .. } if (escala - 1.0).abs() > 0.12 => {
+                out.push(Acao::Zoom {
+                    fator: escala,
+                    cx,
+                    cy,
+                });
+                self.estado = Estado::Pinca { dist: escala };
+            }
+            Estado::Dois { .. } if andou => {
+                let (x0, y0) = (d.x0, d.y0);
+                out.push(Acao::Rolar {
+                    dx: x0 - cx,
+                    dy: y0 - cy,
+                });
+                self.estado = Estado::Rolando;
+            }
+            Estado::Rolando => {
+                if ax != cx || ay != cy {
+                    out.push(Acao::Rolar {
+                        dx: ax - cx,
+                        dy: ay - cy,
+                    });
+                }
+            }
+            Estado::Pinca { dist } if (escala - dist).abs() > 0.005 && dist > 0.0 => {
+                out.push(Acao::Zoom {
+                    fator: escala / dist,
+                    cx,
+                    cy,
+                });
+                self.estado = Estado::Pinca { dist: escala };
+            }
+            _ => {}
+        }
+    }
+
+    /// Os dois dedos saíram (ou o gesto foi cancelado: `cancelado = true` não clica).
+    pub fn pinca_acabou(&mut self, t_ms: u64, cancelado: bool, out: &mut Vec<Acao>) {
+        if !self.dedos.first().is_some_and(|d| d.id == -1) {
+            return;
+        }
+        match self.estado {
+            Estado::Dois { t0, .. }
+                if !cancelado && t_ms.saturating_sub(t0) <= self.limiares.toque_ms =>
+            {
+                out.push(Acao::Clique(Botao::Direito));
+            }
+            Estado::Rolando => out.push(Acao::FimRolagem),
+            _ => {}
+        }
+        self.dedos.clear();
+        // O primeiro dedo ainda pode estar na tela: espera ele subir sem clicar.
+        self.estado = Estado::Esperando;
+    }
+
+    /// O dedo da `TouchArea` subiu depois de uma pinça: volta ao normal sem clicar.
+    pub fn fim_de_toque_apos_pinca(&mut self) {
+        if self.estado == Estado::Esperando && self.dedos.is_empty() {
+            self.estado = Estado::Parado;
+        }
+    }
+
     pub fn toque(&mut self, t: Toque, out: &mut Vec<Acao>) {
         let dt = t.t_ms.saturating_sub(self.ultimo_t);
         self.ultimo_t = t.t_ms;
@@ -668,6 +765,51 @@ mod tests {
                 Acao::Soltar(Botao::Esquerdo),
             ]
         );
+    }
+
+    #[test]
+    fn dois_dedos_pelo_reconhecedor_do_slint() {
+        let mut g = Gravacao::new(Modo::Touchpad);
+        let mut out = Vec::new();
+        // Toque rápido com dois dedos: botão direito; o dedo da TouchArea sobe sem clicar.
+        g.ev(0, Desceu, 100.0, 100.0, 0);
+        g.g.pinca_comecou(g.t + 10, 150.0, 100.0);
+        g.g.pinca_acabou(g.t + 90, false, &mut out);
+        g.ev(0, Subiu, 100.0, 100.0, 95);
+        g.g.fim_de_toque_apos_pinca();
+        out.extend(g.tirar());
+        assert_eq!(out, vec![Acao::Clique(Botao::Direito)]);
+
+        // Rolagem pelo centro.
+        let mut out = Vec::new();
+        g.g.pinca_comecou(5_000, 150.0, 300.0);
+        g.g.pinca(5_016, 1.0, 150.0, 280.0, &mut out);
+        g.g.pinca(5_032, 1.01, 150.0, 260.0, &mut out);
+        g.g.pinca_acabou(5_048, false, &mut out);
+        let dy: f32 = out
+            .iter()
+            .filter_map(|a| match a {
+                Acao::Rolar { dy, .. } => Some(*dy),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(dy, 40.0, "{out:?}");
+        assert_eq!(out.last(), Some(&Acao::FimRolagem));
+
+        // Pinça: o produto dos fatores é a escala final.
+        let mut out = Vec::new();
+        g.g.pinca_comecou(9_000, 150.0, 300.0);
+        g.g.pinca(9_016, 1.5, 150.0, 300.0, &mut out);
+        g.g.pinca(9_032, 2.0, 150.0, 300.0, &mut out);
+        g.g.pinca_acabou(9_048, false, &mut out);
+        let f: f32 = out
+            .iter()
+            .filter_map(|a| match a {
+                Acao::Zoom { fator, .. } => Some(*fator),
+                _ => None,
+            })
+            .product();
+        assert!((f - 2.0).abs() < 1e-4, "{out:?}");
     }
 
     #[test]

@@ -14,7 +14,9 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # Abre as telas numa janela no desktop (desenvolvimento): `cargo run -p taildesk-mobile
 # --example janela --features janela`.
-janela = ["slint/backend-winit", "slint/renderer-femtovg"]
+janela = ["slint/backend-winit", "slint/renderer-femtovg", "openh264"]
+# Decoder em software para testar a sessão no Linux (nunca no build do Android para a Play).
+openh264 = ["taildesk-codec/openh264"]
 
 [dependencies]
 taildesk-proto.workspace = true
@@ -22,16 +24,24 @@ taildesk-overlay.workspace = true
 taildesk-keyboard.workspace = true
 taildesk-session.workspace = true
 taildesk-transport.workspace = true
+# Sem openh264 nem Opus no Android: o MediaCodec decodifica e o som vem na M3.
+taildesk-codec.workspace = true
+taildesk-media.workspace = true
 quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros", "net"] }
 # Leitor de QR em Rust ((MIT OR Apache-2.0) AND ISC), no lugar do ML Kit proprietário.
 rqrr = { version = "0.11", default-features = false }
 # Software renderer: as capturas e os testes de tela rodam sem GPU nem janela.
-slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-software", "software-renderer-systemfonts"] }
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "image-default-formats", "renderer-software", "software-renderer-systemfonts"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+# Fora do Android o software renderer precisa decodificar os ícones SVG do estilo Material (no
+# Android o backend já liga isso no núcleo do Slint). Mesma versão e licença do `slint`.
+i-slint-core = { version = "=1.18.1", default-features = false, features = ["image-decoders", "svg"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 # Backend Android do Slint (NativeActivity + renderer Skia), JNI e NDK (MIT/Apache-2.0).
-slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-android-activity-06"] }
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "image-default-formats", "backend-android-activity-06"] }
 jni = "0.22"
 ndk = { version = "0.9", default-features = false, features = ["media", "api-level-29"] }
 ndk-context = "0.1"
@@ -42,6 +52,8 @@ slint-build = "=1.18.1"
 [dev-dependencies]
 # Gera QRs nos testes da leitura, como o desktop.
 qrcode = { version = "0.14", default-features = false }
+# PNG das capturas da loja (`examples/capturas.rs`, MIT OR Apache-2.0).
+png = "0.18"
 
 [lints]
 workspace = true

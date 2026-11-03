@@ -19,8 +19,8 @@ taildesk-proto.workspace = true
 taildesk-keyboard.workspace = true
 taildesk-files.workspace = true
 taildesk-update.workspace = true
-taildesk-codec.workspace = true
-taildesk-media.workspace = true
+taildesk-codec = { workspace = true, features = ["openh264"] }
+taildesk-media = { workspace = true, features = ["audio", "openh264"] }
 taildesk-render.workspace = true
 quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 slint = { version = "=1.18.1", features = ["unstable-winit-030", "unstable-wgpu-30", "renderer-femtovg-wgpu"] }

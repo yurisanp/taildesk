@@ -1,0 +1,293 @@
+// Janela única do app Android. O Rust (`taildesk_mobile::ui`) preenche as propriedades e trata
+// os callbacks; a tela atual vem de `tela`.
+import { Tema } from "tema.slint";
+import { Botao } from "componentes.slint";
+import {
+    EstadoTs, ItemDispositivo, GrupoDispositivos, Etapa, LinhaTeste,
+    TelaOnboarding, TelaEncontrar, TelaDispositivos, FolhaDetalhe, TelaConectando, TelaTeste, TelaConfiguracoes,
+} from "telas.slint";
+import { TelaSessao } from "sessao.slint";
+
+export { EstadoTs, ItemDispositivo, GrupoDispositivos, Etapa, LinhaTeste, Tema }
+
+export enum Tela { onboarding, encontrar, dispositivos, conectando, sessao, teste, configuracoes }
+
+component Aba inherits Rectangle {
+    in property <string> icone;
+    in property <string> texto;
+    in property <bool> ativa;
+    callback clicada();
+    accessible-role: tab;
+    accessible-label: texto;
+    accessible-action-default => { clicada(); }
+    TouchArea { clicked => { root.clicada(); } }
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        Text { text: root.icone; horizontal-alignment: center; font-size: 20px; color: root.ativa ? Tema.primaria : Tema.texto-2; }
+        Text { text: root.texto; horizontal-alignment: center; font-size: 12px; font-weight: root.ativa ? 700 : 400; color: root.ativa ? Tema.primaria : Tema.texto-2; }
+    }
+}
+
+export component AppCelular inherits Window {
+    title: "TailDesk";
+    background: Tema.fundo;
+    default-font-family: "Inter";
+    preferred-width: 412px;
+    preferred-height: 915px;
+
+    in-out property <Tela> tela: Tela.onboarding;
+    in-out property <string> toast;
+
+    // Onboarding
+    in property <EstadoTs> estado-ts: EstadoTs.verificando;
+    in property <string> versao-ts;
+    in property <bool> versao-ts-antiga;
+    callback abrir-tailscale();
+    callback instalar-tailscale();
+    callback verificar-tailscale();
+    callback demonstracao();
+    callback continuar-onboarding();
+
+    // Encontrar / parear
+    in property <string> erro-pareamento;
+    in property <bool> pareando;
+    callback ler-qr();
+    callback parear-codigo(string, string);
+    callback pular-pareamento();
+
+    // Dispositivos
+    in property <[GrupoDispositivos]> grupos;
+    in property <bool> tarifada;
+    in property <bool> lista-vazia;
+    in property <bool> atualizando;
+    in-out property <string> busca;
+    in-out property <bool> mostrando-detalhe;
+    in property <ItemDispositivo> detalhe;
+    in property <string> detalhe-via;
+    callback conectar(ItemDispositivo);
+    callback abrir-detalhe(ItemDispositivo);
+    callback atualizar-lista();
+    callback busca-mudou(string);
+    callback testar(ItemDispositivo);
+    callback copiar(ItemDispositivo);
+    callback favoritar(ItemDispositivo);
+    callback esquecer(ItemDispositivo);
+
+    // Conectando
+    in property <string> conectando-nome;
+    in property <[Etapa]> etapas;
+    in property <string> erro-conexao;
+    in property <int> restante-consentimento;
+    callback cancelar-conexao();
+    callback tentar-de-novo();
+
+    // Sessão
+    in property <image> quadro;
+    in property <bool> tem-quadro;
+    in property <bool> demo;
+    in property <int> demo-monitor;
+    in property <string> demo-texto;
+    in property <[string]> demo-registro;
+    in property <length> img-x;
+    in property <length> img-y;
+    in property <length> img-w;
+    in property <length> img-h;
+    in property <length> cursor-x;
+    in property <length> cursor-y;
+    in property <bool> cursor-visivel;
+    in property <string> monitor-texto;
+    in property <bool> varios-monitores;
+    in property <[string]> monitores;
+    in property <int> monitor-atual;
+    in-out property <int> modo-toque;
+    in property <bool> hud-visivel;
+    in property <string> hud;
+    in property <string> indicador-teclado;
+    in property <int> trava-ctrl;
+    in property <int> trava-alt;
+    in property <int> trava-meta;
+    in property <int> trava-shift;
+    in property <string> aviso-sessao;
+    in-out property <bool> barra-aberta: true;
+    in-out property <bool> teclado-aberto;
+    callback toque(int, length, length);
+    callback pinca-comecou(length, length);
+    callback pinca(float, length, length);
+    callback pinca-acabou(bool);
+    callback area-mudou(length, length);
+    callback trocar-monitor(int);
+    callback ir-monitor(int);
+    callback alternar-modo();
+    callback alternar-hud();
+    callback encerrar();
+    callback tecla(string);
+    callback modificador(string);
+    callback modificador-segurado(string);
+    callback ctrl-alt-del();
+    callback texto(string);
+    callback apagar(int);
+
+    // Teste de conexão
+    in property <string> teste-nome;
+    in property <[LinhaTeste]> teste-linhas;
+    in property <bool> testando;
+    callback testar-de-novo();
+    callback voltar();
+
+    // Configurações
+    in property <[string]> pareados;
+    in-out property <int> modo-toque-padrao;
+    in-out property <int> qualidade;
+    in-out property <bool> economizar-em-movel: true;
+    in property <string> versao-app;
+    callback modo-toque-padrao-mudou(int);
+    callback qualidade-mudou(int);
+    callback economizar-mudou(bool);
+    callback remover-pareado(int);
+    callback abrir-link(string);
+    callback otimizacao-bateria();
+
+    VerticalLayout {
+        Rectangle {
+            vertical-stretch: 1;
+            if root.tela == Tela.onboarding: TelaOnboarding {
+                estado: root.estado-ts;
+                versao: root.versao-ts;
+                versao-antiga: root.versao-ts-antiga;
+                abrir-tailscale => { root.abrir-tailscale(); }
+                instalar-tailscale => { root.instalar-tailscale(); }
+                verificar => { root.verificar-tailscale(); }
+                demonstracao => { root.demonstracao(); }
+                continuar => { root.continuar-onboarding(); }
+            }
+            if root.tela == Tela.encontrar: TelaEncontrar {
+                erro: root.erro-pareamento;
+                ocupado: root.pareando;
+                ler-qr => { root.ler-qr(); }
+                parear-codigo(n, c) => { root.parear-codigo(n, c); }
+                pular => { root.pular-pareamento(); }
+            }
+            if root.tela == Tela.dispositivos: TelaDispositivos {
+                grupos: root.grupos;
+                tarifada: root.tarifada;
+                vazio: root.lista-vazia;
+                atualizando: root.atualizando;
+                busca <=> root.busca;
+                conectar(d) => { root.conectar(d); }
+                abrir(d) => { root.abrir-detalhe(d); }
+                atualizar => { root.atualizar-lista(); }
+                adicionar => { root.tela = Tela.encontrar; }
+                changed busca => { root.busca-mudou(self.busca); }
+            }
+            if root.tela == Tela.conectando: TelaConectando {
+                nome: root.conectando-nome;
+                etapas: root.etapas;
+                erro: root.erro-conexao;
+                restante: root.restante-consentimento;
+                cancelar => { root.cancelar-conexao(); }
+                tentar-de-novo => { root.tentar-de-novo(); }
+            }
+            if root.tela == Tela.sessao: TelaSessao {
+                nome: root.conectando-nome;
+                quadro: root.quadro;
+                tem-quadro: root.tem-quadro;
+                demo: root.demo;
+                demo-monitor: root.demo-monitor;
+                demo-texto: root.demo-texto;
+                demo-registro: root.demo-registro;
+                img-x: root.img-x;
+                img-y: root.img-y;
+                img-w: root.img-w;
+                img-h: root.img-h;
+                cursor-x: root.cursor-x;
+                cursor-y: root.cursor-y;
+                cursor-visivel: root.cursor-visivel;
+                monitor-texto: root.monitor-texto;
+                varios-monitores: root.varios-monitores;
+                monitores: root.monitores;
+                monitor-atual: root.monitor-atual;
+                modo-toque: root.modo-toque;
+                hud-visivel: root.hud-visivel;
+                hud: root.hud;
+                indicador-teclado: root.indicador-teclado;
+                trava-ctrl: root.trava-ctrl;
+                trava-alt: root.trava-alt;
+                trava-meta: root.trava-meta;
+                trava-shift: root.trava-shift;
+                aviso: root.aviso-sessao;
+                barra-aberta <=> root.barra-aberta;
+                teclado-aberto <=> root.teclado-aberto;
+                toque(k, x, y) => { root.toque(k, x, y); }
+                pinca-comecou(x, y) => { root.pinca-comecou(x, y); }
+                pinca(s, x, y) => { root.pinca(s, x, y); }
+                pinca-acabou(c) => { root.pinca-acabou(c); }
+                area-mudou(w, h) => { root.area-mudou(w, h); }
+                trocar-monitor(p) => { root.trocar-monitor(p); }
+                ir-monitor(i) => { root.ir-monitor(i); }
+                alternar-modo => { root.alternar-modo(); }
+                alternar-hud => { root.alternar-hud(); }
+                encerrar => { root.encerrar(); }
+                tecla(t) => { root.tecla(t); }
+                modificador(m) => { root.modificador(m); }
+                modificador-segurado(m) => { root.modificador-segurado(m); }
+                ctrl-alt-del => { root.ctrl-alt-del(); }
+                texto(t) => { root.texto(t); }
+                apagar(n) => { root.apagar(n); }
+            }
+            if root.tela == Tela.teste: TelaTeste {
+                nome: root.teste-nome;
+                linhas: root.teste-linhas;
+                testando: root.testando;
+                testar => { root.testar-de-novo(); }
+                voltar => { root.voltar(); }
+            }
+            if root.tela == Tela.configuracoes: TelaConfiguracoes {
+                pareados: root.pareados;
+                modo-toque <=> root.modo-toque-padrao;
+                qualidade <=> root.qualidade;
+                economizar-em-movel <=> root.economizar-em-movel;
+                versao: root.versao-app;
+                modo-toque-mudou(i) => { root.modo-toque-padrao-mudou(i); }
+                qualidade-mudou(i) => { root.qualidade-mudou(i); }
+                economizar-mudou(v) => { root.economizar-mudou(v); }
+                remover-pareado(i) => { root.remover-pareado(i); }
+                abrir-link(u) => { root.abrir-link(u); }
+                otimizacao-bateria => { root.otimizacao-bateria(); }
+            }
+            if root.mostrando-detalhe && root.tela == Tela.dispositivos: FolhaDetalhe {
+                item: root.detalhe;
+                via: root.detalhe-via;
+                conectar => { root.mostrando-detalhe = false; root.conectar(root.detalhe); }
+                testar => { root.mostrando-detalhe = false; root.testar(root.detalhe); }
+                copiar => { root.copiar(root.detalhe); }
+                favoritar => { root.favoritar(root.detalhe); }
+                esquecer => { root.mostrando-detalhe = false; root.esquecer(root.detalhe); }
+                fechar => { root.mostrando-detalhe = false; }
+            }
+            if root.toast != "": Rectangle {
+                y: parent.height - self.height - 24px;
+                width: min(parent.width - 32px, toast-texto.preferred-width + 32px);
+                height: toast-texto.preferred-height + 20px;
+                border-radius: 12px;
+                background: #1c1f26ee;
+                toast-texto := Text { width: parent.width - 32px; text: root.toast; color: white; font-size: Tema.fonte; wrap: word-wrap; horizontal-alignment: center; }
+            }
+        }
+        // Abas de baixo (mockup 04); somem na sessão, na conexão e no onboarding.
+        if root.tela == Tela.dispositivos || root.tela == Tela.configuracoes: Rectangle {
+            height: 64px;
+            background: Tema.superficie;
+            Rectangle { y: 0; height: 1px; background: Tema.borda; }
+            HorizontalLayout {
+                Aba { icone: "▦"; texto: @tr("Dispositivos"); ativa: root.tela == Tela.dispositivos; clicada => { root.tela = Tela.dispositivos; } }
+                Aba { icone: "⚙"; texto: @tr("Configurações"); ativa: root.tela == Tela.configuracoes; clicada => { root.tela = Tela.configuracoes; } }
+            }
+        }
+    }
+    Timer {
+        interval: 3s;
+        running: root.toast != "";
+        triggered => { root.toast = ""; }
+    }
+}

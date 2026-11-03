@@ -10,6 +10,7 @@
 //! - [`escada`]: laço lento de resolução e FPS (degraus com histerese).
 
 pub mod adapt;
+#[cfg(feature = "audio")]
 pub mod audio;
 pub mod escada;
 pub mod measure;

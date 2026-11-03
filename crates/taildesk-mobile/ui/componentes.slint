@@ -1,0 +1,150 @@
+// Peças das telas do celular. Alvos de toque ≥ 48 px e rótulos acessíveis (TalkBack, MNF-07).
+import { Tema } from "tema.slint";
+
+export component Botao inherits Rectangle {
+    in property <string> texto;
+    in property <bool> primario: false;
+    in property <bool> perigo: false;
+    in property <bool> discreto: false;
+    in property <bool> habilitado: true;
+    in property <length> altura: Tema.toque;
+    callback clicado();
+
+    accessible-role: button;
+    accessible-label: texto;
+    accessible-enabled: habilitado;
+    accessible-action-default => { if habilitado { clicado(); } }
+
+    min-width: rotulo.preferred-width + 32px;
+    height: altura;
+    border-radius: Tema.raio;
+    background: !habilitado ? Tema.superficie-2
+        : primario ? (toque.pressed ? Tema.primaria-forte : Tema.primaria)
+        : perigo && !discreto ? (toque.pressed ? Tema.perigo.darker(20%) : Tema.perigo)
+        : toque.pressed ? Tema.superficie-2 : discreto ? transparent : Tema.superficie;
+    border-width: primario || discreto || perigo ? 0px : 1px;
+    border-color: Tema.borda;
+
+    toque := TouchArea {
+        clicked => { if root.habilitado { root.clicado(); } }
+    }
+    rotulo := Text {
+        width: parent.width;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: root.texto;
+        font-size: Tema.fonte;
+        font-weight: 600;
+        color: !root.habilitado ? Tema.texto-2
+            : root.primario || (root.perigo && !root.discreto) ? Tema.sobre-primaria
+            : root.perigo ? Tema.perigo : Tema.texto;
+    }
+}
+
+// Ponto colorido de estado (online, offline, relay).
+export component Ponto inherits Rectangle {
+    in property <color> cor: Tema.offline;
+    width: 10px;
+    height: 10px;
+    border-radius: 5px;
+    background: cor;
+}
+
+export component Cartao inherits Rectangle {
+    background: Tema.superficie;
+    border-radius: Tema.raio-grande;
+    border-width: 1px;
+    border-color: Tema.borda;
+}
+
+export component Separador inherits Rectangle {
+    height: 1px;
+    background: Tema.borda;
+}
+
+// Linha de checagem do onboarding ("Tailscale instalado · 1.104.1").
+export component LinhaChecagem inherits HorizontalLayout {
+    in property <string> texto;
+    in property <string> detalhe;
+    // 0 = cinza (não testado), 1 = ok, 2 = falhou
+    in property <int> estado;
+    height: Tema.toque;
+    padding-left: 16px;
+    padding-right: 16px;
+    spacing: 12px;
+    accessible-role: text;
+    accessible-label: texto + (detalhe != "" ? " " + detalhe : "");
+    VerticalLayout { alignment: center; Ponto { cor: estado == 1 ? Tema.online : estado == 2 ? Tema.perigo : Tema.offline; } }
+    Text { text: texto; color: Tema.texto; font-size: Tema.fonte; vertical-alignment: center; }
+    Text { text: detalhe; color: Tema.texto-2; font-size: Tema.fonte-pequena; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+}
+
+// Pílula da barra da sessão (toque grande, fundo escuro sobre o vídeo).
+export component BotaoBarra inherits Rectangle {
+    in property <string> texto;
+    in property <bool> ativo;
+    in property <bool> perigo;
+    in property <string> rotulo-acessivel: texto;
+    callback clicado();
+    accessible-role: button;
+    accessible-label: rotulo-acessivel;
+    accessible-action-default => { clicado(); }
+    min-width: max(Tema.toque, t.preferred-width + 24px);
+    height: 40px;
+    border-radius: 10px;
+    background: perigo ? Tema.perigo : ativo ? #ffffff2e : toque.pressed ? #ffffff1f : transparent;
+    toque := TouchArea { clicked => { root.clicado(); } }
+    t := Text {
+        width: parent.width;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: root.texto;
+        color: white;
+        font-size: Tema.fonte;
+        font-weight: root.perigo ? 700 : 500;
+    }
+}
+
+// Tecla da faixa acima do teclado virtual (mockup 08). `trava`: 0 solta, 1 uma vez, 2 travada.
+export component TeclaFaixa inherits Rectangle {
+    in property <string> texto;
+    in property <string> rotulo-acessivel: texto;
+    in property <int> trava;
+    callback tocada();
+    callback segurada();
+    accessible-role: button;
+    accessible-label: rotulo-acessivel;
+    accessible-checked: trava > 0;
+    accessible-action-default => { tocada(); }
+    min-width: max(44px, t.preferred-width + 20px);
+    height: 44px;
+    border-radius: 8px;
+    background: trava == 2 ? Tema.primaria-forte : trava == 1 ? Tema.primaria : toque.pressed ? Tema.superficie-2 : Tema.superficie;
+    border-width: trava > 0 ? 0px : 1px;
+    border-color: Tema.borda;
+    toque := TouchArea {
+        clicked => { root.tocada(); }
+        // Toque longo fixa o modificador.
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down { segurar.running = true; }
+            if e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel { segurar.running = false; }
+        }
+    }
+    segurar := Timer {
+        interval: 500ms;
+        running: false;
+        triggered => { self.running = false; root.segurada(); }
+    }
+    t := Text {
+        width: parent.width;
+        height: parent.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: root.texto;
+        color: root.trava > 0 ? white : Tema.texto;
+        font-size: Tema.fonte;
+        font-weight: 600;
+    }
+}
