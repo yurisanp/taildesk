@@ -213,7 +213,7 @@ mod tests {
         );
         // Outro nó não é afetado; o bloqueado volta depois do tempo.
         assert_eq!(p.conferir(&c2, "celular", t0), Ok(()));
-        let c3 = p.novo_codigo([10; 6], t0);
+        let c3 = p.novo_codigo([10; 6], t0 + BLOQUEIO);
         assert_eq!(p.conferir(&c3, "intruso", t0 + BLOQUEIO), Ok(()));
     }
 
