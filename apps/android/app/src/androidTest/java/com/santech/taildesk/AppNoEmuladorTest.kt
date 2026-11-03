@@ -2,11 +2,12 @@ package com.santech.taildesk
 
 import android.content.Intent
 import android.graphics.Bitmap
+import androidx.lifecycle.Lifecycle
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -23,14 +24,20 @@ class AppNoEmuladorTest {
 
     private val instr = InstrumentationRegistry.getInstrumentation()
     private val device = UiDevice.getInstance(instr)
-    private val pacote = instr.targetContext.packageName
 
-    private fun abrir(modo: String) {
+    /**
+     * Abre o app e espera a Activity chegar a RESUMED. A NativeActivity não tem Views, então a
+     * árvore de acessibilidade do UiAutomator nem sempre mostra a janela (API 34); o
+     * ActivityScenario espera pelo ciclo de vida.
+     */
+    private fun abrir(modo: String): ActivityScenario<MainActivity> {
         val intent = Intent(instr.targetContext, MainActivity::class.java)
             .putExtra(MainActivity.EXTRA_MODO, modo)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        instr.targetContext.startActivity(intent)
-        assertTrue("o app não abriu", device.wait(Until.hasObject(By.pkg(pacote).depth(0)), 20_000))
+        return ActivityScenario.launch(intent)
+    }
+
+    private fun vivo(cena: ActivityScenario<MainActivity>) {
+        assertEquals("o app caiu", Lifecycle.State.RESUMED, cena.state)
     }
 
     /**
@@ -70,21 +77,24 @@ class AppNoEmuladorTest {
 
     @Test
     fun listaDeExemplo() {
-        abrir("exemplo")
-        capturar("dispositivos")
-        assertTrue("o app caiu", device.hasObject(By.pkg(pacote)))
+        abrir("exemplo").use { cena ->
+            capturar("dispositivos")
+            vivo(cena)
+        }
     }
 
     @Test
     fun modoDemonstracaoComToque() {
         device.setOrientationLeft()
         try {
-            abrir("demo")
-            // Toque no meio da tela: vira clique no host de demonstração.
-            device.click(device.displayWidth / 2, device.displayHeight / 2)
-            Thread.sleep(500)
-            capturar("sessao-demo")
-            assertTrue("o app caiu", device.hasObject(By.pkg(pacote)))
+            abrir("demo").use { cena ->
+                capturar("sessao-demo-antes")
+                // Toque no meio da tela: vira clique no host de demonstração.
+                device.click(device.displayWidth / 2, device.displayHeight / 2)
+                Thread.sleep(500)
+                capturar("sessao-demo")
+                vivo(cena)
+            }
         } finally {
             device.setOrientationNatural()
         }
