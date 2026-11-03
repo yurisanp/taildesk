@@ -52,7 +52,7 @@ impl Android {
             Ok(())
         });
         if let Err(e) = r {
-            eprintln!("taildesk: JNI {metodo:?}: {e}");
+            crate::registrar!("taildesk: JNI {metodo:?}: {e}");
         }
     }
 
@@ -176,6 +176,11 @@ pub fn sinais_de(texto: &str) -> SinaisRede {
 /// Entrada do `NativeActivity` (via `android-activity`).
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_tag("taildesk")
+            .with_max_level(log::LevelFilter::Info),
+    );
     let android = Android { app: app.clone() };
     let (aparelho, densidade, idioma) = aparelho_de(&android.texto_do_aparelho());
     let plataforma_idioma_pt = idioma.to_ascii_lowercase().starts_with("pt");
@@ -196,13 +201,13 @@ fn android_main(app: AndroidApp) {
         }
         _ => {}
     }) {
-        eprintln!("taildesk: Slint no Android: {e}");
+        crate::registrar!("taildesk: Slint no Android: {e}");
         return;
     }
     let ui = match AppCelular::new() {
         Ok(ui) => ui,
         Err(e) => {
-            eprintln!("taildesk: janela: {e}");
+            crate::registrar!("taildesk: janela: {e}");
             return;
         }
     };
@@ -215,6 +220,7 @@ fn android_main(app: AndroidApp) {
     let app_rust = App::new(&ui, Box::new(plataforma));
     match modo.as_str() {
         "demo" => app_rust.demonstracao(),
+        "s1" => app_rust.medir_s1(),
         "exemplo" => {
             app_rust.preencher_exemplo();
             ui.set_tela(crate::ui::Tela::Dispositivos);
@@ -224,7 +230,7 @@ fn android_main(app: AndroidApp) {
     // A casca Kotlin manda os sinais da rede assim que o Rust está pronto.
     Android { app }.chamar(jni_str!("rustPronto"), None);
     if let Err(e) = ui.run() {
-        eprintln!("taildesk: {e}");
+        crate::registrar!("taildesk: {e}");
     }
 }
 

@@ -15,6 +15,17 @@
 //! Kotlin (estado do Tailscale, QR, abrir o app do Tailscale). Código de SO fica no overlay
 //! (`MobileVpnOverlay`) e no backend MediaCodec do `taildesk-codec`, como manda a regra 8.
 
+/// Mensagem de diagnóstico: logcat no Android, stderr fora dele. Nunca com chaves ou segredos.
+#[macro_export]
+macro_rules! registrar {
+    ($($t:tt)*) => {{
+        #[cfg(target_os = "android")]
+        log::warn!($($t)*);
+        #[cfg(not(target_os = "android"))]
+        eprintln!($($t)*);
+    }};
+}
+
 #[cfg(target_os = "android")]
 pub mod android;
 pub mod app;

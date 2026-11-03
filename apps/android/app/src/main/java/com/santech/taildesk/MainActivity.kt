@@ -48,7 +48,8 @@ class MainActivity : NativeActivity() {
 
     /**
      * Tela inicial pedida por quem abriu o app (testes no emulador e capturas da loja):
-     * `demo` (modo demonstração) ou `exemplo` (lista de dispositivos de exemplo). Vazio = normal.
+     * `demo` (modo demonstração), `exemplo` (lista de dispositivos de exemplo) ou `s1` (medição
+     * de quadros por segundo do spike S1, docs/context/mobile/m0-resultados.md). Vazio = normal.
      */
     fun modoInicial(): String = intent?.getStringExtra(EXTRA_MODO).orEmpty()
 

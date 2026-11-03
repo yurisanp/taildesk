@@ -43,6 +43,9 @@ i-slint-core = { version = "=1.18.1", default-features = false, features = ["ima
 # Backend Android do Slint (NativeActivity + renderer Skia), JNI e NDK (MIT/Apache-2.0).
 slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "image-default-formats", "backend-android-activity-06"] }
 jni = "0.22"
+# Logs no logcat (MIT OR Apache-2.0).
+log = "0.4"
+android_logger = { version = "0.15", default-features = false }
 ndk = { version = "0.9", default-features = false, features = ["media", "api-level-29"] }
 ndk-context = "0.1"
 

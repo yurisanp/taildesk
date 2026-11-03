@@ -37,6 +37,9 @@ use crate::ui::{
 use crate::video::Quadro;
 use crate::zoom::Retangulo;
 
+/// Porta do `taildesk-cli bench-net --ouvir` para o spike S3 (a 7420 é do app desktop).
+pub const PORTA_BENCH: u16 = 7421;
+
 /// O que só o Android sabe fazer.
 pub trait Plataforma: 'static {
     fn abrir_tailscale(&self) {}
@@ -322,7 +325,7 @@ impl App {
         let endpoint = {
             let _g = rt.enter();
             taildesk_transport::client_endpoint("0.0.0.0:0".parse().expect("endereço"))
-                .map_err(|e| eprintln!("taildesk: endpoint QUIC: {e}"))
+                .map_err(|e| crate::registrar!("taildesk: endpoint QUIC: {e}"))
                 .ok()
         };
         let versao = plat.aparelho().versao_app;
@@ -1250,6 +1253,59 @@ impl App {
         };
     }
 
+    /// Spike S1 (`m0-resultados.md`): sessão de demonstração com uma imagem 1920×1080 trocada a
+    /// cada quadro (o caminho do vídeo do M1) e a taxa de quadros desenhados no HUD.
+    pub fn medir_s1(self: &Rc<Self>) {
+        self.demonstracao();
+        let Some(ui) = self.ui() else { return };
+        ui.set_demo(false);
+        ui.set_tem_quadro(true);
+        self.estado.borrow_mut().hud_visivel = true;
+        let quadros = Rc::new(std::cell::Cell::new(0u32));
+        {
+            let quadros = quadros.clone();
+            let _ = ui.window().set_rendering_notifier(move |estado, _| {
+                if matches!(estado, slint::RenderingState::AfterRendering) {
+                    quadros.set(quadros.get() + 1);
+                }
+            });
+        }
+        let (w, h) = (1920u32, 1080u32);
+        let mut base = vec![0u8; (w * h * 4) as usize];
+        for (i, px) in base.chunks_exact_mut(4).enumerate() {
+            let (x, y) = (i as u32 % w, i as u32 / w);
+            px.copy_from_slice(&[(x * 255 / w) as u8, (y * 255 / h) as u8, 160, 255]);
+        }
+        let deslocamento = std::cell::Cell::new(0usize);
+        let fraco = Rc::downgrade(self);
+        let inicio = std::cell::Cell::new(Instant::now());
+        self.relogio_lento.stop();
+        self.relogio.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(16),
+            move || {
+                let Some(a) = fraco.upgrade() else { return };
+                let Some(ui) = a.ui() else { return };
+                // Gira a imagem 8 px por quadro: muda tudo sem custo de gerar outra.
+                let d = (deslocamento.get() + 32) % base.len();
+                deslocamento.set(d);
+                let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
+                let dst = buf.make_mut_bytes();
+                dst[..base.len() - d].copy_from_slice(&base[d..]);
+                dst[base.len() - d..].copy_from_slice(&base[..d]);
+                ui.set_quadro(slint::Image::from_rgba8(buf));
+                let t = inicio.get().elapsed();
+                if t >= Duration::from_secs(1) {
+                    let fps = quadros.replace(0) as f32 / t.as_secs_f32();
+                    inicio.set(Instant::now());
+                    let texto = format!("S1 · {fps:.0} fps · 1920×1080");
+                    crate::registrar!("taildesk: {texto}");
+                    ui.set_hud(texto.into());
+                }
+            },
+        );
+    }
+
     // -----------------------------------------------------------------------------------------
     // Ciclo de vida (casca Kotlin / android-activity)
 
@@ -1344,6 +1400,41 @@ impl App {
                 Ok(Err(e)) => vec![("TailDesk", e.to_string())],
                 Err(_) => vec![("TailDesk", "timeout".to_owned())],
             };
+            let mut linhas = linhas;
+            // Spike S3 (m0-resultados.md): banda pela VPN contra `taildesk-cli bench-net
+            // --ouvir <ip>:7421` no computador. Sem o servidor, a linha só não aparece.
+            let banco = SocketAddr::new(addr.ip(), PORTA_BENCH);
+            if let Ok(Ok(conn)) = tokio::time::timeout(
+                Duration::from_secs(3),
+                taildesk_transport::connect(&endpoint, banco, Pin::Insecure),
+            )
+            .await
+                && let Ok(Ok(r)) = tokio::time::timeout(
+                    Duration::from_secs(30),
+                    taildesk_transport::bench::run(
+                        &conn,
+                        taildesk_transport::bench::BenchOptions {
+                            max_kbps: Some(100_000),
+                            ..Default::default()
+                        },
+                    ),
+                )
+                .await
+            {
+                let mbps = |e: Option<taildesk_media::measure::Estimate>| {
+                    e.map_or("—".to_owned(), |e| {
+                        format!(
+                            "{}{:.1} Mbit/s",
+                            if e.saturated { "" } else { "≥ " },
+                            e.kbps as f32 / 1000.0
+                        )
+                    })
+                };
+                linhas.push(("down", mbps(r.down_estimate)));
+                linhas.push(("up", mbps(r.up_estimate)));
+                linhas.push(("mtu", format!("{} B", r.max_datagram)));
+                linhas.push(("classe", format!("{:?}", r.class)));
+            }
             no_app(move |a| {
                 let i = a.estado.borrow().idioma;
                 let rotulo = |k: &str| match k {
@@ -1351,6 +1442,9 @@ impl App {
                     "handshake" => i.t("Tempo para conectar", "Time to connect"),
                     "mtu" => i.t("Maior datagrama", "Largest datagram"),
                     "hw" => i.t("Decode por hardware", "Hardware decode"),
+                    "down" => i.t("Banda para o celular", "Bandwidth to the phone"),
+                    "up" => i.t("Banda do celular", "Bandwidth from the phone"),
+                    "classe" => i.t("Classe de rede", "Network class"),
                     _ => i.t("Porta do TailDesk", "TailDesk port"),
                 };
                 let modelo: Vec<LinhaTeste> = linhas
