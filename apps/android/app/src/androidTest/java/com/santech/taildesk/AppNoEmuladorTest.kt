@@ -59,20 +59,22 @@ class AppNoEmuladorTest {
         assertTrue("tela vazia em $nome", desenhou)
     }
 
-    /** Uma tela desenhada tem mais de uma cor (tela preta ou branca = o Slint não desenhou). */
+    /**
+     * Tela desenhada = não é de uma cor só. Uma tela clara (lista de dispositivos) tem poucas cores
+     * distintas, então a regra é a cor dominante ficar abaixo de 97% de uma grade de 32×32 pontos.
+     */
     private fun temCores(b: Bitmap): Boolean {
-        val vistas = HashSet<Int>()
-        var y = 0
-        while (y < b.height) {
-            var x = 0
-            while (x < b.width) {
-                vistas += b.getPixel(x, y)
-                if (vistas.size > 8) return true
-                x += b.width / 16
+        val contagem = HashMap<Int, Int>()
+        var total = 0
+        for (gy in 0 until 32) {
+            for (gx in 0 until 32) {
+                val p = b.getPixel(gx * (b.width - 1) / 31, gy * (b.height - 1) / 31)
+                contagem[p] = (contagem[p] ?: 0) + 1
+                total++
             }
-            y += b.height / 16
         }
-        return false
+        val dominante = contagem.values.maxOrNull() ?: total
+        return contagem.size >= 3 && dominante < total * 97 / 100
     }
 
     @Test
