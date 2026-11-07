@@ -12,8 +12,9 @@ use taildesk_files::panel::fmt::{self, Locale};
 use taildesk_files::panel::{ListRequest, State};
 use taildesk_files::service::{Event, Files};
 use taildesk_proto::control::FileErrorCode;
+use taildesk_proto::files::INBOX_ROOT;
 
-use super::{Alvo, App, no_app};
+use super::{Alvo, App, Tela, no_app};
 use crate::arquivos::{Acao, Escolhido, Pedido};
 use crate::textos::Idioma;
 use crate::ui::{ItemArquivo, LinhaArquivo};
@@ -298,6 +299,7 @@ impl App {
                                 );
                                 apagar(vec![a.caminho]);
                                 app.toast(t);
+                                app.envio_um(false);
                             }
                         });
                     }
@@ -307,9 +309,20 @@ impl App {
     }
 
     /// Evento do serviço de arquivos da sessão.
-    pub(super) fn evento_arquivos(&self, ev: &Event) {
+    pub(super) fn evento_arquivos(self: &Rc<Self>, ev: &Event) {
         let agora = Instant::now();
         let ef = self.estado.borrow_mut().arquivos.evento(ev, agora);
+        match ev {
+            Event::Finished {
+                direction: Direction::Out,
+                ..
+            } => self.envio_um(true),
+            Event::Failed {
+                direction: Direction::Out,
+                ..
+            } => self.envio_um(false),
+            _ => {}
+        }
         if let Some(r) = ef.listar {
             self.pedir_lista(r);
         }
@@ -352,6 +365,90 @@ impl App {
         if !(progresso && cedo) {
             self.desenhar_arquivos();
         }
+    }
+
+    /// Arquivos do menu de compartilhar, já copiados para o cache (`caminho\tnome\ttamanho`
+    /// por linha). Numa sessão aberta vão direto para ela; fora, a pessoa escolhe o computador.
+    pub fn compartilhar(self: &Rc<Self>, texto: &str) {
+        let escolhidos = escolhidos_de(texto);
+        if escolhidos.is_empty() {
+            return;
+        }
+        let em_sessao = self.ui().is_some_and(|u| u.get_tela() == Tela::Sessao)
+            && self.servico_arquivos().is_some()
+            && self.estado.borrow().envio.is_none();
+        if em_sessao {
+            if let Some(ui) = self.ui() {
+                ui.set_arquivos_aberto(true);
+            }
+            self.arquivos_escolhidos(texto);
+            return;
+        }
+        let antigos = std::mem::replace(&mut self.estado.borrow_mut().compartilhar, escolhidos);
+        apagar(antigos.into_iter().map(|a| a.caminho).collect());
+        if let Some(ui) = self.ui()
+            && matches!(ui.get_tela(), Tela::Dispositivos | Tela::Configuracoes)
+        {
+            ui.set_tela(Tela::Dispositivos);
+        }
+        self.mostrar_compartilhar();
+    }
+
+    pub(super) fn cancelar_compartilhar(&self) {
+        let antigos = std::mem::take(&mut self.estado.borrow_mut().compartilhar);
+        apagar(antigos.into_iter().map(|a| a.caminho).collect());
+        self.mostrar_compartilhar();
+    }
+
+    /// A faixa "Escolha o computador…" da lista de dispositivos.
+    pub(super) fn mostrar_compartilhar(&self) {
+        let Some(ui) = self.ui() else { return };
+        let e = self.estado.borrow();
+        let texto = if e.compartilhar.is_empty() {
+            String::new()
+        } else {
+            crate::compartilhar::faixa(&e.compartilhar, e.overlay.sinais().tarifada, e.idioma)
+        };
+        drop(e);
+        ui.set_compartilhando(texto.into());
+    }
+
+    /// A sessão de envio ficou ao vivo: oferece os arquivos para a pasta de entrada.
+    pub(super) fn enviar_compartilhados(&self) {
+        let arquivos = match self.estado.borrow_mut().envio.as_mut() {
+            Some(e) => e.comecar(),
+            None => return,
+        };
+        self.fazer(Pedido::Enviar {
+            root: INBOX_ROOT,
+            base: String::new(),
+            arquivos,
+        });
+    }
+
+    /// Um arquivo do envio sem sessão terminou; no último, avisa e encerra.
+    fn envio_um(&self, ok: bool) {
+        let resumo = match self.estado.borrow_mut().envio.as_mut() {
+            Some(e) if e.comecou() => e.terminou(ok),
+            _ => None,
+        };
+        let Some(r) = resumo else { return };
+        let nome = self
+            .estado
+            .borrow()
+            .host
+            .as_ref()
+            .map(|h| h.nome.clone())
+            .unwrap_or_default();
+        let texto = r.texto(self.estado.borrow().idioma, &nome);
+        let geracao = self.estado.borrow().geracao;
+        // Na próxima volta do laço, fora do tratamento do evento.
+        no_app(move |a| {
+            if a.estado.borrow().geracao == geracao {
+                a.encerrar();
+                a.toast(texto);
+            }
+        });
     }
 
     pub(super) fn desenhar_arquivos(&self) {

@@ -7,4 +7,5 @@
     <string name="qr_sem_camera">Sem permissão da câmera. Digite o nome do computador e o código.</string>
     <string name="qr_cancelar">Cancelar</string>
     <string name="sem_navegador">Nenhum app abre esse endereço.</string>
+    <string name="compartilhar_com">Enviar ao computador</string>
 </resources>

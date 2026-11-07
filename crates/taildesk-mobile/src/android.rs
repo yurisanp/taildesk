@@ -4,7 +4,8 @@
 //!   pelo objeto da Activity que o `android-activity` entrega (funciona de qualquer thread
 //!   anexada à JVM, sem procurar classe pelo nome).
 //! - Kotlin → Rust: funções nativas do objeto `com.santech.taildesk.Ponte` (`nativeSinais`,
-//!   `nativeQr`, `nativeLerQuadro`, `nativeArquivosEscolhidos`, `nativeDownloadPublicado`).
+//!   `nativeQr`, `nativeLerQuadro`, `nativeArquivosEscolhidos`, `nativeDownloadPublicado`,
+//!   `nativeCompartilhar`).
 //!   Chegam na thread de Java e vão para a thread da interface por [`no_app`].
 //!
 //! Formato das mensagens: texto com campos separados por tabulação, para manter a ponte pequena.
@@ -286,6 +287,22 @@ pub extern "system" fn Java_com_santech_taildesk_Ponte_nativeArquivosEscolhidos<
     env.with_env(|_env| -> jni::errors::Result<()> {
         let t = texto.to_string();
         no_app(move |a| a.arquivos_escolhidos(&t));
+        Ok(())
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
+}
+
+/// `Ponte.nativeCompartilhar(texto)`: arquivos do menu de compartilhar do sistema, já no cache
+/// (`caminho\tnome\ttamanho` por linha; MF-63).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_santech_taildesk_Ponte_nativeCompartilhar<'c>(
+    mut env: EnvUnowned<'c>,
+    _classe: JClass<'c>,
+    texto: JString<'c>,
+) {
+    env.with_env(|_env| -> jni::errors::Result<()> {
+        let t = texto.to_string();
+        no_app(move |a| a.compartilhar(&t));
         Ok(())
     })
     .resolve::<jni::errors::LogErrorAndDefault>();

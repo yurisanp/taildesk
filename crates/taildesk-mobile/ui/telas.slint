@@ -255,10 +255,12 @@ export component TelaDispositivos inherits Rectangle {
     in property <bool> vazio;
     in property <bool> atualizando;
     in-out property <string> busca;
+    in property <string> compartilhando;
     callback conectar(ItemDispositivo);
     callback abrir(ItemDispositivo);
     callback atualizar();
     callback adicionar();
+    callback cancelar-compartilhar();
 
     background: Tema.fundo;
     VerticalLayout {
@@ -280,6 +282,34 @@ export component TelaDispositivos inherits Rectangle {
         LineEdit {
             placeholder-text: @tr("Buscar dispositivos");
             text <=> root.busca;
+        }
+        // MF-63: toque num computador para mandar os arquivos compartilhados.
+        if root.compartilhando != "": Rectangle {
+            background: Tema.primaria;
+            border-radius: Tema.raio;
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 8px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.compartilhando;
+                    color: Tema.sobre-primaria;
+                    font-size: Tema.fonte;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: max(Tema.toque, cancelar.preferred-width + 20px);
+                    height: Tema.toque;
+                    border-radius: 10px;
+                    background: toque-cancelar.pressed ? #ffffff40 : #ffffff26;
+                    accessible-role: button;
+                    accessible-label: @tr("Cancelar");
+                    accessible-action-default => { root.cancelar-compartilhar(); }
+                    toque-cancelar := TouchArea { clicked => { root.cancelar-compartilhar(); } }
+                    cancelar := Text { text: @tr("Cancelar"); color: Tema.sobre-primaria; font-size: Tema.fonte; font-weight: 600; }
+                }
+            }
         }
         if root.tarifada: Rectangle {
             background: Tema.aviso-fundo;
