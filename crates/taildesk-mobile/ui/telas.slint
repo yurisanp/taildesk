@@ -449,13 +449,16 @@ export component TelaConectando inherits Rectangle {
     }
 }
 
-// MF-83 mínimo do M1, mockup 12.
+// MF-83, mockup 12 e `14-selecao-adaptativa.md` §7.2.
 export component TelaTeste inherits Rectangle {
     in property <string> nome;
     in property <[LinhaTeste]> linhas;
     in property <bool> testando;
+    /// Há um resultado completo para copiar.
+    in property <bool> relatorio-pronto;
     callback testar();
     callback voltar();
+    callback copiar-relatorio();
 
     background: Tema.fundo;
     VerticalLayout {
@@ -466,21 +469,30 @@ export component TelaTeste inherits Rectangle {
             Text { text: @tr("Teste de conexão"); font-size: 22px; font-weight: 700; color: Tema.texto; vertical-alignment: center; }
         }
         Text { text: root.nome; font-size: Tema.fonte; color: Tema.texto-2; }
-        Cartao {
+        ScrollView {
+            vertical-stretch: 1;
             VerticalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                for l[i] in root.linhas: VerticalLayout {
-                    if i > 0: Separador { }
-                    HorizontalLayout {
-                        height: Tema.toque;
-                        Text { text: l.rotulo; color: Tema.texto-2; font-size: Tema.fonte; vertical-alignment: center; horizontal-stretch: 1; }
-                        Text { text: l.valor; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; vertical-alignment: center; }
+                alignment: start;
+                Cartao {
+                    VerticalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        for l[i] in root.linhas: VerticalLayout {
+                            if i > 0: Separador { }
+                            HorizontalLayout {
+                                min-height: Tema.toque;
+                                padding-top: 6px;
+                                padding-bottom: 6px;
+                                spacing: 12px;
+                                Text { text: l.rotulo; color: Tema.texto-2; font-size: Tema.fonte; vertical-alignment: center; width: 38%; wrap: word-wrap; }
+                                Text { text: l.valor; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; vertical-alignment: center; horizontal-alignment: right; horizontal-stretch: 1; wrap: word-wrap; }
+                            }
+                        }
                     }
                 }
             }
         }
-        Rectangle { vertical-stretch: 1; }
+        if root.relatorio-pronto && !root.testando: Botao { texto: @tr("Copiar relatório"); clicado => { root.copiar-relatorio(); } }
         Botao { texto: root.testando ? @tr("Testando…") : @tr("Testar de novo"); primario: true; habilitado: !root.testando; clicado => { root.testar(); } }
     }
 }

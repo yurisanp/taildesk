@@ -196,6 +196,7 @@ fn analisar(texto: &str) -> Config {
                 name: (*nome).to_owned(),
             }),
             ["celulares", v] => c.host.allow_phones = *v != "0",
+            ["testes", v] => c.host.allow_tests = *v != "0",
             ["celular", id, nome, aparelho, ms] if !id.is_empty() => {
                 c.host.phones.push(PairedPhone {
                     node_stable_id: (*id).to_owned(),
@@ -260,6 +261,7 @@ fn escrever(c: &Config) -> String {
         );
     }
     s += &format!("celulares\t{}\n", u8::from(c.host.allow_phones));
+    s += &format!("testes\t{}\n", u8::from(c.host.allow_tests));
     for p in &c.host.phones {
         s += &format!(
             "celular\t{}\t{}\t{}\t{}\n",
@@ -371,6 +373,7 @@ mod tests {
         });
         c.hosts.insert("nXYZ".into(), [7; 32]);
         c.host.allow_phones = false;
+        c.host.allow_tests = false;
         c.host.phones.push(PairedPhone {
             node_stable_id: "nCEL".into(),
             name: "pixel-8".into(),
@@ -411,10 +414,12 @@ mod tests {
         assert_eq!(volta.hosts, c.hosts);
         assert_eq!(volta.host.password_hash, c.host.password_hash);
         assert!(!volta.host.allow_phones);
+        assert!(!volta.host.allow_tests);
         assert_eq!(volta.host.phones.len(), 1);
         assert_eq!(volta.host.phones[0].device_name, "Pixeldo Rafael");
         assert_eq!(volta.host.phones[0].paired_at_ms, 1_762_000_000_000);
         assert!(analisar("").host.allow_phones);
+        assert!(analisar("").host.allow_tests);
         assert_eq!(analisar("senha_hash\tqualquer\n").host.password_hash, None);
         // Linhas desconhecidas ou estragadas não derrubam a leitura.
         let estragado = format!("{texto}futuro\tx\nhost\tnQ\tzz\nconfiavel\t\tsem id\n");

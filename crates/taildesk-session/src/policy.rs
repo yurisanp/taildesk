@@ -32,6 +32,9 @@ pub struct HostSettings {
     pub allow_phones: bool,
     /// Celulares pareados: podem pedir a lista de dispositivos desta tailnet.
     pub phones: Vec<crate::pareamento::PairedPhone>,
+    /// "Permitir testes de conexão": quem a ACL deixa chegar pode medir a rede até aqui, sem
+    /// diálogo (o teste não vê a tela nem controla nada; `14-selecao-adaptativa.md` §7.1).
+    pub allow_tests: bool,
 }
 
 impl Default for HostSettings {
@@ -45,6 +48,7 @@ impl Default for HostSettings {
             password_hash: None,
             allow_phones: true,
             phones: Vec::new(),
+            allow_tests: true,
         }
     }
 }

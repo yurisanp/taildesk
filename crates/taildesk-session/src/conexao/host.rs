@@ -19,23 +19,28 @@ use taildesk_files::audit::AuditLog;
 use taildesk_files::service::{Config, Event, Files, SharedRoot, Side};
 use taildesk_keyboard::{Inject, KeyMsg, Keymap, Locks};
 use taildesk_overlay::{Overlay, PeerIdentity, PeerInfo};
+use taildesk_proto::control::Control;
 use taildesk_proto::control::{
     AudioStopReason, AudioStopped, ChatMessage, ClientKind, Close, CloseReason, Consent,
     DisplayInfo, HelloAck, KeyboardInfo, LanIface, Msg, PROTO_VERSION, PairError, PairRequest,
     PairResult, PathInfo, PeerEntry, PeerList, PeerListRequest, Permissions, Platform, Pong,
-    PowerInfo, TaildeskPresence, WakeError, WakeRequest, WakeResult, limits,
+    PowerInfo, TaildeskPresence, TestError, TestReady, WakeError, WakeRequest, WakeResult, limits,
 };
+use taildesk_transport::bench;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 
 use super::clipboard::{ArquivosDaArea, DoSistema, Ponte, Sistema, sem_sistema};
 use super::{ESPERA_HELLO, FimLeitura, Leitor, StreamUni, classificar, controle, encerrar};
 use crate::acessos::{
-    Acesso, Evento, MOTIVO_FORA_DA_TAILNET, MOTIVO_QUEDA, RegistroAcessos, nome_motivo,
+    Acesso, Evento, MOTIVO_FORA_DA_TAILNET, MOTIVO_QUEDA, MOTIVO_TESTE_REPETIDO,
+    MOTIVO_TESTES_DESLIGADOS, RegistroAcessos, nome_motivo,
 };
 use crate::acordar::{self, Limite};
 use crate::host::{ConsentAnswer, ConsentPrompt, HelloReply, HostSession, HostState};
 use crate::pareamento::{Pareamento, pode_listar};
 use crate::policy::HostSettings;
+use crate::teste::{DURACAO_MAXIMA, LimiteTestes};
 
 /// Quem está do outro lado, segundo a tailnet. Em produção é o `SystemOverlay`.
 pub trait Identificador: Send + Sync + 'static {
@@ -215,6 +220,8 @@ pub struct ConfigHost {
     pub fingerprint: [u8; 32],
     /// Pedidos de Wake on LAN por MAC (este host como repetidor).
     pub acordar: Mutex<Limite>,
+    /// Testes de conexão por dispositivo.
+    pub testes: Mutex<LimiteTestes>,
 }
 
 impl ConfigHost {
@@ -353,6 +360,10 @@ async fn atender<I: Identificador, M: Maquina>(
         Ok(Ok(Msg::WakeRequest(r))) => {
             let resposta = acordar(identificador, maquina, config, &peer, &r).await;
             encerrar(&conn, saida, tarefa, Some(resposta)).await;
+            return;
+        }
+        Ok(Ok(Msg::TestRequest(_))) => {
+            testar(&conn, identificador, maquina, config, &peer, saida, tarefa).await;
             return;
         }
         Ok(Ok(Msg::PairRequest(r))) => {
@@ -610,6 +621,73 @@ async fn acordar<I: Identificador, M: Maquina>(
         }
         _ => resultado(0, WakeError::SendFailed),
     }
+}
+
+/// Teste de conexão (`14-selecao-adaptativa.md` §7): sem diálogo, para quem a ACL deixa chegar,
+/// um por dispositivo a cada 10 s e registrado no histórico. Aceito, responde `TestReady` e
+/// atende o `bench` do controlador na mesma conexão.
+async fn testar<I: Identificador, M: Maquina>(
+    conn: &quinn::Connection,
+    identificador: &I,
+    maquina: &M,
+    config: &ConfigHost,
+    peer: &PeerIdentity,
+    saida: mpsc::Sender<Control>,
+    tarefa: JoinHandle<()>,
+) {
+    let remoto = conn.remote_address();
+    let permitido = config
+        .settings
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .allow_tests;
+    let chave = if peer.node_stable_id.is_empty() {
+        remoto.ip().to_string()
+    } else {
+        peer.node_stable_id.clone()
+    };
+    let erro = if !permitido {
+        TestError::Disabled
+    } else if !config
+        .testes
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .liberar(&chave, Instant::now())
+    {
+        TestError::RateLimited
+    } else {
+        TestError::Unspecified
+    };
+    let acesso = Acesso::novo(Evento::Teste, Some(peer), remoto);
+    if erro != TestError::Unspecified {
+        let motivo = if erro == TestError::Disabled {
+            MOTIVO_TESTES_DESLIGADOS
+        } else {
+            MOTIVO_TESTE_REPETIDO
+        };
+        config.registrar(acesso.com_motivo(motivo));
+        let recusa = Msg::TestReady(TestReady {
+            ok: false,
+            error: erro.into(),
+            ..TestReady::default()
+        });
+        encerrar(conn, saida, tarefa, Some(recusa)).await;
+        return;
+    }
+    config.registrar(acesso);
+    let descricao = maquina.descricao();
+    let pronto = TestReady {
+        ok: true,
+        error: TestError::Unspecified.into(),
+        host_name: descricao.nome,
+        platform: Some(descricao.plataforma),
+        encode_caps: descricao.encode_caps,
+        path: identificador.caminho(remoto.ip()).await,
+    };
+    let _ = saida.send(super::controle(Msg::TestReady(pronto))).await;
+    // O fim normal é o controlador fechar a conexão, que aqui aparece como erro de leitura.
+    let _ = tokio::time::timeout(DURACAO_MAXIMA, bench::serve(conn)).await;
+    encerrar(conn, saida, tarefa, None).await;
 }
 
 /// Corta o texto em até `max` bytes sem quebrar um caractere.

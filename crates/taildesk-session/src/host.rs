@@ -145,7 +145,10 @@ pub fn need(msg: &Msg) -> Need {
         // Energia: o `PowerInfo` só vai do host; o `WakeRequest` abre uma conexão de serviço.
         | Msg::PowerInfo(_)
         | Msg::WakeRequest(_)
-        | Msg::WakeResult(_) => Need::Nothing,
+        | Msg::WakeResult(_)
+        // Teste de conexão: também é conexão de serviço.
+        | Msg::TestRequest(_)
+        | Msg::TestReady(_) => Need::Nothing,
     }
 }
 

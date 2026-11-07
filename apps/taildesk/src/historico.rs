@@ -49,6 +49,8 @@ fn motivo(m: &str) -> &str {
         "erro_de_protocolo" => "erro de protocolo",
         "fora_da_tailnet" => "fora da sua tailnet",
         "queda" => "a conexão caiu",
+        "testes_desligados" => "testes de conexão desligados",
+        "teste_repetido" => "outro teste há menos de 10 s",
         outro => outro,
     }
 }
@@ -96,6 +98,10 @@ fn texto(a: &Acesso) -> String {
             }
             t
         }
+        Evento::Teste => match &a.motivo {
+            Some(m) => format!("Teste de conexão recusado: {}", motivo(m)),
+            None => "Testou a conexão".to_owned(),
+        },
         Evento::Recusado => match &a.motivo {
             Some(m) => format!("Não entrou: {}", motivo(m)),
             None => "Não entrou".to_owned(),
@@ -217,6 +223,11 @@ mod tests {
         assert!(!alerta(
             &a(Evento::Recusado).com_motivo("recusado_no_dialogo")
         ));
+        assert_eq!(texto(&a(Evento::Teste)), "Testou a conexão");
+        assert_eq!(
+            texto(&a(Evento::Teste).com_motivo("teste_repetido")),
+            "Teste de conexão recusado: outro teste há menos de 10 s"
+        );
         assert_eq!(duracao(59), "59 s");
         assert_eq!(duracao(61), "1 min");
         assert_eq!(quando(0).len(), "01/01 00:00".len());

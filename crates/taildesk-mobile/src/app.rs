@@ -19,9 +19,11 @@ use taildesk_keyboard::Mods;
 use taildesk_keyboard::virtual_kb::Trava;
 use taildesk_overlay::MobileVpnOverlay;
 use taildesk_overlay::mobile::{EstadoTailscale, SinaisRede};
-use taildesk_proto::control::{HelloAck, Msg};
+use taildesk_proto::control::{CloseReason, HelloAck, Msg, TestError};
 use taildesk_proto::pair::{PairOffer, normalize_code};
 use taildesk_session::conexao::controlador::EventoControlador;
+use taildesk_session::conexao::servico::{self, ErroServico};
+use taildesk_session::teste;
 use taildesk_session::{ControllerState, EndReason};
 use taildesk_transport::Pin;
 
@@ -38,9 +40,6 @@ use crate::ui::{
 };
 use crate::video::Quadro;
 use crate::zoom::Retangulo;
-
-/// Porta do `taildesk-cli bench-net --ouvir` para o spike S3 (a 7420 é do app desktop).
-pub const PORTA_BENCH: u16 = 7421;
 
 /// O que só o Android sabe fazer.
 pub trait Plataforma: 'static {
@@ -196,6 +195,8 @@ struct Estado {
     detalhe: Option<IpAddr>,
     busca: String,
     teste: Option<IpAddr>,
+    /// Relatório do último teste completo ("Copiar relatório").
+    relatorio: Option<String>,
     /// Tela presa (lista de exemplo dos testes e capturas): o estado do Tailscale não a troca.
     tela_fixa: bool,
     /// Folha de arquivos da sessão.
@@ -383,6 +384,7 @@ impl App {
                 detalhe: None,
                 busca: String::new(),
                 teste: None,
+                relatorio: None,
                 tela_fixa: false,
                 arquivos: crate::arquivos::Folha::new(),
                 ultimo_desenho_arquivos: None,
@@ -1602,98 +1604,133 @@ impl App {
         let Some(ui) = self.ui() else { return };
         ui.set_teste_nome(format!("{} · {}", d.nome, d.ip).into());
         ui.set_testando(true);
+        ui.set_teste_relatorio_pronto(false);
         ui.set_tela(Tela::Teste);
-        self.estado.borrow_mut().teste = Some(d.ip);
+        {
+            let mut e = self.estado.borrow_mut();
+            e.teste = Some(d.ip);
+            e.relatorio = None;
+        }
         let Some(endpoint) = self.estado.borrow().endpoint.clone() else {
             return;
         };
         let pin = d.fingerprint.map_or(Pin::FirstContact, Pin::Sha256);
         let addr = SocketAddr::new(d.ip, taildesk_proto::DEFAULT_PORT);
-        let hw = cfg!(target_os = "android");
+        // Em dados móveis com "Economizar dados", a sondagem não passa de 5 Mbit/s.
+        let teto = {
+            let e = self.estado.borrow();
+            if e.config.economizar_em_movel && e.overlay.sinais().tarifada {
+                5_000
+            } else {
+                100_000
+            }
+        };
         self.estado.borrow().rt.spawn(async move {
-            let t0 = Instant::now();
+            let opcoes = taildesk_transport::bench::BenchOptions {
+                max_kbps: Some(teto),
+                ..Default::default()
+            };
             let r = tokio::time::timeout(
-                Duration::from_secs(5),
-                taildesk_transport::connect(&endpoint, addr, pin),
+                Duration::from_secs(75),
+                servico::testar(&endpoint, addr, pin, opcoes),
             )
             .await;
-            let linhas = match r {
-                Ok(Ok(conn)) => {
-                    let handshake = t0.elapsed();
-                    let rtt = conn.rtt();
-                    let mtu = conn.max_datagram_size().unwrap_or(0);
-                    conn.close(0u32.into(), b"teste");
-                    vec![
-                        ("TailDesk", "ok".to_owned()),
-                        ("rtt", format!("{} ms", rtt.as_millis())),
-                        ("handshake", format!("{} ms", handshake.as_millis())),
-                        ("mtu", format!("{mtu} B")),
-                        ("hw", (if hw { "MediaCodec" } else { "—" }).to_owned()),
-                    ]
-                }
-                Ok(Err(e)) => vec![("TailDesk", e.to_string())],
-                Err(_) => vec![("TailDesk", "timeout".to_owned())],
+            // Host sem o teste de conexão (versão antiga): só conecta e mede o básico.
+            let antigo = matches!(
+                r,
+                Ok(Err(ErroServico::Recusado(CloseReason::ProtocolError)))
+            );
+            let basico = if antigo {
+                Some(teste_basico(&endpoint, addr, pin).await)
+            } else {
+                None
             };
-            let mut linhas = linhas;
-            // Spike S3 (m0-resultados.md): banda pela VPN contra `taildesk-cli bench-net
-            // --ouvir <ip>:7421` no computador. Sem o servidor, a linha só não aparece.
-            let banco = SocketAddr::new(addr.ip(), PORTA_BENCH);
-            if let Ok(Ok(conn)) = tokio::time::timeout(
-                Duration::from_secs(3),
-                taildesk_transport::connect(&endpoint, banco, Pin::Insecure),
-            )
-            .await
-                && let Ok(Ok(r)) = tokio::time::timeout(
-                    Duration::from_secs(30),
-                    taildesk_transport::bench::run(
-                        &conn,
-                        taildesk_transport::bench::BenchOptions {
-                            max_kbps: Some(100_000),
-                            ..Default::default()
-                        },
-                    ),
-                )
-                .await
-            {
-                let mbps = |e: Option<taildesk_media::measure::Estimate>| {
-                    e.map_or("—".to_owned(), |e| {
-                        format!(
-                            "{}{:.1} Mbit/s",
-                            if e.saturated { "" } else { "≥ " },
-                            e.kbps as f32 / 1000.0
-                        )
-                    })
-                };
-                linhas.push(("down", mbps(r.down_estimate)));
-                linhas.push(("up", mbps(r.up_estimate)));
-                linhas.push(("mtu", format!("{} B", r.max_datagram)));
-                linhas.push(("classe", format!("{:?}", r.class)));
-            }
-            no_app(move |a| {
-                let i = a.estado.borrow().idioma;
-                let rotulo = |k: &str| match k {
-                    "rtt" => i.t("Latência (ida e volta)", "Latency (round trip)"),
-                    "handshake" => i.t("Tempo para conectar", "Time to connect"),
-                    "mtu" => i.t("Maior datagrama", "Largest datagram"),
-                    "hw" => i.t("Decode por hardware", "Hardware decode"),
-                    "down" => i.t("Banda para o celular", "Bandwidth to the phone"),
-                    "up" => i.t("Banda do celular", "Bandwidth from the phone"),
-                    "classe" => i.t("Classe de rede", "Network class"),
-                    _ => i.t("Porta do TailDesk", "TailDesk port"),
-                };
-                let modelo: Vec<LinhaTeste> = linhas
-                    .iter()
-                    .map(|(k, v)| LinhaTeste {
-                        rotulo: rotulo(k).into(),
-                        valor: v.as_str().into(),
+            no_app(move |a| a.mostrar_teste(r, basico));
+        });
+    }
+
+    fn mostrar_teste(
+        &self,
+        r: Result<Result<teste::Resultado, ErroServico>, tokio::time::error::Elapsed>,
+        basico: Option<Vec<(&'static str, String)>>,
+    ) {
+        let i = self.estado.borrow().idioma;
+        let en = i == Idioma::En;
+        let hw = cfg!(target_os = "android");
+        let decode = (
+            i.t("Decode por hardware", "Hardware decode"),
+            (if hw { "MediaCodec" } else { "—" }).to_owned(),
+        );
+        let porta = i.t("Porta do TailDesk", "TailDesk port");
+        let (linhas, relatorio): (Vec<(&str, String)>, Option<String>) = match (r, basico) {
+            (_, Some(b)) => {
+                let mut b: Vec<(&str, String)> = b
+                    .into_iter()
+                    .map(|(k, v)| {
+                        let rotulo = match k {
+                            "rtt" => i.t("Latência (ida e volta)", "Latency (round trip)"),
+                            "handshake" => i.t("Tempo para conectar", "Time to connect"),
+                            "mtu" => i.t("Maior datagrama", "Largest datagram"),
+                            _ => porta,
+                        };
+                        (rotulo, v)
                     })
                     .collect();
-                if let Some(ui) = a.ui() {
-                    ui.set_teste_linhas(ModelRc::new(VecModel::from(modelo)));
-                    ui.set_testando(false);
-                }
-            });
-        });
+                b.push(decode);
+                b.push((
+                    i.t("Teste completo", "Full test"),
+                    i.t(
+                        "atualize o TailDesk do computador",
+                        "update TailDesk on the computer",
+                    )
+                    .to_owned(),
+                ));
+                (b, None)
+            }
+            (Ok(Ok(r)), None) => {
+                let mut l = teste::linhas(&r, en);
+                l.push(decode);
+                (l, Some(teste::relatorio(&r, en)))
+            }
+            (Ok(Err(ErroServico::TesteRecusado(TestError::Disabled))), None) => (
+                vec![(
+                    porta,
+                    i.t(
+                        "o computador não aceita testes de conexão (Configurações → Permitir testes de conexão)",
+                        "the computer doesn't accept connection tests (Settings → Allow connection tests)",
+                    )
+                    .to_owned(),
+                )],
+                None,
+            ),
+            (Ok(Err(ErroServico::TesteRecusado(_))), None) => (
+                vec![(
+                    porta,
+                    i.t(
+                        "espere 10 s e teste de novo",
+                        "wait 10 s and test again",
+                    )
+                    .to_owned(),
+                )],
+                None,
+            ),
+            (Ok(Err(e)), None) => (vec![(porta, e.to_string())], None),
+            (Err(_), None) => (vec![(porta, "timeout".to_owned())], None),
+        };
+        let modelo: Vec<LinhaTeste> = linhas
+            .iter()
+            .map(|(k, v)| LinhaTeste {
+                rotulo: (*k).into(),
+                valor: v.as_str().into(),
+            })
+            .collect();
+        let pronto = relatorio.is_some();
+        self.estado.borrow_mut().relatorio = relatorio;
+        if let Some(ui) = self.ui() {
+            ui.set_teste_linhas(ModelRc::new(VecModel::from(modelo)));
+            ui.set_teste_relatorio_pronto(pronto);
+            ui.set_testando(false);
+        }
     }
 
     /// Lista e rede de exemplo (capturas da loja e testes de tela), como no mockup 04.
@@ -1854,6 +1891,12 @@ impl App {
         ui.on_testar(com1!(|a: &Rc<App>, item: ItemDispositivo| {
             if let Some(d) = a.dispositivo(&item) {
                 a.testar(d);
+            }
+        }));
+        ui.on_copiar_relatorio(com!(|a: &Rc<App>| {
+            let e = a.estado.borrow();
+            if let Some(r) = &e.relatorio {
+                e.plat.copiar(r);
             }
         }));
         ui.on_testar_de_novo(com!(|a: &Rc<App>| {
@@ -2115,4 +2158,34 @@ impl App {
 /// Itens de um modelo (para os testes e as capturas).
 pub fn itens<T: Clone + 'static>(m: &ModelRc<T>) -> Vec<T> {
     m.iter().collect()
+}
+
+/// Teste de um host sem `TestRequest`: conecta e mede o que dá sem a ajuda dele.
+async fn teste_basico(
+    endpoint: &quinn::Endpoint,
+    addr: SocketAddr,
+    pin: Pin,
+) -> Vec<(&'static str, String)> {
+    let t0 = Instant::now();
+    match tokio::time::timeout(
+        Duration::from_secs(5),
+        taildesk_transport::connect(endpoint, addr, pin),
+    )
+    .await
+    {
+        Ok(Ok(conn)) => {
+            let conectar = t0.elapsed();
+            let rtt = conn.rtt();
+            let mtu = conn.max_datagram_size().unwrap_or(0);
+            conn.close(0u32.into(), b"teste");
+            vec![
+                ("TailDesk", "ok".to_owned()),
+                ("rtt", format!("{} ms", rtt.as_millis())),
+                ("handshake", format!("{} ms", conectar.as_millis())),
+                ("mtu", format!("{mtu} B")),
+            ]
+        }
+        Ok(Err(e)) => vec![("TailDesk", e.to_string())],
+        Err(_) => vec![("TailDesk", "timeout".to_owned())],
+    }
 }

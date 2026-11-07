@@ -125,6 +125,7 @@ pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
         pareamento,
         fingerprint: id.fingerprint(),
         acordar: Mutex::default(),
+        testes: Mutex::default(),
     });
     let (tx, mut rx) = mpsc::channel(64);
     tokio::spawn(servir(
@@ -221,6 +222,7 @@ pub fn rodar_agente(perfil: std::path::PathBuf) -> std::io::Result<()> {
                 pareamento: Arc::default(),
                 fingerprint: id.fingerprint(),
                 acordar: Mutex::default(),
+                testes: Mutex::default(),
             });
             let (tx, mut rx) = mpsc::channel(64);
             tokio::spawn(servir(

@@ -12,8 +12,8 @@ use taildesk_keyboard::{Inject, Locks, fixtures};
 use taildesk_overlay::{PeerIdentity, PeerInfo};
 use taildesk_proto::control::{
     Button, ChatMessage, ClientKind, CloseReason, CodecSelected, Feature, Hello, Key, LanIface,
-    MouseButton, Msg, PairError, PathInfo, Permissions, SecureAttention, StartVideo, WakeError,
-    WakeRequest,
+    MouseButton, Msg, PairError, PathInfo, Permissions, SecureAttention, StartVideo, TestError,
+    WakeError, WakeRequest,
 };
 use taildesk_proto::files::INBOX_ROOT;
 use taildesk_proto::net::PathKind;
@@ -24,8 +24,9 @@ use taildesk_session::conexao::host::{
     CanalMidia, ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, FimHost, Identificador,
     Maquina, Midia, servir,
 };
-use taildesk_session::conexao::servico::{ErroServico, parear, pedir_acordar, pedir_lista};
+use taildesk_session::conexao::servico::{ErroServico, parear, pedir_acordar, pedir_lista, testar};
 use taildesk_session::{ConsentAnswer, ControllerState, EndReason, HostSettings, Pareamento};
+use taildesk_transport::bench::BenchOptions;
 use taildesk_transport::{Identity, Pin, client_endpoint, server_endpoint};
 use tokio::sync::mpsc;
 
@@ -267,6 +268,7 @@ impl Host {
                 pareamento: pareamento.clone(),
                 fingerprint: id.fingerprint(),
                 acordar: Mutex::default(),
+                testes: Mutex::default(),
             }),
             tx,
         ));
@@ -964,4 +966,44 @@ async fn controlador_recebe_as_placas_do_host() {
             None => panic!("sessão acabou sem PowerInfo"),
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn teste_de_conexao_sem_dialogo_um_a_cada_10_s() {
+    // Da tailnet e sem diálogo (nem lembrado nem pareado): o teste não vê a tela nem controla
+    // nada.
+    let host = Host::iniciar(true, None);
+    let endpoint = client_endpoint(host.addr).unwrap();
+    let pin = Pin::Sha256(host.fingerprint);
+    let opcoes = BenchOptions {
+        pings: 3,
+        step_ms: 50,
+        max_kbps: Some(4_000),
+        ..BenchOptions::default()
+    };
+    let r = testar(&endpoint, host.addr, pin, opcoes).await.unwrap();
+    assert_eq!(r.host, "desktop");
+    assert_eq!(r.caminho.as_ref().unwrap().relay_region, "sao");
+    assert_eq!(r.bench.rtt.len(), 3);
+    assert!(r.bench.report.down_kbps > 0);
+    let a = host.acessos(1).await;
+    assert_eq!(a[0].evento, Evento::Teste);
+    assert_eq!(a[0].motivo, None);
+
+    // De novo logo em seguida: recusado e registrado.
+    assert!(matches!(
+        testar(&endpoint, host.addr, pin, opcoes).await,
+        Err(ErroServico::TesteRecusado(TestError::RateLimited))
+    ));
+    let a = host.acessos(2).await;
+    assert_eq!(a[1].motivo.as_deref(), Some("teste_repetido"));
+
+    // Desligado nas configurações.
+    host.settings.lock().unwrap().allow_tests = false;
+    assert!(matches!(
+        testar(&endpoint, host.addr, pin, opcoes).await,
+        Err(ErroServico::TesteRecusado(TestError::Disabled))
+    ));
+    let a = host.acessos(3).await;
+    assert_eq!(a[2].motivo.as_deref(), Some("testes_desligados"));
 }

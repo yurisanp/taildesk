@@ -31,6 +31,8 @@ pub enum Evento {
     Recusado,
     /// Uma sessão que tinha entrado acabou.
     Saiu,
+    /// Teste de conexão (sem tela nem controle). Com `motivo`, foi recusado.
+    Teste,
 }
 
 /// Como o acesso foi liberado.
@@ -119,6 +121,10 @@ pub fn nome_motivo(r: CloseReason) -> &'static str {
 pub const MOTIVO_QUEDA: &str = "queda";
 /// O `tailscaled` não soube dizer quem é (fora da tailnet).
 pub const MOTIVO_FORA_DA_TAILNET: &str = "fora_da_tailnet";
+/// Teste recusado: "Permitir testes de conexão" desligado.
+pub const MOTIVO_TESTES_DESLIGADOS: &str = "testes_desligados";
+/// Teste recusado: outro do mesmo dispositivo há menos de 10 s.
+pub const MOTIVO_TESTE_REPETIDO: &str = "teste_repetido";
 
 impl Acesso {
     /// Linha com a identidade de `peer` (ou só o endereço, se `None`).

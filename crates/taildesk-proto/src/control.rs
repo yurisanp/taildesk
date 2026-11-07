@@ -109,7 +109,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 56, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104, 110, 120, 121, 122, 123, 124, 130, 131, 132"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 56, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104, 110, 120, 121, 122, 123, 124, 130, 131, 132, 140, 141"
     )]
     pub msg: Option<Msg>,
 }
@@ -262,6 +262,14 @@ pub enum Msg {
     WakeRequest(WakeRequest),
     #[prost(message, tag = "132")]
     WakeResult(WakeResult),
+
+    // Teste de conexão (`14-selecao-adaptativa.md` §7). `TestRequest` abre uma conexão de serviço
+    // sem `Hello`; com `TestReady{ok}` o controlador abre um stream bidi na mesma conexão e roda
+    // o `taildesk_transport::bench` (o host atende com `bench::serve`).
+    #[prost(message, tag = "140")]
+    TestRequest(TestRequest),
+    #[prost(message, tag = "141")]
+    TestReady(TestReady),
 }
 
 impl From<Msg> for Control {
@@ -1351,6 +1359,32 @@ pub struct WakeResult {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Teste de conexão
+
+/// C→H: primeira (e única) mensagem de uma conexão de serviço pedindo um teste de conexão.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct TestRequest {}
+
+/// H→C: o host aceita (ou não) o teste. Com `ok`, traz o que o controlador precisa para dizer
+/// qual perfil usaria: o caminho visto pelo `tailscaled` do host e os encoders dele.
+#[derive(Clone, PartialEq, Message)]
+pub struct TestReady {
+    #[prost(bool, tag = "1")]
+    pub ok: bool,
+    #[prost(enumeration = "TestError", tag = "2")]
+    pub error: i32,
+    #[prost(string, tag = "3")]
+    pub host_name: String,
+    #[prost(message, optional, tag = "4")]
+    pub platform: Option<Platform>,
+    #[prost(message, repeated, tag = "5")]
+    pub encode_caps: Vec<CodecCap>,
+    /// Caminho até o controlador; ausente = o host não soube dizer.
+    #[prost(message, optional, tag = "6")]
+    pub path: Option<PathInfo>,
+}
+
+// ---------------------------------------------------------------------------------------------
 // Enums (0 = não especificado; valor desconhecido = tratar como 0)
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
@@ -1417,6 +1451,16 @@ pub enum WakeError {
     RateLimited = 2,
     /// Nenhuma placa conseguiu mandar o pacote.
     SendFailed = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum TestError {
+    Unspecified = 0,
+    /// "Permitir testes de conexão" está desligado neste host.
+    Disabled = 1,
+    /// Outro teste deste mesmo dispositivo em menos de 10 s.
+    RateLimited = 2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
@@ -1922,6 +1966,14 @@ impl Control {
                 exactly("mac", m.mac.len(), limits::MAC_LEN)?;
                 m.lan.as_ref().map_or(Ok(()), lan_iface)
             }
+            Msg::TestReady(m) => {
+                at_most("host_name", m.host_name.len(), limits::SHORT_TEXT_LEN)?;
+                platform(m.platform.as_ref())?;
+                at_most("encode_caps", m.encode_caps.len(), limits::CODEC_CAPS)?;
+                m.path.as_ref().map_or(Ok(()), |p| {
+                    at_most("relay_region", p.relay_region.len(), limits::SHORT_TEXT_LEN)
+                })
+            }
             Msg::DisplaysChanged(m) => displays(&m.displays),
             Msg::CodecSelected(m) => video_stream(m.stream_id),
             Msg::VideoStats(m) => {
@@ -1995,7 +2047,8 @@ impl Control {
             | Msg::FsRootsRequest(_)
             | Msg::FileCancel(_)
             | Msg::FileError(_)
-            | Msg::WakeResult(_) => Ok(()),
+            | Msg::WakeResult(_)
+            | Msg::TestRequest(_) => Ok(()),
         }
     }
 }
@@ -2564,6 +2617,24 @@ mod tests {
                 sent: 0,
                 error: WakeError::NotSameLan.into(),
             }),
+            Msg::TestRequest(TestRequest {}),
+            Msg::TestReady(TestReady {
+                ok: true,
+                error: TestError::Unspecified.into(),
+                host_name: "desktop-casa".into(),
+                platform: None,
+                encode_caps: Vec::new(),
+                path: Some(PathInfo {
+                    kind: crate::net::PathKind::Relayed as u32,
+                    relay_region: "sao".into(),
+                    rtt_ms: 38,
+                }),
+            }),
+            Msg::TestReady(TestReady {
+                ok: false,
+                error: TestError::RateLimited.into(),
+                ..TestReady::default()
+            }),
         ]
     }
 
@@ -2642,6 +2713,32 @@ mod tests {
             ..Hello::default()
         }));
         assert_eq!(e.field, "viewport.w_px");
+    }
+
+    #[test]
+    fn limites_do_teste() {
+        let pronto = |nome: usize, caps: usize, regiao: usize| {
+            Msg::TestReady(TestReady {
+                ok: true,
+                host_name: "a".repeat(nome),
+                encode_caps: vec![CodecCap::default(); caps],
+                path: Some(PathInfo {
+                    relay_region: "r".repeat(regiao),
+                    ..PathInfo::default()
+                }),
+                ..TestReady::default()
+            })
+        };
+        let n = limits::SHORT_TEXT_LEN;
+        Control::from(pronto(n, limits::CODEC_CAPS, n))
+            .validate()
+            .unwrap();
+        assert_eq!(invalida(pronto(n + 1, 0, 0)).field, "host_name");
+        assert_eq!(
+            invalida(pronto(0, limits::CODEC_CAPS + 1, 0)).field,
+            "encode_caps"
+        );
+        assert_eq!(invalida(pronto(0, 0, n + 1)).field, "relay_region");
     }
 
     #[test]

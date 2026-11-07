@@ -26,6 +26,7 @@ pub mod monitores;
 pub mod pareamento;
 pub mod policy;
 pub mod senha;
+pub mod teste;
 
 pub use controller::{ControllerSession, ControllerState, EndReason};
 pub use cursor::{AcaoForma, CursorControlador, CursorHost, Desenho, Forma};
