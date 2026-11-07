@@ -19,12 +19,11 @@ class ShareReceiverActivity : Activity() {
         if (uris.isNotEmpty()) {
             val clip = ClipData.newRawUri("", uris[0])
             uris.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
-            startActivity(
-                Intent(this, MainActivity::class.java)
-                    .setAction(MainActivity.ACAO_COMPARTILHAR)
-                    .setClipData(clip)
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
+            val repasse = Intent(this, MainActivity::class.java).setAction(MainActivity.ACAO_COMPARTILHAR)
+            // `setClipData` não devolve o Intent.
+            repasse.clipData = clip
+            repasse.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(repasse)
         }
         finish()
     }
