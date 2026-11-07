@@ -30,6 +30,7 @@ Codinome usado nos exemplos: **`halyard`** (placeholder — troque à vontade).
 | [`14-selecao-adaptativa.md`](14-selecao-adaptativa.md) | Classes de rede, perfis de mídia, troca adaptativa e aba "Teste de conexão". | Ambos |
 | [`15-audio.md`](15-audio.md) | Áudio do sistema (Opus em datagramas, liga/desliga que corta o tráfego). | Ambos |
 | [`16-atualizacao-automatica.md`](16-atualizacao-automatica.md) | Auto update: update information e `.zsync` do AppImage, atualizador no app, outros pacotes. | Ambos |
+| [`17-wake-on-lan.md`](17-wake-on-lan.md) | Wake on LAN pela tailnet: repetidor na LAN do alvo, PeerAPI `/v0/wol` do Tailscale, segurança. | Ambos |
 | [`plano-execucao.md`](plano-execucao.md) | Plano de execução: tudo o que falta, em etapas, com issues, dependências e o que precisa do Yuri. Ponto de partida de toda tarefa nova. | Ambos |
 | [`mobile/`](mobile/) | App mobile: requisitos, arquitetura, fases, telas e o [detalhamento do Android](mobile/android-detalhado.md) com a publicação na Play e no GitHub. | Ambos |
 | [`09-fontes.md`](09-fontes.md) | Links de referência e versões verificadas. | Ambos |

@@ -11,8 +11,9 @@ use taildesk_files::service::Event;
 use taildesk_keyboard::{Inject, Locks, fixtures};
 use taildesk_overlay::{PeerIdentity, PeerInfo};
 use taildesk_proto::control::{
-    Button, ChatMessage, ClientKind, CloseReason, CodecSelected, Feature, Hello, Key, MouseButton,
-    Msg, PairError, PathInfo, Permissions, SecureAttention, StartVideo,
+    Button, ChatMessage, ClientKind, CloseReason, CodecSelected, Feature, Hello, Key, LanIface,
+    MouseButton, Msg, PairError, PathInfo, Permissions, SecureAttention, StartVideo, WakeError,
+    WakeRequest,
 };
 use taildesk_proto::files::INBOX_ROOT;
 use taildesk_proto::net::PathKind;
@@ -23,7 +24,7 @@ use taildesk_session::conexao::host::{
     CanalMidia, ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, FimHost, Identificador,
     Maquina, Midia, servir,
 };
-use taildesk_session::conexao::servico::{ErroServico, parear, pedir_lista};
+use taildesk_session::conexao::servico::{ErroServico, parear, pedir_acordar, pedir_lista};
 use taildesk_session::{ConsentAnswer, ControllerState, EndReason, HostSettings, Pareamento};
 use taildesk_transport::{Identity, Pin, client_endpoint, server_endpoint};
 use tokio::sync::mpsc;
@@ -172,6 +173,17 @@ impl Maquina for MaquinaFalsa {
         MidiaFalsa(self.0.clone(), canal)
     }
 
+    fn placas_lan(&self) -> Vec<LanIface> {
+        vec![LanIface {
+            mac: vec![2, 0, 0, 0, 0, 1],
+            ipv4: u32::from(Ipv4Addr::LOCALHOST),
+            prefix_len: 8,
+            gateway_mac: Vec::new(),
+            wired: true,
+            wol: 0,
+        }]
+    }
+
     async fn area(
         &self,
     ) -> Option<(
@@ -254,6 +266,7 @@ impl Host {
                 tela_de_entrada: false,
                 pareamento: pareamento.clone(),
                 fingerprint: id.fingerprint(),
+                acordar: Mutex::default(),
             }),
             tx,
         ));
@@ -802,6 +815,71 @@ async fn lista_de_dispositivos_so_para_o_dono_ou_pareado() {
         .await
         .unwrap();
     assert_eq!(lista.len(), 70);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repetidor_do_wake_on_lan() {
+    let lan = |ip: [u8; 4], prefixo| LanIface {
+        mac: Vec::new(),
+        ipv4: u32::from(Ipv4Addr::from(ip)),
+        prefix_len: prefixo,
+        gateway_mac: Vec::new(),
+        wired: true,
+        wol: 0,
+    };
+    let pedido = |l: Option<LanIface>| WakeRequest {
+        mac: vec![0x3c, 0x7c, 0x3f, 1, 2, 3],
+        lan: l,
+    };
+    let dono = Host::iniciar_tudo(true, None, false, Some("yuri@example.com"));
+    let endpoint = client_endpoint(dono.addr).unwrap();
+    let pin = Pin::Sha256(dono.fingerprint);
+
+    // Alvo em outra LAN: recusa sem mandar nada (e sem gastar o limite).
+    let r = pedir_acordar(
+        &endpoint,
+        dono.addr,
+        pin,
+        pedido(Some(lan([192, 168, 0, 20], 24))),
+    )
+    .await
+    .unwrap();
+    assert!(!r.ok);
+    assert_eq!(r.error(), WakeError::NotSameLan);
+
+    // Na mesma LAN (o loopback da máquina falsa): manda. Alguns sandboxes recusam broadcast,
+    // então aceita a falha de envio, mas nunca outra recusa.
+    let r = pedir_acordar(
+        &endpoint,
+        dono.addr,
+        pin,
+        pedido(Some(lan([127, 0, 0, 9], 8))),
+    )
+    .await
+    .unwrap();
+    assert!(
+        (r.ok && r.sent == 1) || r.error() == WakeError::SendFailed,
+        "{r:?}"
+    );
+    // O mesmo MAC logo depois: limite.
+    let r = pedir_acordar(&endpoint, dono.addr, pin, pedido(None))
+        .await
+        .unwrap();
+    assert_eq!(r.error(), WakeError::RateLimited);
+
+    // Outro usuário da tailnet, sem parear: nem sabe se o host está na LAN.
+    let outro = Host::iniciar_tudo(true, None, false, Some("ana@example.com"));
+    let endpoint = client_endpoint(outro.addr).unwrap();
+    assert!(matches!(
+        pedir_acordar(
+            &endpoint,
+            outro.addr,
+            Pin::Sha256(outro.fingerprint),
+            pedido(None)
+        )
+        .await,
+        Err(ErroServico::Recusado(CloseReason::NotAllowed))
+    ));
 }
 
 /// Sessão confiável com o `Hello` dado; devolve a sessão e os eventos já ao vivo.

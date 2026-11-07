@@ -2,6 +2,8 @@
 //! uma resposta, e o host fecha. Sem diálogo, sem mídia.
 //!
 //! - [`pedir_lista`]: as páginas de `PeerList` (só para o dono da tailnet ou celular pareado).
+//! - [`pedir_acordar`]: pede a um repetidor na LAN do alvo que mande o pacote mágico
+//!   (`17-wake-on-lan.md` §4.3).
 //! - [`parear`]: manda o código do QR; o certificado do host já é conferido contra o QR na
 //!   conexão (`Pin::Sha256`), então um host falso nem chega a ver o código.
 
@@ -9,7 +11,8 @@ use std::io;
 use std::net::SocketAddr;
 
 use taildesk_proto::control::{
-    CloseReason, Msg, PairRequest, PairResult, PeerEntry, PeerListRequest, limits,
+    CloseReason, Msg, PairRequest, PairResult, PeerEntry, PeerListRequest, WakeRequest, WakeResult,
+    limits,
 };
 use taildesk_proto::pair::PairOffer;
 use taildesk_transport::{Pin, connect};
@@ -97,6 +100,20 @@ pub async fn pedir_lista(
             todos.truncate(limits::PEER_TOTAL);
             return Ok(todos);
         }
+    }
+}
+
+/// Pede ao TailDesk de `remoto` que acorde `pedido.mac` na LAN dele. `Ok` traz o
+/// `WakeResult`, que pode ser uma recusa (`NotSameLan`: tente outro repetidor).
+pub async fn pedir_acordar(
+    endpoint: &quinn::Endpoint,
+    remoto: SocketAddr,
+    pin: Pin,
+    pedido: WakeRequest,
+) -> Result<WakeResult, ErroServico> {
+    match perguntar(endpoint, remoto, pin, Msg::WakeRequest(pedido)).await? {
+        Msg::WakeResult(r) => Ok(r),
+        _ => Err(ErroServico::Protocolo),
     }
 }
 

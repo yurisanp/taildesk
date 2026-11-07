@@ -124,6 +124,7 @@ pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
         tela_de_entrada: false,
         pareamento,
         fingerprint: id.fingerprint(),
+        acordar: Mutex::default(),
     });
     let (tx, mut rx) = mpsc::channel(64);
     tokio::spawn(servir(
@@ -219,6 +220,7 @@ pub fn rodar_agente(perfil: std::path::PathBuf) -> std::io::Result<()> {
                 // Ninguém na tela para mostrar o QR: nenhum código fica em vigor.
                 pareamento: Arc::default(),
                 fingerprint: id.fingerprint(),
+                acordar: Mutex::default(),
             });
             let (tx, mut rx) = mpsc::channel(64);
             tokio::spawn(servir(
