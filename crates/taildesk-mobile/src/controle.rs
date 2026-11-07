@@ -3,14 +3,15 @@
 //! `SecureAttention`, `StartVideo`/`StopVideo`), mais o zoom local e a troca de monitor.
 //!
 //! Regras do `AGENTS.md` que valem aqui: identidade nunca vem das mensagens; ao sair ou perder
-//! o foco sempre `ReleaseAll` (MF-50); só um monitor recebido por vez no celular (MF-47).
+//! o foco sempre `ReleaseAll` (MF-50); só um monitor recebido por vez no celular, dois na tela
+//! dividida do tablet (MF-47).
 
 use taildesk_keyboard::virtual_kb::{TeclaFaixa, Trava, VirtualKeyboard};
 use taildesk_keyboard::{KeyMsg, Mods};
 use taildesk_proto::control::{
     AbsPos, Button, ClientKind, CodecCap, CursorPos, DisplayInfo, Feature, Hello, KeyboardInfo,
     KeyboardSource, MouseButton, MouseMove, Msg, Platform, Priority, QualityPrefs, ReleaseAll,
-    Scroll, SecureAttention, StartVideo, StopVideo, Viewport, mouse_move,
+    Scroll, SecureAttention, SetPriority, StartVideo, StopVideo, Viewport, mouse_move,
 };
 
 use crate::gestos::{Acao, Botao, Gestos, Limiares, Modo, Toque};
@@ -96,11 +97,15 @@ fn botao(b: Botao) -> Button {
     }
 }
 
-/// Monitores do host, um por vez (MF-47).
+/// Monitores do host (MF-47): um por vez no celular; no tablet, dois em tela dividida.
 #[derive(Clone, Debug, Default)]
 pub struct Monitores {
     lista: Vec<DisplayInfo>,
+    /// O que recebe o toque e o teclado (`Priority::Focused`).
     atual: Option<u32>,
+    /// Tela dividida: o que fica em cada metade (esquerda/cima, direita/baixo). Não mudam de
+    /// lugar quando o foco passa de um para o outro.
+    paineis: Option<[u32; 2]>,
 }
 
 impl Monitores {
@@ -114,6 +119,23 @@ impl Monitores {
             .and_then(|id| self.lista.iter().find(|d| d.id == id))
     }
 
+    pub fn por_id(&self, id: u32) -> Option<&DisplayInfo> {
+        self.lista.iter().find(|d| d.id == id)
+    }
+
+    /// Os dois monitores da tela dividida, na ordem das metades.
+    pub fn paineis(&self) -> Option<[u32; 2]> {
+        self.paineis
+    }
+
+    /// Monitores que estão vindo (o atual e, na tela dividida, o outro).
+    pub fn na_tela(&self) -> Vec<u32> {
+        match self.paineis {
+            Some(p) => p.to_vec(),
+            None => self.atual.into_iter().collect(),
+        }
+    }
+
     /// Posição do atual e total ("1/2" na barra).
     pub fn posicao(&self) -> (usize, usize) {
         let i = self
@@ -121,6 +143,14 @@ impl Monitores {
             .and_then(|id| self.lista.iter().position(|d| d.id == id))
             .map_or(0, |i| i + 1);
         (i, self.lista.len())
+    }
+
+    fn start(id: u32, prefs: Option<QualityPrefs>, p: Priority, out: &mut Vec<Msg>) {
+        out.push(Msg::StartVideo(StartVideo {
+            display_id: id,
+            wanted: prefs,
+            priority: p.into(),
+        }));
     }
 
     /// Lista nova (`HelloAck` ou `DisplaysChanged`). Começa (ou continua) no principal.
@@ -132,6 +162,27 @@ impl Monitores {
         out: &mut Vec<Msg>,
     ) {
         self.lista = todos.iter().filter(|d| d.shared).cloned().collect();
+        // Um dos dois da tela dividida sumiu (o host já parou o stream dele): volta a um só.
+        if let Some(p) = self.paineis
+            && !p.iter().all(|id| self.lista.iter().any(|d| d.id == *id))
+        {
+            self.paineis = None;
+            if let Some(&outro) = p
+                .iter()
+                .find(|id| Some(**id) != self.atual && self.lista.iter().any(|d| d.id == **id))
+            {
+                // Ficou só o que não estava em foco: ele passa a ser o atual.
+                if !self.lista.iter().any(|d| Some(d.id) == self.atual) {
+                    self.atual = Some(outro);
+                    out.push(Msg::SetPriority(SetPriority {
+                        display_id: outro,
+                        priority: Priority::Focused.into(),
+                    }));
+                    return;
+                }
+                out.push(Msg::StopVideo(StopVideo { display_id: outro }));
+            }
+        }
         let ainda = self
             .atual
             .is_some_and(|id| self.lista.iter().any(|d| d.id == id));
@@ -147,16 +198,56 @@ impl Monitores {
         // O antigo sumiu: o host já parou o stream (`VideoStopped{DISPLAY_REMOVED}`).
         self.atual = novo;
         if let Some(id) = novo {
-            out.push(Msg::StartVideo(StartVideo {
-                display_id: id,
-                wanted: prefs,
-                priority: Priority::Focused.into(),
-            }));
+            Self::start(id, prefs, Priority::Focused, out);
         }
     }
 
-    /// ◀ ▶ ou três dedos: para um e começa o outro.
+    /// Liga ou desliga a tela dividida. Ligando, o monitor seguinte ao atual entra na outra
+    /// metade (`Priority::Visible`); desligando, fica só o atual.
+    pub fn dividir(&mut self, ligar: bool, prefs: Option<QualityPrefs>, out: &mut Vec<Msg>) {
+        match (ligar, self.paineis, self.atual) {
+            (true, None, Some(atual)) if self.lista.len() >= 2 => {
+                let i = self.lista.iter().position(|d| d.id == atual).unwrap_or(0);
+                let outro = self.lista[(i + 1) % self.lista.len()].id;
+                self.paineis = Some([atual, outro]);
+                Self::start(outro, prefs, Priority::Visible, out);
+            }
+            (false, Some(p), Some(atual)) => {
+                self.paineis = None;
+                for id in p.into_iter().filter(|id| *id != atual) {
+                    out.push(Msg::StopVideo(StopVideo { display_id: id }));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Tela dividida: o toque foi na outra metade. Passa o foco sem parar nenhum dos dois.
+    pub fn focar(&mut self, id: u32, out: &mut Vec<Msg>) {
+        let Some(p) = self.paineis else { return };
+        if self.atual == Some(id) || !p.contains(&id) {
+            return;
+        }
+        if let Some(antigo) = self.atual {
+            out.push(Msg::SetPriority(SetPriority {
+                display_id: antigo,
+                priority: Priority::Visible.into(),
+            }));
+        }
+        self.atual = Some(id);
+        out.push(Msg::SetPriority(SetPriority {
+            display_id: id,
+            priority: Priority::Focused.into(),
+        }));
+    }
+
+    /// ◀ ▶ ou três dedos: para um e começa o outro. Na tela dividida, passa o foco.
     pub fn trocar(&mut self, passo: i32, prefs: Option<QualityPrefs>, out: &mut Vec<Msg>) {
+        if let (Some(p), Some(atual)) = (self.paineis, self.atual) {
+            let outro = if p[0] == atual { p[1] } else { p[0] };
+            self.focar(outro, out);
+            return;
+        }
         let n = self.lista.len();
         if n < 2 {
             return;
@@ -167,20 +258,29 @@ impl Monitores {
         self.ir_para(self.lista[proximo].id, prefs, out);
     }
 
-    /// Escolheu na lista da barra.
+    /// Escolheu na lista da barra. Na tela dividida, o escolhido entra na metade em foco (ou
+    /// só ganha o foco, se já está na outra).
     pub fn ir_para(&mut self, id: u32, prefs: Option<QualityPrefs>, out: &mut Vec<Msg>) {
         if self.atual == Some(id) || !self.lista.iter().any(|d| d.id == id) {
             return;
+        }
+        if let Some(mut p) = self.paineis {
+            if p.contains(&id) {
+                self.focar(id, out);
+                return;
+            }
+            for slot in &mut p {
+                if Some(*slot) == self.atual {
+                    *slot = id;
+                }
+            }
+            self.paineis = Some(p);
         }
         if let Some(antigo) = self.atual {
             out.push(Msg::StopVideo(StopVideo { display_id: antigo }));
         }
         self.atual = Some(id);
-        out.push(Msg::StartVideo(StartVideo {
-            display_id: id,
-            wanted: prefs,
-            priority: Priority::Focused.into(),
-        }));
+        Self::start(id, prefs, Priority::Focused, out);
     }
 }
 
@@ -192,6 +292,8 @@ pub struct Controle {
     pub teclado: VirtualKeyboard,
     pub monitores: Monitores,
     /// Área de vídeo na tela do celular.
+    area_total: Retangulo,
+    /// Parte dela com o monitor em foco (a área toda, fora da tela dividida).
     area: Retangulo,
     /// Cursor do host em fração do monitor atual (do `CursorPos`, e movido localmente no
     /// touchpad para não esperar a volta).
@@ -211,6 +313,7 @@ impl Controle {
             vista: Vista::new(area, (1920, 1080)),
             teclado: VirtualKeyboard::default(),
             monitores: Monitores::default(),
+            area_total: area,
             area,
             cursor: (0.5, 0.5),
             atencao_segura: false,
@@ -234,10 +337,83 @@ impl Controle {
         self.ajustar_vista();
     }
 
-    /// Ajusta a vista ao tamanho do monitor atual (depois de trocar de monitor).
+    /// As duas metades da tela dividida: lado a lado com a tela deitada, uma em cima da outra
+    /// em pé.
+    pub fn metades(&self) -> [Retangulo; 2] {
+        let a = self.area_total;
+        if a.w >= a.h {
+            let w = a.w / 2.0;
+            [Retangulo { w, ..a }, Retangulo { x: a.x + w, w, ..a }]
+        } else {
+            let h = a.h / 2.0;
+            [Retangulo { h, ..a }, Retangulo { y: a.y + h, h, ..a }]
+        }
+    }
+
+    /// Onde fica o monitor `id` (a área toda fora da tela dividida).
+    fn area_de(&self, id: Option<u32>) -> Retangulo {
+        match (self.monitores.paineis(), id) {
+            (Some(p), Some(id)) if p[1] == id => self.metades()[1],
+            (Some(_), _) => self.metades()[0],
+            (None, _) => self.area_total,
+        }
+    }
+
+    /// Ajusta a vista ao tamanho e à metade do monitor atual (depois de trocar de monitor).
     pub fn ajustar_vista(&mut self) {
-        if let Some(d) = self.monitores.atual() {
-            self.vista.redimensionar(self.area, (d.width, d.height));
+        self.area = self.area_de(self.monitores.atual().map(|d| d.id));
+        let tamanho = self
+            .monitores
+            .atual()
+            .map_or((1920, 1080), |d| (d.width, d.height));
+        self.vista.redimensionar(self.area, tamanho);
+    }
+
+    /// Tela dividida (tablet, dois monitores ou mais).
+    pub fn pode_dividir(&self) -> bool {
+        self.monitores.lista().len() >= 2
+    }
+
+    pub fn dividida(&self) -> bool {
+        self.monitores.paineis().is_some()
+    }
+
+    pub fn dividir(&mut self, ligar: bool, out: &mut Vec<Msg>) {
+        self.monitores.dividir(ligar, self.prefs, out);
+        self.vista.restaurar();
+        self.ajustar_vista();
+    }
+
+    /// Na tela dividida: o outro monitor e onde a imagem dele fica (inteira na metade dele).
+    pub fn outro_painel(&self) -> Option<(u32, Retangulo, Retangulo)> {
+        let p = self.monitores.paineis()?;
+        let atual = self.monitores.atual().map(|d| d.id);
+        let (id, metade) = if Some(p[0]) == atual {
+            (p[1], self.metades()[1])
+        } else {
+            (p[0], self.metades()[0])
+        };
+        let d = self.monitores.por_id(id)?;
+        Some((id, metade, Vista::new(metade, (d.width, d.height)).imagem()))
+    }
+
+    /// Metade do monitor em foco (a área toda fora da tela dividida).
+    pub fn area_atual(&self) -> Retangulo {
+        self.area
+    }
+
+    /// Dedo desceu na outra metade da tela dividida: ela ganha o foco antes do gesto.
+    fn focar_pelo_toque(&mut self, x: f32, y: f32, out: &mut Vec<Msg>) {
+        let Some((id, metade, _)) = self.outro_painel() else {
+            return;
+        };
+        let dentro =
+            x >= metade.x && x < metade.x + metade.w && y >= metade.y && y < metade.y + metade.h;
+        if dentro {
+            self.monitores.focar(id, out);
+            self.cursor = (0.5, 0.5);
+            self.vista.restaurar();
+            self.ajustar_vista();
         }
     }
 
@@ -253,12 +429,8 @@ impl Controle {
 
     /// A área de vídeo mudou (rotação, barra do teclado abriu). Zoom e centro ficam (MF-49).
     pub fn area_mudou(&mut self, area: Retangulo) {
-        self.area = area;
-        let tamanho = self
-            .monitores
-            .atual()
-            .map_or((1920, 1080), |d| (d.width, d.height));
-        self.vista.redimensionar(area, tamanho);
+        self.area_total = area;
+        self.ajustar_vista();
     }
 
     fn mover_abs(&mut self, fx: f32, fy: f32, out: &mut Vec<Msg>) {
@@ -338,6 +510,9 @@ impl Controle {
 
     /// Um evento de dedo na área do vídeo.
     pub fn toque(&mut self, t: Toque, out: &mut Vec<Msg>) {
+        if t.fase == crate::gestos::Fase::Desceu {
+            self.focar_pelo_toque(t.x, t.y, out);
+        }
         let mut acoes = std::mem::take(&mut self.acoes);
         self.gestos.toque(t, &mut acoes);
         for a in acoes.drain(..) {
@@ -477,6 +652,102 @@ mod tests {
             },
             out,
         );
+    }
+
+    fn mouse_em(out: &[Msg]) -> Option<u32> {
+        out.iter().rev().find_map(|m| match m {
+            Msg::MouseMove(MouseMove {
+                pos: Some(mouse_move::Pos::Abs(p)),
+            }) => Some(p.display_id),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn tela_dividida_no_tablet() {
+        let (mut c, _) = controle(Modo::ToqueDireto);
+        assert!(c.pode_dividir());
+        let mut out = Vec::new();
+        c.dividir(true, &mut out);
+        // Começa no principal (7); o seguinte da lista (3) entra na outra metade.
+        assert_eq!(
+            out,
+            vec![Msg::StartVideo(StartVideo {
+                display_id: 3,
+                wanted: None,
+                priority: Priority::Visible.into(),
+            })]
+        );
+        assert_eq!(c.monitores.paineis(), Some([7, 3]));
+        assert_eq!(c.monitores.na_tela(), vec![7, 3]);
+        // Deitado: lado a lado.
+        assert_eq!(c.area_atual().w, 960.0);
+        let (id, metade, img) = c.outro_painel().unwrap();
+        assert_eq!((id, metade.x), (3, 960.0));
+        assert!(img.w <= 960.0 && img.x >= 960.0);
+
+        // Toque na metade direita: o 3 ganha o foco e recebe o mouse, sem parar ninguém.
+        out.clear();
+        toque(&mut c, 0, Fase::Desceu, 1500.0, 500.0, 0, &mut out);
+        toque(&mut c, 0, Fase::Subiu, 1500.0, 500.0, 50, &mut out);
+        assert!(out.contains(&Msg::SetPriority(SetPriority {
+            display_id: 3,
+            priority: Priority::Focused.into(),
+        })));
+        assert!(out.contains(&Msg::SetPriority(SetPriority {
+            display_id: 7,
+            priority: Priority::Visible.into(),
+        })));
+        assert!(!out.iter().any(|m| matches!(m, Msg::StopVideo(_))));
+        assert_eq!(mouse_em(&out), Some(3));
+        assert_eq!(
+            c.monitores.paineis(),
+            Some([7, 3]),
+            "as metades não trocam de lugar"
+        );
+        assert_eq!(c.area_atual().x, 960.0);
+
+        // ◀ ▶ só passa o foco.
+        out.clear();
+        c.monitores.trocar(1, None, &mut out);
+        assert_eq!(c.monitores.atual().unwrap().id, 7);
+
+        // Desligando, fica o que está em foco.
+        out.clear();
+        c.dividir(false, &mut out);
+        assert_eq!(out, vec![Msg::StopVideo(StopVideo { display_id: 3 })]);
+        assert_eq!(c.area_atual(), area());
+        assert!(c.outro_painel().is_none());
+    }
+
+    #[test]
+    fn tela_dividida_em_pe_e_monitor_que_some() {
+        let (mut c, _) = controle(Modo::ToqueDireto);
+        c.area_mudou(Retangulo {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 1280.0,
+        });
+        let mut out = Vec::new();
+        c.dividir(true, &mut out);
+        // Em pé: uma em cima da outra.
+        assert_eq!(c.metades()[1].y, 640.0);
+        assert_eq!(c.area_atual().h, 640.0);
+
+        // O monitor em foco (7) sumiu: o outro fica sozinho e em foco, sem pedir de novo.
+        out.clear();
+        c.monitores_mudaram(&[monitor(3, false)], &mut out);
+        assert_eq!(
+            out,
+            vec![Msg::SetPriority(SetPriority {
+                display_id: 3,
+                priority: Priority::Focused.into(),
+            })]
+        );
+        assert!(!c.dividida());
+        assert!(!c.pode_dividir());
+        assert_eq!(c.area_atual().h, 1280.0);
     }
 
     #[test]

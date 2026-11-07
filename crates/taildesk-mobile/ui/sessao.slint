@@ -80,11 +80,30 @@ export component TelaSessao inherits Rectangle {
     in property <int> demo-monitor;
     in property <string> demo-texto;
     in property <[string]> demo-registro;
-    // Onde a imagem do monitor fica (zoom e pan já aplicados).
+    // Primeira metade (a área toda fora da tela dividida) e onde a imagem fica dentro dela
+    // (zoom e pan já aplicados).
+    in property <length> painel-x;
+    in property <length> painel-y;
+    in property <length> painel-w;
+    in property <length> painel-h;
     in property <length> img-x;
     in property <length> img-y;
     in property <length> img-w;
     in property <length> img-h;
+    // Tela dividida do tablet (MF-47): a segunda metade.
+    in property <bool> dividida;
+    in property <bool> pode-dividir;
+    in property <bool> foco-na-segunda;
+    in property <image> quadro2;
+    in property <bool> tem-quadro2;
+    in property <length> painel2-x;
+    in property <length> painel2-y;
+    in property <length> painel2-w;
+    in property <length> painel2-h;
+    in property <length> img2-x;
+    in property <length> img2-y;
+    in property <length> img2-w;
+    in property <length> img2-h;
     in property <length> cursor-x;
     in property <length> cursor-y;
     in property <bool> cursor-visivel;
@@ -117,6 +136,7 @@ export component TelaSessao inherits Rectangle {
     callback area-mudou(length, length);
     callback trocar-monitor(int);
     callback ir-monitor(int);
+    callback alternar-divisao();
     callback alternar-modo();
     callback alternar-hud();
     callback encerrar();
@@ -144,13 +164,49 @@ export component TelaSessao inherits Rectangle {
         changed height => { root.area-mudou(self.width, self.height); }
         init => { root.area-mudou(self.width, self.height); }
 
-        if root.tem-quadro && !root.demo: Image {
-            x: root.img-x;
-            y: root.img-y;
-            width: root.img-w;
-            height: root.img-h;
-            source: root.quadro;
-            image-fit: fill;
+        if !root.demo: Rectangle {
+            x: root.painel-x;
+            y: root.painel-y;
+            width: root.painel-w;
+            height: root.painel-h;
+            clip: true;
+            if root.tem-quadro: Image {
+                x: root.img-x;
+                y: root.img-y;
+                width: root.img-w;
+                height: root.img-h;
+                source: root.quadro;
+                image-fit: fill;
+            }
+        }
+        if root.dividida && !root.demo: Rectangle {
+            x: root.painel2-x;
+            y: root.painel2-y;
+            width: root.painel2-w;
+            height: root.painel2-h;
+            clip: true;
+            if root.tem-quadro2: Image {
+                x: root.img2-x;
+                y: root.img2-y;
+                width: root.img2-w;
+                height: root.img2-h;
+                source: root.quadro2;
+                image-fit: fill;
+            }
+            if !root.tem-quadro2: Text {
+                text: @tr("Esperando a imagem…");
+                color: #ffffffb3;
+                font-size: Tema.fonte;
+            }
+        }
+        // Na tela dividida, a metade em foco (que recebe o toque e o teclado) tem borda.
+        if root.dividida && !root.demo: Rectangle {
+            x: root.foco-na-segunda ? root.painel2-x : root.painel-x;
+            y: root.foco-na-segunda ? root.painel2-y : root.painel-y;
+            width: root.foco-na-segunda ? root.painel2-w : root.painel-w;
+            height: root.foco-na-segunda ? root.painel2-h : root.painel-h;
+            border-width: 2px;
+            border-color: Tema.primaria;
         }
         if root.demo: AreaDemo {
             x: root.img-x;
@@ -238,6 +294,7 @@ export component TelaSessao inherits Rectangle {
                     if root.varios-monitores: BotaoBarra { texto: "◀"; rotulo-acessivel: @tr("Monitor anterior"); clicado => { root.trocar-monitor(-1); } }
                     BotaoBarra { texto: "🖥 " + root.monitor-texto; rotulo-acessivel: @tr("Monitores"); clicado => { root.mostrando-monitores = !root.mostrando-monitores; } }
                     if root.varios-monitores: BotaoBarra { texto: "▶"; rotulo-acessivel: @tr("Próximo monitor"); clicado => { root.trocar-monitor(1); } }
+                    if root.pode-dividir: BotaoBarra { texto: "◫"; ativo: root.dividida; rotulo-acessivel: root.dividida ? @tr("Um monitor só") : @tr("Dois monitores lado a lado"); clicado => { root.alternar-divisao(); } }
                     BotaoBarra { texto: "⌨"; ativo: root.teclado-aberto; rotulo-acessivel: @tr("Teclado"); clicado => { root.teclado-aberto = !root.teclado-aberto; if root.teclado-aberto && !root.teclado-fisico { captador.focus(); } else { fisico.focus(); } } }
                     BotaoBarra { texto: root.modo-toque == 0 ? @tr("Touchpad") : @tr("Toque direto"); ativo: true; clicado => { root.alternar-modo(); } }
                     BotaoBarra { texto: "📁"; rotulo-acessivel: @tr("Arquivos"); clicado => { root.abrir-arquivos(); } }

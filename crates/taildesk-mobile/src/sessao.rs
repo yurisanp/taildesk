@@ -1,8 +1,10 @@
 //! Sessão de rede do celular com um host: o `Sessao` do `taildesk-session` (controle, consentimento,
-//! eventos) mais a recepção de vídeo do monitor que está na tela, um por vez (MF-47).
+//! eventos) mais a recepção de vídeo dos monitores que estão na tela: um por vez, dois na tela
+//! dividida do tablet (MF-47).
 //!
 //! Os datagramas são lidos numa task e entregues ao `RecepcaoVideo` do stream; o decode roda na
-//! thread dele e guarda o quadro na [`Caixa`]; `acordar` avisa a interface (latest-wins).
+//! thread dele e guarda o quadro na [`Caixa`] do monitor; `acordar` avisa a interface
+//! (latest-wins).
 
 use std::collections::HashMap;
 use std::io;
@@ -60,7 +62,8 @@ pub struct SessaoRede {
     sessao: Sessao,
     recepcoes: Recepcoes,
     som: crate::som::Destino,
-    pub caixa: Arc<Caixa>,
+    /// Último quadro de cada monitor recebido.
+    caixas: Mutex<HashMap<u32, Arc<Caixa>>>,
     /// Bytes recebidos em datagramas (consumo da sessão, MF-81).
     pub bytes: Arc<AtomicU64>,
     datagramas: tokio::task::JoinHandle<()>,
@@ -115,7 +118,7 @@ impl SessaoRede {
                 sessao,
                 recepcoes,
                 som,
-                caixa: Arc::default(),
+                caixas: Mutex::default(),
                 bytes,
                 datagramas,
                 acordar,
@@ -149,11 +152,26 @@ impl SessaoRede {
         u32::try_from(self.sessao.rtt().as_millis()).unwrap_or(u32::MAX)
     }
 
-    /// O host escolheu o codec de um monitor: começa a receber esse stream (e larga os outros:
-    /// só um monitor na tela por vez).
-    pub fn codec_escolhido(&self, c: &CodecSelected) -> Result<(), ErroCodec> {
+    /// Caixa do monitor `display_id` (criada no primeiro `CodecSelected` dele).
+    pub fn caixa(&self, display_id: u32) -> Option<Arc<Caixa>> {
+        self.caixas
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&display_id)
+            .cloned()
+    }
+
+    /// O host escolheu o codec de um monitor: começa a receber esse stream e larga os de
+    /// monitores fora de `na_tela` (o celular só recebe o que mostra).
+    pub fn codec_escolhido(&self, c: &CodecSelected, na_tela: &[u32]) -> Result<(), ErroCodec> {
         let decoder = (self.abrir)(c.width, c.height)?;
-        let caixa = self.caixa.clone();
+        let caixa = self
+            .caixas
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(c.display_id)
+            .or_default()
+            .clone();
         let acordar = self.acordar.clone();
         let mut rascunho = Vec::new();
         let ao_quadro = Box::new(move |_: u32, q: &QuadroYuv<'_>| {
@@ -174,14 +192,23 @@ impl SessaoRede {
         let r = RecepcaoVideo::iniciar(display, stream, decoder, ao_quadro, pedir_chave)
             .map_err(|e| ErroCodec::Backend(e.to_string()))?;
         let mut m = travar(&self.recepcoes);
-        m.clear();
+        m.retain(|_, (d, _)| *d != display && na_tela.contains(d));
         m.insert(stream, (display, r));
+        drop(m);
+        self.caixas
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|d, _| *d == display || na_tela.contains(d));
         Ok(())
     }
 
     /// O host parou o vídeo de um monitor.
     pub fn video_parou(&self, display_id: u32) {
         travar(&self.recepcoes).retain(|_, (d, _)| *d != display_id);
+        self.caixas
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&display_id);
     }
 
     /// `ReceiverReport` de cada stream recebido (mande a cada 250 ms).

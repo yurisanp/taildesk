@@ -293,3 +293,9 @@ msgstr "Turn sound on"
 
 msgid "Copiar relatório"
 msgstr "Copy report"
+
+msgid "Um monitor só"
+msgstr "One display only"
+
+msgid "Dois monitores lado a lado"
+msgstr "Two displays side by side"

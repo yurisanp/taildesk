@@ -97,6 +97,24 @@ export component AppCelular inherits Window {
     in property <length> img-y;
     in property <length> img-w;
     in property <length> img-h;
+    in property <length> painel-x;
+    in property <length> painel-y;
+    in property <length> painel-w;
+    in property <length> painel-h;
+    in property <length> painel2-x;
+    in property <length> painel2-y;
+    in property <length> painel2-w;
+    in property <length> painel2-h;
+    in property <length> img2-x;
+    in property <length> img2-y;
+    in property <length> img2-w;
+    in property <length> img2-h;
+    in property <image> quadro2;
+    in property <bool> tem-quadro2;
+    in property <bool> dividida;
+    in property <bool> pode-dividir;
+    in property <bool> foco-na-segunda;
+    callback alternar-divisao();
     in property <length> cursor-x;
     in property <length> cursor-y;
     in property <bool> cursor-visivel;
@@ -228,6 +246,23 @@ export component AppCelular inherits Window {
                 img-y: root.img-y;
                 img-w: root.img-w;
                 img-h: root.img-h;
+                painel-x: root.painel-x;
+                painel-y: root.painel-y;
+                painel-w: root.painel-w;
+                painel-h: root.painel-h;
+                painel2-x: root.painel2-x;
+                painel2-y: root.painel2-y;
+                painel2-w: root.painel2-w;
+                painel2-h: root.painel2-h;
+                img2-x: root.img2-x;
+                img2-y: root.img2-y;
+                img2-w: root.img2-w;
+                img2-h: root.img2-h;
+                quadro2: root.quadro2;
+                tem-quadro2: root.tem-quadro2;
+                dividida: root.dividida;
+                pode-dividir: root.pode-dividir;
+                foco-na-segunda: root.foco-na-segunda;
                 cursor-x: root.cursor-x;
                 cursor-y: root.cursor-y;
                 cursor-visivel: root.cursor-visivel;
@@ -253,6 +288,7 @@ export component AppCelular inherits Window {
                 area-mudou(w, h) => { root.area-mudou(w, h); }
                 trocar-monitor(p) => { root.trocar-monitor(p); }
                 ir-monitor(i) => { root.ir-monitor(i); }
+                alternar-divisao => { root.alternar-divisao(); }
                 alternar-modo => { root.alternar-modo(); }
                 alternar-hud => { root.alternar-hud(); }
                 encerrar => { root.encerrar(); }
