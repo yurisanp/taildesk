@@ -1293,7 +1293,8 @@ pub struct PairResult {
 // ---------------------------------------------------------------------------------------------
 // Energia (`17-wake-on-lan.md` §4)
 
-/// H→C, logo depois do `HelloAck`: as placas de rede pelas quais este host pode ser acordado.
+/// H→C, quando a sessão fica ao vivo (depois do consentimento): as placas de rede pelas quais
+/// este host pode ser acordado.
 /// O controlador guarda para quando o host estiver desligado. Só IPv4 (o pacote mágico é
 /// broadcast IPv4); sem a `tailscale0`/Wintun.
 #[derive(Clone, PartialEq, Message)]

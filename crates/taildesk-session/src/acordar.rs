@@ -7,10 +7,10 @@
 
 use std::collections::HashMap;
 use std::io;
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
 
-use taildesk_proto::control::LanIface;
+use taildesk_proto::control::{LanIface, WolState};
 
 /// Porta do pacote mágico ("discard"); a 7 também é comum, mas a 9 é a que todos escutam.
 pub const PORTA: u16 = 9;
@@ -76,6 +76,28 @@ pub fn mesma_lan(local: &LanIface, alvo: &LanIface) -> bool {
         (Some(a), Some(b)) => a == b,
         _ => true,
     }
+}
+
+/// `ip` (um endereço de underlay que um peer anuncia) cai na sub-rede de `alvo`? Pista de que
+/// o peer está na mesma LAN e serve de repetidor.
+pub fn ip_na_lan(ip: IpAddr, alvo: &LanIface) -> bool {
+    let IpAddr::V4(ip) = ip else {
+        return false;
+    };
+    if alvo.ipv4 == 0 || alvo.prefix_len == 0 || ip.is_loopback() || ip.is_unspecified() {
+        return false;
+    }
+    let m = mascara(alvo.prefix_len);
+    u32::from(ip) & m == alvo.ipv4 & m
+}
+
+/// A placa a acordar dentre as que o host informou: cabo antes de Wi-Fi e, entre iguais, a que
+/// não está desligada. `None` sem nenhuma com MAC válido.
+pub fn placa_para_acordar(placas: &[LanIface]) -> Option<(Mac, &LanIface)> {
+    placas
+        .iter()
+        .filter_map(|p| mac_de(&p.mac).map(|m| (m, p)))
+        .min_by_key(|(_, p)| (!p.wired, p.wol() == WolState::Off))
 }
 
 /// Por onde mandar: as placas com IPv4 na LAN do alvo (ou todas com IPv4, sem `alvo`).
@@ -229,6 +251,47 @@ mod tests {
         assert_eq!(so_lan[0].ipv4, locais[0].ipv4);
         assert_eq!(placas_para(&locais, None).len(), 2);
         assert!(placas_para(&locais, Some(&iface([172, 16, 0, 1], 24, &[]))).is_empty());
+    }
+
+    #[test]
+    fn ip_de_underlay_na_lan() {
+        let alvo = iface([192, 168, 0, 20], 24, &[]);
+        assert!(ip_na_lan("192.168.0.33".parse().unwrap(), &alvo));
+        assert!(!ip_na_lan("192.168.1.33".parse().unwrap(), &alvo));
+        assert!(!ip_na_lan("fd00::1".parse().unwrap(), &alvo));
+        assert!(!ip_na_lan(
+            "127.0.0.1".parse().unwrap(),
+            &iface([127, 0, 0, 1], 8, &[])
+        ));
+        assert!(!ip_na_lan(
+            "192.168.0.33".parse().unwrap(),
+            &iface([0, 0, 0, 0], 24, &[])
+        ));
+    }
+
+    #[test]
+    fn prefere_cabo_e_wol_ligado() {
+        let com = |mac: u8, wired: bool, wol: WolState| LanIface {
+            mac: vec![2, 0, 0, 0, 0, mac],
+            wired,
+            wol: wol.into(),
+            ..iface([192, 168, 0, 20], 24, &[])
+        };
+        let wifi = com(1, false, WolState::Armed);
+        let cabo_off = com(2, true, WolState::Off);
+        let cabo = com(3, true, WolState::Unknown);
+        let lista = [wifi.clone(), cabo_off.clone(), cabo];
+        assert_eq!(placa_para_acordar(&lista).unwrap().0, [2, 0, 0, 0, 0, 3]);
+        assert_eq!(
+            placa_para_acordar(&[wifi.clone(), cabo_off]).unwrap().0,
+            [2, 0, 0, 0, 0, 2]
+        );
+        assert_eq!(placa_para_acordar(&[wifi]).unwrap().0, [2, 0, 0, 0, 0, 1]);
+        let sem_mac = LanIface {
+            mac: Vec::new(),
+            ..com(4, true, WolState::Armed)
+        };
+        assert!(placa_para_acordar(&[sem_mac]).is_none());
     }
 
     #[test]

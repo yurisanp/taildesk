@@ -15,6 +15,11 @@ keyring-core = "1"
 # PNG da área de transferência: o Windows guarda imagens em DIB (MIT OR Apache-2.0).
 png = "0.18"
 
+# Placas de rede (MAC, IPv4, gateway e o MAC dele) para o Wake on LAN, pelo netlink no Linux e
+# pelo IP Helper no Windows (MIT). Sem as features de Apple/Android.
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+netdev = { version = "0.47", default-features = false, features = ["gateway"] }
+
 # Pergunta ao D-Bus se há bandeja (StatusNotifierWatcher). O Slint já traz o zbus para a bandeja.
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"

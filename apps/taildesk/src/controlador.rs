@@ -961,6 +961,7 @@ impl SessaoUi {
                     self.monitores.on_video_stopped(&v, &mut out);
                 }
                 Msg::ChatMessage(c) => self.chat_recebido(c.text),
+                Msg::PowerInfo(p) => self.lembrar_placas(p.ifaces),
                 Msg::Error(e) if e.code == ErrorCode::TooManyStreams as i32 => {
                     // Monitor a mais numa janela própria: volta a ser aba.
                     if let Some(d) = e.display_id.filter(|&d| self.monitores.destacado(d)) {
@@ -983,6 +984,21 @@ impl SessaoUi {
         self.painel.estado(&self.janela, &self.estado);
         if std::mem::take(&mut self.todos_ao_conectar) {
             self.usar_todos(false);
+        }
+    }
+
+    /// Guarda as placas de rede do host, para acordá-lo quando estiver desligado (Wake on LAN).
+    fn lembrar_placas(&mut self, ifaces: Vec<taildesk_proto::control::LanIface>) {
+        let Some(node) = self.node.clone() else {
+            return;
+        };
+        let mut c = config::ler();
+        if c.energia.get(&node) == Some(&ifaces) {
+            return;
+        }
+        c.energia.insert(node, ifaces);
+        if let Err(e) = config::gravar(&c) {
+            eprintln!("taildesk: não foi possível gravar as placas de rede do host: {e}");
         }
     }
 

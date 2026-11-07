@@ -945,3 +945,23 @@ async fn desktop_nao_recebe_caminho() {
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn controlador_recebe_as_placas_do_host() {
+    let mut host = Host::iniciar(true, None);
+    let (_sessao, mut ev) = ao_vivo_com(&mut host, Hello::default()).await;
+    loop {
+        match tokio::time::timeout(PRAZO, ev.recv()).await.unwrap() {
+            Some(EventoControlador::Mensagem(m)) => {
+                if let Msg::PowerInfo(p) = *m {
+                    assert_eq!(p.ifaces.len(), 1);
+                    assert_eq!(p.ifaces[0].mac, vec![2, 0, 0, 0, 0, 1]);
+                    assert_eq!(p.ifaces[0].ipv4, u32::from(Ipv4Addr::LOCALHOST));
+                    break;
+                }
+            }
+            Some(_) => {}
+            None => panic!("sessão acabou sem PowerInfo"),
+        }
+    }
+}

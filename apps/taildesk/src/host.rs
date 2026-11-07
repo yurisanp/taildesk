@@ -480,6 +480,11 @@ impl Maquina for MaquinaApp {
     #[cfg(not(any(windows, target_os = "linux")))]
     type Area = taildesk_session::conexao::clipboard::SemArea;
 
+    #[cfg(any(windows, target_os = "linux"))]
+    fn placas_lan(&self) -> Vec<taildesk_proto::control::LanIface> {
+        taildesk_platform::rede::placas_lan()
+    }
+
     fn descricao(&self) -> Descricao {
         let (keymap, os_layout_id) = teclado_do_host();
         Descricao {

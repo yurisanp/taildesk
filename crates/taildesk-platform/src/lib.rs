@@ -24,6 +24,8 @@ pub mod instancia;
 #[cfg(windows)]
 pub mod mesa_windows;
 pub mod mouse;
+#[cfg(any(target_os = "linux", windows))]
+pub mod rede;
 pub mod segredos;
 #[cfg(windows)]
 pub mod servico_windows;
