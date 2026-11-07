@@ -260,3 +260,27 @@ msgstr "Code on GitHub"
 
 msgid "Privacidade"
 msgstr "Privacy"
+
+msgid "Pastas do computador"
+msgstr "Computer folders"
+
+msgid "Enviar"
+msgstr "Send"
+
+msgid "Carregando…"
+msgstr "Loading…"
+
+msgid "Este computador não liberou pastas. Você ainda pode enviar arquivos para a pasta de entrada dele."
+msgstr "This computer has not shared any folders. You can still send files to its inbox folder."
+
+msgid "Pasta vazia."
+msgstr "Empty folder."
+
+msgid "Sem permissão para abrir"
+msgstr "No permission to open"
+
+msgid "Transferências"
+msgstr "Transfers"
+
+msgid "Usar dados móveis?"
+msgstr "Use mobile data?"

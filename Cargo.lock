@@ -6280,6 +6280,7 @@ dependencies = [
  "slint",
  "slint-build",
  "taildesk-codec",
+ "taildesk-files",
  "taildesk-keyboard",
  "taildesk-media",
  "taildesk-overlay",
