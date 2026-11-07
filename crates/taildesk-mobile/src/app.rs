@@ -186,7 +186,10 @@ struct Estado {
     hud: Hud,
     hud_visivel: bool,
     area: Retangulo,
-    quadro: Quadro,
+    /// Último quadro de cada metade (a segunda só na tela dividida).
+    quadros: [Quadro; 2],
+    /// Tablet: a barra oferece a tela dividida com dois monitores ou mais.
+    tablet: bool,
     quadros_no_segundo: u32,
     inicio: Instant,
     /// Muda a cada conexão: eventos de uma conexão cancelada são ignorados.
@@ -376,7 +379,8 @@ impl App {
                     w: 915.0,
                     h: 412.0,
                 },
-                quadro: Quadro::default(),
+                quadros: [Quadro::default(), Quadro::default()],
+                tablet: false,
                 quadros_no_segundo: 0,
                 inicio: Instant::now(),
                 geracao: 0,
@@ -981,6 +985,7 @@ impl App {
         {
             let mut e = self.estado.borrow_mut();
             let densidade = e.plat.densidade();
+            e.tablet = e.plat.aparelho().tablet;
             let mut c = Controle::new(e.config.modo_toque, densidade, e.area);
             c.prefs = e.prefs();
             let (monitores, layout) = match (&e.alvo, &e.ack) {
@@ -1021,6 +1026,7 @@ impl App {
             ui.set_som_ligado(e.som.ligado);
         }
         ui.set_tem_quadro(false);
+        ui.set_tem_quadro2(false);
         ui.set_barra_aberta(true);
         ui.set_teclado_aberto(false);
         ui.set_tela(Tela::Sessao);
@@ -1144,8 +1150,13 @@ impl App {
             let e = &mut *e;
             match &m {
                 Msg::CodecSelected(c) => {
+                    let na_tela = e
+                        .controle
+                        .as_ref()
+                        .map(|c| c.monitores.na_tela())
+                        .unwrap_or_default();
                     if let Some(Alvo::Rede(Some(s))) = &e.alvo
-                        && let Err(err) = s.codec_escolhido(c)
+                        && let Err(err) = s.codec_escolhido(c, &na_tela)
                     {
                         drop(err);
                         e.hud.decode_hw = false;
@@ -1329,26 +1340,47 @@ impl App {
         self.enviar(out);
     }
 
+    /// Monitor de cada metade: na tela dividida, os dois; fora dela, só o atual na primeira.
+    fn monitores_das_metades(c: &Controle) -> [Option<u32>; 2] {
+        match c.monitores.paineis() {
+            Some([a, b]) => [Some(a), Some(b)],
+            None => [c.monitores.atual().map(|d| d.id), None],
+        }
+    }
+
     fn novo_quadro(&self) {
         let mut e = self.estado.borrow_mut();
         let e = &mut *e;
         let Some(Alvo::Rede(Some(s))) = &e.alvo else {
             return;
         };
-        if !s.caixa.pegar(&mut e.quadro) {
-            return;
-        }
-        e.quadros_no_segundo += 1;
-        let q = &e.quadro;
-        if q.largura == 0 || q.rgba.len() < (q.largura * q.altura * 4) as usize {
-            return;
-        }
-        let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-            &q.rgba, q.largura, q.altura,
-        );
-        if let Some(ui) = self.ui() {
-            ui.set_quadro(slint::Image::from_rgba8(buf));
-            ui.set_tem_quadro(true);
+        let Some(c) = &e.controle else { return };
+        let Some(ui) = self.ui() else { return };
+        for (i, id) in Self::monitores_das_metades(c).into_iter().enumerate() {
+            let Some(caixa) = id.and_then(|id| s.caixa(id)) else {
+                continue;
+            };
+            let q = &mut e.quadros[i];
+            if !caixa.pegar(q) {
+                continue;
+            }
+            if i == 0 {
+                e.quadros_no_segundo += 1;
+            }
+            if q.largura == 0 || q.rgba.len() < (q.largura * q.altura * 4) as usize {
+                continue;
+            }
+            let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+                &q.rgba, q.largura, q.altura,
+            );
+            let img = slint::Image::from_rgba8(buf);
+            if i == 0 {
+                ui.set_quadro(img);
+                ui.set_tem_quadro(true);
+            } else {
+                ui.set_quadro2(img);
+                ui.set_tem_quadro2(true);
+            }
         }
     }
 
@@ -1357,11 +1389,47 @@ impl App {
         let Some(ui) = self.ui() else { return };
         let e = self.estado.borrow();
         let Some(c) = &e.controle else { return };
-        let img = c.vista.imagem();
-        ui.set_img_x(img.x);
-        ui.set_img_y(img.y);
+        // Cada metade: onde ela fica (recorte) e onde a imagem fica dentro dela. A do monitor em
+        // foco segue o zoom; a outra fica inteira.
+        let atual = c.monitores.atual().map(|d| d.id);
+        let metades = Self::monitores_das_metades(c);
+        let outro = c.outro_painel();
+        let (recorte, img) = if metades[0] == atual || outro.is_none() {
+            (c.area_atual(), c.vista.imagem())
+        } else {
+            let (_, m, i) = outro.unwrap_or_default();
+            (m, i)
+        };
+        ui.set_painel_x(recorte.x);
+        ui.set_painel_y(recorte.y);
+        ui.set_painel_w(recorte.w);
+        ui.set_painel_h(recorte.h);
+        ui.set_img_x(img.x - recorte.x);
+        ui.set_img_y(img.y - recorte.y);
         ui.set_img_w(img.w);
         ui.set_img_h(img.h);
+        let dividida = c.dividida();
+        ui.set_dividida(dividida);
+        ui.set_pode_dividir(e.tablet && c.pode_dividir() && !matches!(e.alvo, Some(Alvo::Demo(_))));
+        ui.set_foco_na_segunda(dividida && metades[1] == atual);
+        if dividida {
+            let (recorte, img) = if metades[1] == atual {
+                (c.area_atual(), c.vista.imagem())
+            } else {
+                let (_, m, i) = outro.unwrap_or_default();
+                (m, i)
+            };
+            ui.set_painel2_x(recorte.x);
+            ui.set_painel2_y(recorte.y);
+            ui.set_painel2_w(recorte.w);
+            ui.set_painel2_h(recorte.h);
+            ui.set_img2_x(img.x - recorte.x);
+            ui.set_img2_y(img.y - recorte.y);
+            ui.set_img2_w(img.w);
+            ui.set_img2_h(img.h);
+        } else {
+            ui.set_tem_quadro2(false);
+        }
         let (cx, cy) = c.vista.fracao_para_tela(c.cursor().0, c.cursor().1);
         ui.set_cursor_x(cx);
         ui.set_cursor_y(cy);
@@ -2042,6 +2110,13 @@ impl App {
                 c.monitores.trocar(passo, prefs, out);
                 c.ajustar_vista();
             });
+        }));
+        ui.on_alternar_divisao(com!(|a: &Rc<App>| {
+            a.com_controle(|c, out| {
+                let ligar = !c.dividida();
+                c.dividir(ligar, out);
+            });
+            a.mostrar_sessao();
         }));
         ui.on_ir_monitor(com1!(|a: &Rc<App>, i: i32| {
             a.com_controle(|c, out| {
