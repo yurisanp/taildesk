@@ -16,6 +16,7 @@
 //! | 100–109  | Áudio (`15-audio.md` §6.5; reservado, sem implementação) |
 //! | 110–119  | Chat                                                     |
 //! | 120–129  | Celular: caminho, lista de dispositivos e pareamento     |
+//! | 130–139  | Energia: Wake on LAN (`17-wake-on-lan.md` §4)            |
 //!
 //! No fio cada [`Control`] vai precedido do tamanho em varint ([`encode_frame`], [`decode_frame`]).
 //! Tag desconhecida no `oneof` chega como `msg: None`: quem recebe ignora e loga. Campos novos
@@ -89,6 +90,10 @@ pub mod limits {
     pub const FINGERPRINT_LEN: usize = 32;
     /// Lado do viewport do celular em pixels (8K cobre qualquer tablet).
     pub const VIEWPORT_PX: u32 = 8192;
+    /// Interfaces de rede num `PowerInfo`.
+    pub const LAN_IFACES: usize = 8;
+    /// Endereço MAC (Ethernet).
+    pub const MAC_LEN: usize = 6;
     /// Bytes de um pedaço de `ClipboardData` (cabe folgado num frame de controle).
     pub const CLIP_CHUNK: usize = 32 * 1024;
     /// Maior conteúdo de um formato (uma captura de tela 4K em PNG passa com folga).
@@ -104,7 +109,7 @@ pub mod limits {
 pub struct Control {
     #[prost(
         oneof = "Msg",
-        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 56, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104, 110, 120, 121, 122, 123, 124"
+        tags = "1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 41, 42, 50, 51, 52, 53, 54, 55, 56, 60, 61, 70, 71, 72, 73, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 100, 101, 102, 103, 104, 110, 120, 121, 122, 123, 124, 130, 131, 132"
     )]
     pub msg: Option<Msg>,
 }
@@ -248,6 +253,15 @@ pub enum Msg {
     PairRequest(PairRequest),
     #[prost(message, tag = "124")]
     PairResult(PairResult),
+
+    // Energia (`17-wake-on-lan.md` §4). `PowerInfo` vai na sessão; `WakeRequest` abre uma
+    // conexão de serviço curta com um repetidor na LAN do alvo, sem `Hello`.
+    #[prost(message, tag = "130")]
+    PowerInfo(PowerInfo),
+    #[prost(message, tag = "131")]
+    WakeRequest(WakeRequest),
+    #[prost(message, tag = "132")]
+    WakeResult(WakeResult),
 }
 
 impl From<Msg> for Control {
@@ -1277,6 +1291,65 @@ pub struct PairResult {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Energia (`17-wake-on-lan.md` §4)
+
+/// H→C, logo depois do `HelloAck`: as placas de rede pelas quais este host pode ser acordado.
+/// O controlador guarda para quando o host estiver desligado. Só IPv4 (o pacote mágico é
+/// broadcast IPv4); sem a `tailscale0`/Wintun.
+#[derive(Clone, PartialEq, Message)]
+pub struct PowerInfo {
+    #[prost(message, repeated, tag = "1")]
+    pub ifaces: Vec<LanIface>,
+}
+
+/// Uma placa de rede numa LAN.
+#[derive(Clone, PartialEq, Message)]
+pub struct LanIface {
+    /// MAC da placa (6 bytes).
+    #[prost(bytes = "vec", tag = "1")]
+    pub mac: Vec<u8>,
+    /// IPv4 da placa na LAN, em ordem de rede (`u32::from(Ipv4Addr)`); 0 = sem endereço.
+    #[prost(fixed32, tag = "2")]
+    pub ipv4: u32,
+    /// Tamanho do prefixo da sub-rede (0–32).
+    #[prost(uint32, tag = "3")]
+    pub prefix_len: u32,
+    /// MAC do gateway padrão (6 bytes) ou vazio: separa duas casas com a mesma `192.168.0.0/24`.
+    #[prost(bytes = "vec", tag = "4")]
+    pub gateway_mac: Vec<u8>,
+    /// Cabo (Ethernet); `false` = Wi-Fi, que quase nunca acorda.
+    #[prost(bool, tag = "5")]
+    pub wired: bool,
+    #[prost(enumeration = "WolState", tag = "6")]
+    pub wol: i32,
+}
+
+/// C→H: primeira (e única) mensagem de uma conexão de serviço pedindo que este host mande o
+/// pacote mágico para `mac`. O repetidor só atende o dono da tailnet ou um celular pareado e,
+/// com `lan`, só manda se tiver uma placa nessa mesma LAN.
+#[derive(Clone, PartialEq, Message)]
+pub struct WakeRequest {
+    /// MAC de quem acordar (6 bytes).
+    #[prost(bytes = "vec", tag = "1")]
+    pub mac: Vec<u8>,
+    /// A LAN do alvo, como ele informou no `PowerInfo` (o `mac` dela não é usado).
+    #[prost(message, optional, tag = "2")]
+    pub lan: Option<LanIface>,
+}
+
+/// H→C: resposta ao `WakeRequest`. Não diz se o alvo acordou: isso se vê pelo `status`.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub struct WakeResult {
+    #[prost(bool, tag = "1")]
+    pub ok: bool,
+    /// Placas de rede por onde o pacote saiu.
+    #[prost(uint32, tag = "2")]
+    pub sent: u32,
+    #[prost(enumeration = "WakeError", tag = "3")]
+    pub error: i32,
+}
+
+// ---------------------------------------------------------------------------------------------
 // Enums (0 = não especificado; valor desconhecido = tratar como 0)
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
@@ -1320,6 +1393,29 @@ pub enum PairError {
     TooManyAttempts = 3,
     /// O host não aceita celulares (desligado nas configurações).
     Disabled = 4,
+}
+
+/// Se a placa está armada para acordar com o pacote mágico.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum WolState {
+    /// O sistema não deixou ver (sem permissão ou sem suporte).
+    Unknown = 0,
+    Armed = 1,
+    /// Desligado na placa ou no sistema: avisar antes de tentar.
+    Off = 2,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum WakeError {
+    Unspecified = 0,
+    /// Este repetidor não tem placa na LAN do alvo: tente outro.
+    NotSameLan = 1,
+    /// Pedido repetido para o mesmo MAC em menos de 10 s.
+    RateLimited = 2,
+    /// Nenhuma placa conseguiu mandar o pacote.
+    SendFailed = 3,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
@@ -1695,6 +1791,21 @@ fn audio_prefs(p: Option<&AudioPrefs>) -> Result<(), InvalidMessage> {
     }
 }
 
+/// MAC vazio ou com 6 bytes.
+fn mac_opcional(field: &'static str, mac: &[u8]) -> Result<(), InvalidMessage> {
+    if mac.is_empty() {
+        Ok(())
+    } else {
+        exactly(field, mac.len(), limits::MAC_LEN)
+    }
+}
+
+fn lan_iface(i: &LanIface) -> Result<(), InvalidMessage> {
+    mac_opcional("iface.mac", &i.mac)?;
+    mac_opcional("iface.gateway_mac", &i.gateway_mac)?;
+    at_most("iface.prefix_len", i.prefix_len as usize, 32)
+}
+
 impl Control {
     /// Confere os limites do protocolo. [`decode_frame`] já chama.
     pub fn validate(&self) -> Result<(), InvalidMessage> {
@@ -1799,6 +1910,17 @@ impl Control {
                 let want = if m.ok { limits::FINGERPRINT_LEN } else { 0 };
                 exactly("cert_fingerprint", m.cert_fingerprint.len(), want)
             }
+            Msg::PowerInfo(m) => {
+                at_most("ifaces", m.ifaces.len(), limits::LAN_IFACES)?;
+                m.ifaces.iter().try_for_each(|i| {
+                    exactly("iface.mac", i.mac.len(), limits::MAC_LEN)?;
+                    lan_iface(i)
+                })
+            }
+            Msg::WakeRequest(m) => {
+                exactly("mac", m.mac.len(), limits::MAC_LEN)?;
+                m.lan.as_ref().map_or(Ok(()), lan_iface)
+            }
             Msg::DisplaysChanged(m) => displays(&m.displays),
             Msg::CodecSelected(m) => video_stream(m.stream_id),
             Msg::VideoStats(m) => {
@@ -1871,7 +1993,8 @@ impl Control {
             | Msg::ClipboardError(_)
             | Msg::FsRootsRequest(_)
             | Msg::FileCancel(_)
-            | Msg::FileError(_) => Ok(()),
+            | Msg::FileError(_)
+            | Msg::WakeResult(_) => Ok(()),
         }
     }
 }
@@ -2395,6 +2518,51 @@ mod tests {
                 cert_fingerprint: Vec::new(),
                 error: PairError::Expired.into(),
             }),
+            Msg::PowerInfo(PowerInfo {
+                ifaces: vec![
+                    LanIface {
+                        mac: vec![0x3c, 0x7c, 0x3f, 0x01, 0x02, 0x03],
+                        ipv4: u32::from(std::net::Ipv4Addr::new(192, 168, 0, 20)),
+                        prefix_len: 24,
+                        gateway_mac: vec![0xa4, 0x2b, 0xb0, 9, 8, 7],
+                        wired: true,
+                        wol: WolState::Armed.into(),
+                    },
+                    LanIface {
+                        mac: vec![0x02, 0, 0, 0, 0, 1],
+                        ipv4: 0,
+                        prefix_len: 0,
+                        gateway_mac: Vec::new(),
+                        wired: false,
+                        wol: WolState::Off.into(),
+                    },
+                ],
+            }),
+            Msg::WakeRequest(WakeRequest {
+                mac: vec![0x3c, 0x7c, 0x3f, 0x01, 0x02, 0x03],
+                lan: Some(LanIface {
+                    mac: Vec::new(),
+                    ipv4: u32::from(std::net::Ipv4Addr::new(192, 168, 0, 20)),
+                    prefix_len: 24,
+                    gateway_mac: vec![0xa4, 0x2b, 0xb0, 9, 8, 7],
+                    wired: true,
+                    wol: WolState::Unknown.into(),
+                }),
+            }),
+            Msg::WakeRequest(WakeRequest {
+                mac: vec![1, 2, 3, 4, 5, 6],
+                lan: None,
+            }),
+            Msg::WakeResult(WakeResult {
+                ok: true,
+                sent: 2,
+                error: WakeError::Unspecified.into(),
+            }),
+            Msg::WakeResult(WakeResult {
+                ok: false,
+                sent: 0,
+                error: WakeError::NotSameLan.into(),
+            }),
         ]
     }
 
@@ -2473,6 +2641,52 @@ mod tests {
             ..Hello::default()
         }));
         assert_eq!(e.field, "viewport.w_px");
+    }
+
+    #[test]
+    fn limites_da_energia() {
+        let iface = |mac: usize, gw: usize, prefixo: u32| LanIface {
+            mac: vec![1; mac],
+            ipv4: 1,
+            prefix_len: prefixo,
+            gateway_mac: vec![2; gw],
+            wired: true,
+            wol: 0,
+        };
+        let info = |n: usize, i: LanIface| Msg::PowerInfo(PowerInfo { ifaces: vec![i; n] });
+        Control::from(info(limits::LAN_IFACES, iface(6, 6, 32)))
+            .validate()
+            .unwrap();
+        Control::from(info(1, iface(6, 0, 0))).validate().unwrap();
+        assert_eq!(
+            invalida(info(limits::LAN_IFACES + 1, iface(6, 6, 24))).field,
+            "ifaces"
+        );
+        // No `PowerInfo` o MAC da placa é obrigatório.
+        assert_eq!(invalida(info(1, iface(0, 6, 24))).field, "iface.mac");
+        assert_eq!(invalida(info(1, iface(5, 6, 24))).field, "iface.mac");
+        assert_eq!(
+            invalida(info(1, iface(6, 7, 24))).field,
+            "iface.gateway_mac"
+        );
+        assert_eq!(invalida(info(1, iface(6, 6, 33))).field, "iface.prefix_len");
+
+        let pedido = |mac: usize, lan: Option<LanIface>| {
+            Msg::WakeRequest(WakeRequest {
+                mac: vec![1; mac],
+                lan,
+            })
+        };
+        // Na LAN do pedido o MAC é opcional.
+        Control::from(pedido(6, Some(iface(0, 0, 24))))
+            .validate()
+            .unwrap();
+        assert_eq!(invalida(pedido(0, None)).field, "mac");
+        assert_eq!(invalida(pedido(7, None)).field, "mac");
+        assert_eq!(
+            invalida(pedido(6, Some(iface(0, 0, 40)))).field,
+            "iface.prefix_len"
+        );
     }
 
     #[test]

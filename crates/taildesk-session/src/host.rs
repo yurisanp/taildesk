@@ -141,7 +141,11 @@ pub fn need(msg: &Msg) -> Need {
         | Msg::PeerListRequest(_)
         | Msg::PeerList(_)
         | Msg::PairRequest(_)
-        | Msg::PairResult(_) => Need::Nothing,
+        | Msg::PairResult(_)
+        // Energia: o `PowerInfo` só vai do host; o `WakeRequest` abre uma conexão de serviço.
+        | Msg::PowerInfo(_)
+        | Msg::WakeRequest(_)
+        | Msg::WakeResult(_) => Need::Nothing,
     }
 }
 

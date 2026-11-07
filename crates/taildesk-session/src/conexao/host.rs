@@ -21,9 +21,9 @@ use taildesk_keyboard::{Inject, KeyMsg, Keymap, Locks};
 use taildesk_overlay::{Overlay, PeerIdentity, PeerInfo};
 use taildesk_proto::control::{
     AudioStopReason, AudioStopped, ChatMessage, ClientKind, Close, CloseReason, Consent,
-    DisplayInfo, HelloAck, KeyboardInfo, Msg, PROTO_VERSION, PairError, PairRequest, PairResult,
-    PathInfo, PeerEntry, PeerList, PeerListRequest, Permissions, Platform, Pong, TaildeskPresence,
-    limits,
+    DisplayInfo, HelloAck, KeyboardInfo, LanIface, Msg, PROTO_VERSION, PairError, PairRequest,
+    PairResult, PathInfo, PeerEntry, PeerList, PeerListRequest, Permissions, Platform, Pong,
+    TaildeskPresence, WakeError, WakeRequest, WakeResult, limits,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -32,6 +32,7 @@ use super::{ESPERA_HELLO, FimLeitura, Leitor, StreamUni, classificar, controle, 
 use crate::acessos::{
     Acesso, Evento, MOTIVO_FORA_DA_TAILNET, MOTIVO_QUEDA, RegistroAcessos, nome_motivo,
 };
+use crate::acordar::{self, Limite};
 use crate::host::{ConsentAnswer, ConsentPrompt, HelloReply, HostSession, HostState};
 use crate::pareamento::{Pareamento, pode_listar};
 use crate::policy::HostSettings;
@@ -188,6 +189,11 @@ pub trait Maquina: Send + Sync + 'static {
     /// [`Maquina::midia`] (no Wayland é da mesma sessão do portal). `None` = sem suporte: os
     /// pedidos do controlador voltam `UNAVAILABLE`.
     fn area(&self) -> impl Future<Output = Option<(Self::Area, mpsc::Receiver<DoSistema>)>> + Send;
+    /// Placas de rede deste computador nas LANs (sem a da tailnet), para o `PowerInfo` e para
+    /// servir de repetidor do Wake on LAN. O padrão não conhece nenhuma.
+    fn placas_lan(&self) -> Vec<LanIface> {
+        Vec::new()
+    }
 }
 
 /// Configuração do host para todas as sessões.
@@ -207,6 +213,8 @@ pub struct ConfigHost {
     pub pareamento: Arc<Mutex<Pareamento>>,
     /// SHA-256 do certificado deste host, devolvido no `PairResult`.
     pub fingerprint: [u8; 32],
+    /// Pedidos de Wake on LAN por MAC (este host como repetidor).
+    pub acordar: Mutex<Limite>,
 }
 
 impl ConfigHost {
@@ -339,6 +347,11 @@ async fn atender<I: Identificador, M: Maquina>(
         // Conexões de serviço do celular: uma pergunta, uma resposta, e fecha.
         Ok(Ok(Msg::PeerListRequest(r))) => {
             let resposta = lista(identificador, config, &peer, r).await;
+            encerrar(&conn, saida, tarefa, Some(resposta)).await;
+            return;
+        }
+        Ok(Ok(Msg::WakeRequest(r))) => {
+            let resposta = acordar(identificador, maquina, config, &peer, &r).await;
             encerrar(&conn, saida, tarefa, Some(resposta)).await;
             return;
         }
@@ -529,6 +542,64 @@ async fn lista<I: Identificador>(
     }
     let todos = identificador.dispositivos().await.unwrap_or_default();
     Msg::PeerList(pagina_de_dispositivos(&todos, pedido.start as usize))
+}
+
+/// Repetidor do Wake on LAN: manda o pacote mágico pela placa na LAN do alvo. Só para o dono da
+/// tailnet ou um celular pareado (o mesmo critério da `PeerList` e da PeerAPI do Tailscale).
+async fn acordar<I: Identificador, M: Maquina>(
+    identificador: &I,
+    maquina: &M,
+    config: &ConfigHost,
+    peer: &PeerIdentity,
+    pedido: &WakeRequest,
+) -> Msg {
+    let dono = identificador.dono().await;
+    let pode = {
+        let settings = config.settings.lock().unwrap_or_else(|e| e.into_inner());
+        pode_listar(&settings, peer, dono.as_deref())
+    };
+    let Some(mac) = acordar::mac_de(&pedido.mac).filter(|_| pode) else {
+        return Msg::Close(Close {
+            reason: CloseReason::NotAllowed.into(),
+            message: String::new(),
+        });
+    };
+    let resultado = |sent, error: WakeError| {
+        Msg::WakeResult(WakeResult {
+            ok: error == WakeError::Unspecified,
+            sent,
+            error: error.into(),
+        })
+    };
+    let locais = maquina.placas_lan();
+    let placas: Vec<LanIface> = acordar::placas_para(&locais, pedido.lan.as_ref())
+        .into_iter()
+        .cloned()
+        .collect();
+    if placas.is_empty() {
+        return resultado(0, WakeError::NotSameLan);
+    }
+    let liberado = config
+        .acordar
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .liberar(mac, Instant::now());
+    if !liberado {
+        return resultado(0, WakeError::RateLimited);
+    }
+    let envio = tokio::task::spawn_blocking(move || {
+        let refs: Vec<&LanIface> = placas.iter().collect();
+        acordar::enviar(mac, &refs)
+    })
+    .await;
+    match envio {
+        Ok(Ok(n)) if n > 0 => resultado(n, WakeError::Unspecified),
+        Ok(Err(e)) => {
+            eprintln!("taildesk: wake on lan: {e}");
+            resultado(0, WakeError::SendFailed)
+        }
+        _ => resultado(0, WakeError::SendFailed),
+    }
 }
 
 /// Corta o texto em até `max` bytes sem quebrar um caractere.

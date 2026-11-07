@@ -8,6 +8,7 @@
 //! - [`cursor`]: cursor separado (posição e forma à parte do vídeo).
 //! - [`clipboard`]: área de transferência compartilhada (oferta, pedido e pedaços).
 //! - [`pareamento`]: celulares pareados por QR e quem pode pedir a lista de dispositivos.
+//! - [`acordar`]: Wake on LAN (pacote mágico, mesma LAN, limite por MAC).
 //! - [`acessos`]: registro de quem acessou este computador (auditoria).
 //! - [`conexao`]: tudo isso sobre QUIC (stream de controle, streams uni, arquivos).
 //!
@@ -15,6 +16,7 @@
 //! captura e keyring entram pelas traits de [`conexao::host`].
 
 pub mod acessos;
+pub mod acordar;
 pub mod clipboard;
 pub mod conexao;
 pub mod controller;

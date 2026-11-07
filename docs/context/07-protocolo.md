@@ -58,6 +58,7 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | 100–109 | Áudio (`15-audio.md` §6.5; reservado) |
 | 110–119 | Chat |
 | 120–129 | Celular: caminho, lista de dispositivos e pareamento (§3.4) |
+| 130–139 | Energia: Wake on LAN (§3.5, `17-wake-on-lan.md`) |
 
 | Grupo | Mensagens |
 |---|---|
@@ -71,6 +72,7 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | Áudio (`15-audio.md` §6.5) | `StartAudio{stream_id, prefs: AudioPrefs{profile: AUTO|VOICE|MUSIC, max_kbps, channels}}`, `AudioSelected{stream_id, codec=OPUS, sample_rate, channels, frame_ms_x10, bitrate_kbps, redundancy, inband_fec}`, `AudioConfig{stream_id, bitrate_kbps, frame_ms_x10, redundancy}` (troca a quente), `StopAudio{stream_id}`, `AudioStopped{stream_id, reason: BY_CONTROLLER|BY_HOST|NO_PERMISSION|DEVICE_ERROR}` |
 | Chat | `ChatMessage{text}` |
 | Celular (120–124) | `PathInfo{kind, relay_region, rtt_ms}` (H→C), `PeerListRequest{start}` / `PeerList{entries, more}`, `PairRequest{code, device_name}` / `PairResult{ok, cert_fingerprint, error}` (detalhe em §3.4) |
+| Energia (130–132) | `PowerInfo{ifaces}` (H→C), `WakeRequest{mac, lan}` / `WakeResult{ok, sent, error}` (detalhe em §3.5) |
 
 Multi-monitor (`13-multimonitor.md` §3): **um stream de vídeo por monitor**, cada um com encoder, keyframes e `stream_id` próprios, respondido por um `CodecSelected` por `display_id`. Host recusa `StartVideo` acima do seu limite (`Error{TOO_MANY_STREAMS}`; padrão 2 com openh264). Parser: no máximo 16 `DisplayInfo` por mensagem, `name` ≤ 128 bytes.
 
@@ -181,6 +183,28 @@ diálogo e sem mídia. No meio de uma sessão são ignoradas.
 símbolos do Base32 de Crockford (`0-9A-Z` sem `I L O U`), vale uma vez por 5 minutos e aparece em
 dois grupos (`K7P-2QX`); ao digitar, `O` vira `0` e `I`/`L` viram `1`. O celular confere o
 certificado contra `f` antes de mandar o código.
+
+### 3.5 Energia: Wake on LAN (tags 130–132, `17-wake-on-lan.md` §4)
+
+O pacote mágico é broadcast de camada 2 e não atravessa a tailnet: quem manda é um nó acordado na
+mesma LAN do alvo (o **repetidor**). O host informa as próprias placas enquanto está ligado, e o
+controlador guarda para quando ele estiver desligado.
+
+- **`PowerInfo{ifaces}`** (tag 130, H→C, logo depois do `HelloAck`): até 8 `LanIface{mac (6 B),
+  ipv4 (fixed32, ordem de rede; 0 = sem endereço), prefix_len (0–32), gateway_mac (vazio ou 6 B),
+  wired, wol: UNKNOWN|ARMED|OFF}`. Só IPv4 e sem a placa da tailnet. No `PowerInfo` o `mac` é
+  obrigatório.
+- **`WakeRequest{mac (6 B), lan?}`** (tag 131) → **`WakeResult{ok, sent, error}`** (tag 132), numa
+  **conexão de serviço** como as do §3.4. `lan` é a `LanIface` do alvo (o `mac` dela é opcional e
+  não é usado). O repetidor só atende o **mesmo usuário da tailnet** ou um celular **pareado**
+  (como a `PeerList` e a PeerAPI `/v0/wol` do Tailscale); para os outros, `Close{NOT_ALLOWED}`.
+  Duas placas estão na mesma LAN quando a sub-rede bate (pelo prefixo do alvo) e, se os dois lados
+  sabem, o MAC do gateway também. Sem placa na LAN: `NOT_SAME_LAN = 1`, sem mandar nada (o
+  controlador tenta outro repetidor). O mesmo MAC em menos de 10 s: `RATE_LIMITED = 2`. Nenhuma
+  placa conseguiu: `SEND_FAILED = 3`. Com `ok`, `sent` = por quantas placas saiu. O pacote (102
+  bytes: `FF`×6 + MAC×16) vai em UDP para `255.255.255.255:9` e para o broadcast dirigido da
+  sub-rede, 3 vezes com 100 ms entre elas. `WakeResult` não diz se o alvo acordou: isso se vê pelo
+  peer voltar `Online` no `status`.
 
 ## 4. Header de datagrama de mídia (binário, little-endian, 16 bytes)
 
