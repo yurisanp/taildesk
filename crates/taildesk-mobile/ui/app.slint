@@ -156,6 +156,8 @@ export component AppCelular inherits Window {
     in property <string> teste-nome;
     in property <[LinhaTeste]> teste-linhas;
     in property <bool> testando;
+    in property <bool> teste-relatorio-pronto;
+    callback copiar-relatorio();
     callback testar-de-novo();
     callback voltar();
 
@@ -285,6 +287,8 @@ export component AppCelular inherits Window {
                 nome: root.teste-nome;
                 linhas: root.teste-linhas;
                 testando: root.testando;
+                relatorio-pronto: root.teste-relatorio-pronto;
+                copiar-relatorio => { root.copiar-relatorio(); }
                 testar => { root.testar-de-novo(); }
                 voltar => { root.voltar(); }
             }

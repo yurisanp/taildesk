@@ -149,6 +149,7 @@ pub fn mostrar(j: &JanelaPrincipal) {
     })
     .unwrap_or(c.host.clone());
     j.set_pedir_sempre(settings.ask_always);
+    j.set_permitir_testes(settings.allow_tests);
     j.set_tem_senha(settings.password_hash.is_some());
     let nomes: Vec<SharedString> = settings
         .trusted
@@ -442,6 +443,15 @@ pub fn ligar(j: &JanelaPrincipal) {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .ask_always = v;
+            crate::host::gravar_settings(&app.settings);
+        });
+    });
+    j.on_permitir_testes_mudou(|v| {
+        no_app(move |app| {
+            app.settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .allow_tests = v;
             crate::host::gravar_settings(&app.settings);
         });
     });

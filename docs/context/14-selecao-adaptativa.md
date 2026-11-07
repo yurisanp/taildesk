@@ -233,6 +233,8 @@ máxima é Média e a aba de teste explica o motivo.
   consentimento. O host precisa estar com o TailDesk aberto, aceita por padrão pedidos de peers que
   a ACL já deixa chegar, limita a 1 teste a cada 10 s por peer, registra no log de auditoria e pode
   desligar isso em Configurações ("Permitir testes de conexão" / "Allow connection tests").
+  Protocolo: `TestRequest`/`TestReady` numa conexão de serviço (`07-protocolo.md` §3.6); o app
+  desktop atende sem precisar do `taildesk-cli bench-net --ouvir`.
 
 ### 7.2 O que mostra
 

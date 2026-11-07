@@ -4,17 +4,21 @@
 //! - [`pedir_lista`]: as páginas de `PeerList` (só para o dono da tailnet ou celular pareado).
 //! - [`pedir_acordar`]: pede a um repetidor na LAN do alvo que mande o pacote mágico
 //!   (`17-wake-on-lan.md` §4.3).
+//! - [`testar`]: teste de conexão (`14-selecao-adaptativa.md` §7): o host responde `TestReady` e
+//!   atende o `bench` na mesma conexão.
 //! - [`parear`]: manda o código do QR; o certificado do host já é conferido contra o QR na
 //!   conexão (`Pin::Sha256`), então um host falso nem chega a ver o código.
 
 use std::io;
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use taildesk_proto::control::{
-    CloseReason, Msg, PairRequest, PairResult, PeerEntry, PeerListRequest, WakeRequest, WakeResult,
-    limits,
+    CloseReason, Msg, PairRequest, PairResult, PeerEntry, PeerListRequest, TestError, TestRequest,
+    WakeRequest, WakeResult, limits,
 };
 use taildesk_proto::pair::PairOffer;
+use taildesk_transport::bench::{self, BenchOptions};
 use taildesk_transport::{Pin, connect};
 
 use super::{ESPERA_HELLO, Leitor, controle};
@@ -28,6 +32,8 @@ pub enum ErroServico {
     Recusado(CloseReason),
     /// Resposta fora do protocolo.
     Protocolo,
+    /// O host não aceitou o teste de conexão (desligado ou repetido).
+    TesteRecusado(TestError),
 }
 
 impl std::fmt::Display for ErroServico {
@@ -36,6 +42,7 @@ impl std::fmt::Display for ErroServico {
             ErroServico::Rede(e) => write!(f, "rede: {e}"),
             ErroServico::Recusado(r) => write!(f, "o computador recusou ({r:?})"),
             ErroServico::Protocolo => f.write_str("resposta inválida do computador"),
+            ErroServico::TesteRecusado(e) => write!(f, "o computador recusou o teste ({e:?})"),
         }
     }
 }
@@ -115,6 +122,68 @@ pub async fn pedir_acordar(
         Msg::WakeResult(r) => Ok(r),
         _ => Err(ErroServico::Protocolo),
     }
+}
+
+/// Teste de conexão até `remoto`. `opcoes.path` vem do caminho que o host informar.
+pub async fn testar(
+    endpoint: &quinn::Endpoint,
+    remoto: SocketAddr,
+    pin: Pin,
+    mut opcoes: BenchOptions,
+) -> Result<crate::teste::Resultado, ErroServico> {
+    let t0 = Instant::now();
+    let conn = connect(endpoint, remoto, pin).await?;
+    let conectar = t0.elapsed();
+    let (tx, rx) = conn.open_bi().await.map_err(io::Error::other)?;
+    let (saida, escrita) = super::escritor(tx);
+    let fim = |conn: &quinn::Connection| conn.close(0u32.into(), b"fim");
+    if saida
+        .send(controle(Msg::TestRequest(TestRequest {})))
+        .await
+        .is_err()
+    {
+        fim(&conn);
+        return Err(io::Error::from(io::ErrorKind::BrokenPipe).into());
+    }
+    let mut leitor = Leitor::new(rx);
+    let pronto = match tokio::time::timeout(ESPERA_HELLO, leitor.proxima()).await {
+        Ok(Ok(Msg::TestReady(p))) if p.ok => p,
+        Ok(Ok(Msg::TestReady(p))) => {
+            fim(&conn);
+            return Err(ErroServico::TesteRecusado(p.error()));
+        }
+        Ok(Ok(Msg::Close(c))) => {
+            fim(&conn);
+            return Err(ErroServico::Recusado(c.reason()));
+        }
+        Ok(_) => {
+            fim(&conn);
+            return Err(ErroServico::Protocolo);
+        }
+        Err(_) => {
+            fim(&conn);
+            return Err(io::Error::from(io::ErrorKind::TimedOut).into());
+        }
+    };
+    if let Some(c) = &pronto.path {
+        opcoes.path = c.path_kind();
+    }
+    let medido =
+        tokio::time::timeout(crate::teste::DURACAO_MAXIMA, bench::run(&conn, opcoes)).await;
+    drop(saida);
+    let _ = escrita.await;
+    fim(&conn);
+    let bench = match medido {
+        Ok(r) => r?,
+        Err(_) => return Err(io::Error::from(io::ErrorKind::TimedOut).into()),
+    };
+    Ok(crate::teste::Resultado {
+        host: pronto.host_name,
+        caminho: pronto.path,
+        encode_caps: pronto.encode_caps,
+        conectar,
+        bench,
+    })
 }
 
 /// Pareia com o desktop do QR. `Ok` traz o `PairResult` (que pode ser uma recusa com motivo).

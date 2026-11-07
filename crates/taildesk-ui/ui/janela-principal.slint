@@ -455,6 +455,7 @@ component OpcaoSenha inherits VerticalLayout {
 component SecaoConfiguracoes inherits ScrollView {
     in-out property <bool> aceitando;
     in-out property <bool> pedir-sempre;
+    in-out property <bool> permitir-testes;
     in property <[string]> confiaveis;
     in property <bool> tem-senha;
     in-out property <bool> editando-senha;
@@ -484,6 +485,7 @@ component SecaoConfiguracoes inherits ScrollView {
     callback remover-celular(int);
     callback aceitando-mudou(bool);
     callback pedir-sempre-mudou(bool);
+    callback permitir-testes-mudou(bool);
     callback revogar(int);
     callback definir-senha(string, string);
     callback remover-senha();
@@ -527,6 +529,13 @@ component SecaoConfiguracoes inherits ScrollView {
                         descricao: @tr("Desligado, os dispositivos confiáveis abaixo entram sem perguntar. O aviso de sessão ativa aparece sempre.");
                         ligado <=> root.pedir-sempre;
                         mudou(v) => { root.pedir-sempre-mudou(v); }
+                    }
+                    Separador { }
+                    OpcaoConfig {
+                        titulo: @tr("Permitir testes de conexão");
+                        descricao: @tr("Dispositivos da sua tailnet podem medir a rede até aqui (latência, perda e banda) sem pedir permissão. O teste não vê a tela nem controla nada, e fica no histórico de acessos.");
+                        ligado <=> root.permitir-testes;
+                        mudou(v) => { root.permitir-testes-mudou(v); }
                     }
                     Separador { }
                     OpcaoSenha {
@@ -725,6 +734,7 @@ export component JanelaPrincipal inherits Window {
     in property <string> este-pc;
     in-out property <bool> aceitando: true;
     in-out property <bool> pedir-sempre: true;
+    in-out property <bool> permitir-testes: true;
     in property <[string]> confiaveis;
     in property <bool> tem-senha;
     in-out property <bool> editando-senha;
@@ -763,6 +773,7 @@ export component JanelaPrincipal inherits Window {
     callback verificar();
     callback aceitando-mudou(bool);
     callback pedir-sempre-mudou(bool);
+    callback permitir-testes-mudou(bool);
     callback revogar(int);
     callback definir-senha(string, string);
     callback remover-senha();
@@ -870,6 +881,7 @@ export component JanelaPrincipal inherits Window {
                 vertical-stretch: 1;
                 aceitando <=> root.aceitando;
                 pedir-sempre <=> root.pedir-sempre;
+                permitir-testes <=> root.permitir-testes;
                 confiaveis: root.confiaveis;
                 tem-senha: root.tem-senha;
                 editando-senha <=> root.editando-senha;
@@ -898,6 +910,7 @@ export component JanelaPrincipal inherits Window {
                 cancelar-qr => { root.cancelar-qr(); }
                 remover-celular(i) => { root.remover-celular(i); }
                 pedir-sempre-mudou(v) => { root.pedir-sempre-mudou(v); }
+                permitir-testes-mudou(v) => { root.permitir-testes-mudou(v); }
                 revogar(i) => { root.revogar(i); }
                 abrir-pasta-entrada => { root.abrir-pasta-entrada(); }
                 codec-mudou(i) => { root.codec-config-mudou(i); }

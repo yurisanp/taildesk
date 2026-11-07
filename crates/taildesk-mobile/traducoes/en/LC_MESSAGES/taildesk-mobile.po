@@ -290,3 +290,6 @@ msgstr "Turn sound off"
 
 msgid "Ligar o som"
 msgstr "Turn sound on"
+
+msgid "Copiar relatório"
+msgstr "Copy report"

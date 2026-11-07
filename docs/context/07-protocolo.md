@@ -59,6 +59,7 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | 110–119 | Chat |
 | 120–129 | Celular: caminho, lista de dispositivos e pareamento (§3.4) |
 | 130–139 | Energia: Wake on LAN (§3.5, `17-wake-on-lan.md`) |
+| 140–149 | Teste de conexão (§3.6, `14-selecao-adaptativa.md` §7) |
 
 | Grupo | Mensagens |
 |---|---|
@@ -73,6 +74,7 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | Chat | `ChatMessage{text}` |
 | Celular (120–124) | `PathInfo{kind, relay_region, rtt_ms}` (H→C), `PeerListRequest{start}` / `PeerList{entries, more}`, `PairRequest{code, device_name}` / `PairResult{ok, cert_fingerprint, error}` (detalhe em §3.4) |
 | Energia (130–132) | `PowerInfo{ifaces}` (H→C), `WakeRequest{mac, lan}` / `WakeResult{ok, sent, error}` (detalhe em §3.5) |
+| Teste de conexão (140–141) | `TestRequest{}` / `TestReady{ok, error, host_name, platform, encode_caps, path}` (detalhe em §3.6) |
 
 Multi-monitor (`13-multimonitor.md` §3): **um stream de vídeo por monitor**, cada um com encoder, keyframes e `stream_id` próprios, respondido por um `CodecSelected` por `display_id`. Host recusa `StartVideo` acima do seu limite (`Error{TOO_MANY_STREAMS}`; padrão 2 com openh264). Parser: no máximo 16 `DisplayInfo` por mensagem, `name` ≤ 128 bytes.
 
@@ -205,6 +207,21 @@ controlador guarda para quando ele estiver desligado.
   bytes: `FF`×6 + MAC×16) vai em UDP para `255.255.255.255:9` e para o broadcast dirigido da
   sub-rede, 3 vezes com 100 ms entre elas. `WakeResult` não diz se o alvo acordou: isso se vê pelo
   peer voltar `Online` no `status`.
+
+### 3.6 Teste de conexão (tags 140–141, `14-selecao-adaptativa.md` §7)
+
+- **`TestRequest{}`** (tag 140) abre uma **conexão de serviço** como as do §3.4, sem `Hello` e sem
+  diálogo: o teste não mostra a tela nem controla nada. O host atende quem a tailnet identifica
+  (`whois`; fora dela, `Close{NOT_ALLOWED}`), um por dispositivo (`node_stable_id`) a cada 10 s, e
+  registra cada pedido no histórico de acessos (evento `teste`, com `motivo` quando recusa).
+- **`TestReady`** (tag 141, H→C): `ok`, `error` (`DISABLED = 1`: "Permitir testes de conexão"
+  desligado; `RATE_LIMITED = 2`), `host_name` (≤ 128 B), `platform`, `encode_caps` (≤ 16) e
+  `path` (o `PathInfo` do §3.4 visto pelo `tailscaled` do host; ausente = não soube). Recusado, o
+  host fecha em seguida.
+- Com `ok`, o controlador abre um **stream bidi novo** na mesma conexão e roda o teste do
+  `taildesk_transport::bench` (pings, sondagem de banda por datagramas nos dois sentidos), com a
+  pista do caminho tirada de `path`; o host atende com `bench::serve` e corta em 60 s. O fim é o
+  controlador fechar a conexão.
 
 ## 4. Header de datagrama de mídia (binário, little-endian, 16 bytes)
 
