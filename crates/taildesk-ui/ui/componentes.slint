@@ -20,6 +20,12 @@ export struct Dispositivo {
     favorito: bool,
     ultimo-acesso: string,
     teclado: string,
+    // `node_stable_id` da tailnet.
+    id: string,
+    // Desligado e o TailDesk sabe a placa de rede dele (Wake on LAN).
+    pode-ligar: bool,
+    // Por que pode não acordar (Wi-Fi, WoL desligado na placa); vazio = nada a dizer.
+    aviso-ligar: string,
 }
 
 export global Textos {

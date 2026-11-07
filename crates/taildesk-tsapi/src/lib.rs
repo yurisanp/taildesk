@@ -69,9 +69,37 @@ pub struct PeerStatus {
     /// Dono do nó (chave de [`Status::user`]).
     #[serde(rename = "UserID")]
     pub user_id: u64,
+    /// PeerAPI do `tailscaled` do nó (`http://100.x.y.z:porta`), uma por IP da tailnet.
+    #[serde(rename = "PeerAPIURL")]
+    pub peer_api_url: Option<Vec<String>>,
 }
 
 impl PeerStatus {
+    /// IPs de underlay que o nó anuncia (`Addrs` e `CurAddr`), sem repetir: os da LAN dele
+    /// aparecem aqui, o que serve para achar um repetidor do Wake on LAN.
+    pub fn underlay_ips(&self) -> Vec<IpAddr> {
+        let mut ips: Vec<IpAddr> = self
+            .addrs
+            .iter()
+            .flatten()
+            .chain(std::iter::once(&self.cur_addr))
+            .filter_map(|a| a.parse::<SocketAddr>().ok())
+            .map(|a| a.ip())
+            .collect();
+        ips.sort();
+        ips.dedup();
+        ips
+    }
+
+    /// A PeerAPI em IPv4 (a do `/v0/wol`), se o nó anunciar.
+    pub fn peer_api_v4(&self) -> Option<SocketAddr> {
+        self.peer_api_url
+            .iter()
+            .flatten()
+            .filter_map(|u| peerapi_addr(u))
+            .find(SocketAddr::is_ipv4)
+    }
+
     /// Nome curto: o primeiro rótulo do nome MagicDNS, ou o hostname.
     pub fn short_name(&self) -> &str {
         self.dns_name
@@ -208,6 +236,48 @@ pub struct WhoIsUser {
     pub display_name: String,
 }
 
+/// Resposta do `POST /v0/wol` da PeerAPI (`feature/wakeonlan`).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase", default)]
+pub struct WolResponse {
+    /// Interfaces por onde o pacote saiu.
+    pub sent_to: Option<Vec<String>>,
+    pub errors: Option<Vec<String>>,
+}
+
+/// `http://100.64.0.2:41112` → endereço. Só `http` e IP literal (é o que o `tailscaled` publica).
+fn peerapi_addr(url: &str) -> Option<SocketAddr> {
+    let resto = url.strip_prefix("http://")?;
+    resto.split('/').next()?.parse().ok()
+}
+
+/// Pede ao `tailscaled` do nó `peerapi` (da [`PeerStatus::peer_api_v4`]) que mande o pacote
+/// mágico para `mac` (`aa:bb:cc:dd:ee:ff`) em todas as placas IPv4 dele. O próprio `tailscaled`
+/// autoriza: mesmo usuário sem tags, ou a capability `tailscale.com/cap/wake-on-lan`; senão
+/// volta [`io::ErrorKind::PermissionDenied`].
+pub async fn peerapi_wol(peerapi: SocketAddr, mac: &str) -> io::Result<WolResponse> {
+    let valido = mac.len() == 17
+        && mac
+            .split(':')
+            .all(|b| b.len() == 2 && b.bytes().all(|c| c.is_ascii_hexdigit()));
+    if !valido {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "MAC inválido"));
+    }
+    let body = tokio::time::timeout(REQUEST_TIMEOUT, async {
+        let mut stream = tokio::net::TcpStream::connect(peerapi).await?;
+        exchange(
+            &mut stream,
+            &peerapi.to_string(),
+            "POST",
+            &format!("/v0/wol?mac={mac}"),
+        )
+        .await
+    })
+    .await
+    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "PeerAPI não respondeu"))??;
+    serde_json::from_slice(&body).map_err(invalid)
+}
+
 fn invalid(e: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e)
 }
@@ -255,21 +325,25 @@ impl LocalApi {
                     ),
                 )
             })?;
-            exchange(&mut stream, method, path).await
+            exchange(&mut stream, LOCALAPI_HOST, method, path).await
         })
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "LocalAPI não respondeu"))?
     }
 }
 
+/// Host fixo exigido pela LocalAPI.
+const LOCALAPI_HOST: &str = "local-tailscaled.sock";
+
 async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,
+    host: &str,
     method: &str,
     path: &str,
 ) -> io::Result<Vec<u8>> {
-    // Host fixo exigido pela LocalAPI; sem Origin/Referer (proteção contra navegador).
+    // Sem Origin/Referer (a LocalAPI recusa pedidos com cara de navegador).
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: local-tailscaled.sock\r\nUser-Agent: taildesk\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: taildesk\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     );
     stream.write_all(req.as_bytes()).await?;
     stream.flush().await?;
@@ -283,6 +357,12 @@ async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
         ));
     }
     let (status, body) = parse_response(&raw)?;
+    if status == 403 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("recusado (403): {}", String::from_utf8_lossy(&body).trim()),
+        ));
+    }
     if status != 200 {
         let msg = String::from_utf8_lossy(&body);
         return Err(io::Error::other(format!(
@@ -392,14 +472,72 @@ mod tests {
                 .unwrap();
             req
         });
-        let err = exchange(&mut client, "GET", "/localapi/v0/status")
+        let err = exchange(&mut client, LOCALAPI_HOST, "GET", "/localapi/v0/status")
             .await
             .unwrap_err();
         assert!(err.to_string().contains("403"), "{err}");
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
         let req = srv.await.unwrap();
         assert!(req.starts_with("GET /localapi/v0/status HTTP/1.1\r\n"));
         assert!(req.contains("\r\nHost: local-tailscaled.sock\r\n"));
         assert!(!req.contains("Origin"));
+    }
+
+    #[test]
+    fn underlay_and_peerapi() {
+        let p: PeerStatus = serde_json::from_str(
+            r#"{"ID":"nA","Addrs":["192.168.0.20:41641","200.1.2.3:41641","192.168.0.20:41641"],
+                "CurAddr":"192.168.0.20:41641",
+                "PeerAPIURL":["http://100.64.0.2:41112","http://[fd7a:115c:a1e0::2]:41112"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            p.underlay_ips(),
+            vec![
+                "192.168.0.20".parse::<IpAddr>().unwrap(),
+                "200.1.2.3".parse().unwrap()
+            ]
+        );
+        assert_eq!(p.peer_api_v4(), Some("100.64.0.2:41112".parse().unwrap()));
+        assert_eq!(PeerStatus::default().peer_api_v4(), None);
+        assert!(PeerStatus::default().underlay_ips().is_empty());
+        assert_eq!(peerapi_addr("https://100.64.0.2:1"), None);
+        assert_eq!(peerapi_addr("http://nome:1"), None);
+    }
+
+    #[tokio::test]
+    async fn peerapi_wol_pede_o_pacote() {
+        let ouvinte = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = ouvinte.local_addr().unwrap();
+        let srv = tokio::spawn(async move {
+            let (mut s, _) = ouvinte.accept().await.unwrap();
+            let mut req = vec![0u8; 512];
+            let n = s.read(&mut req).await.unwrap();
+            let corpo = br#"{"SentTo":["enp3s0"],"Errors":null}"#;
+            s.write_all(
+                format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", corpo.len()).as_bytes(),
+            )
+            .await
+            .unwrap();
+            s.write_all(corpo).await.unwrap();
+            String::from_utf8_lossy(&req[..n]).to_string()
+        });
+        let r = peerapi_wol(addr, "3c:7c:3f:01:ab:03").await.unwrap();
+        assert_eq!(r.sent_to, Some(vec!["enp3s0".into()]));
+        let req = srv.await.unwrap();
+        assert!(req.starts_with("POST /v0/wol?mac=3c:7c:3f:01:ab:03 HTTP/1.1\r\n"));
+        assert!(req.contains(&format!("\r\nHost: {addr}\r\n")));
+        // MAC estranho nem sai da máquina.
+        for mac in [
+            "3c:7c:3f:01:ab",
+            "3c:7c:3f:01:ab:0g",
+            "3c:7c:3f:01:ab:03&x=1",
+        ] {
+            assert_eq!(
+                peerapi_wol(addr, mac).await.unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
     }
 
     #[tokio::test]

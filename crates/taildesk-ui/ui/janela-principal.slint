@@ -135,6 +135,7 @@ component ItemDispositivo inherits Rectangle {
     in property <bool> selecionado;
     callback selecionar();
     callback conectar();
+    callback ligar();
 
     accessible-role: list-item;
     accessible-label: d.nome + ", " + d.so + ", " + Textos.estado(d.estado);
@@ -175,6 +176,10 @@ component ItemDispositivo inherits Rectangle {
                 primario: true;
                 clicado => { root.conectar(); }
             }
+            if root.d.pode-ligar: Botao {
+                texto: @tr("Ligar");
+                clicado => { root.ligar(); }
+            }
         }
     }
 }
@@ -182,6 +187,7 @@ component ItemDispositivo inherits Rectangle {
 component PainelDetalhe inherits Rectangle {
     in property <Dispositivo> d;
     callback conectar();
+    callback ligar();
     callback copiar(string);
     background: Tema.superficie;
 
@@ -200,6 +206,16 @@ component PainelDetalhe inherits Rectangle {
             primario: true;
             habilitado: Textos.conectavel(root.d.estado);
             clicado => { root.conectar(); }
+        }
+        if root.d.pode-ligar: Botao {
+            texto: @tr("Ligar pela rede");
+            clicado => { root.ligar(); }
+        }
+        if root.d.pode-ligar && root.d.aviso-ligar != "": Text {
+            wrap: word-wrap;
+            text: root.d.aviso-ligar;
+            font-size: Tema.fonte-pequena;
+            color: Tema.texto-2;
         }
         Separador { }
         LinhaInfo {
@@ -232,6 +248,7 @@ component SecaoDispositivos inherits Rectangle {
     in-out property <string> busca;
     callback busca-mudou(string);
     callback conectar(Dispositivo);
+    callback ligar(Dispositivo);
     callback copiar(string);
 
     HorizontalLayout {
@@ -274,6 +291,7 @@ component SecaoDispositivos inherits Rectangle {
                     selecionado: i == root.selecionado;
                     selecionar => { root.selecionado = i; }
                     conectar => { root.conectar(d); }
+                    ligar => { root.ligar(d); }
                 }
             }
         }
@@ -282,6 +300,7 @@ component SecaoDispositivos inherits Rectangle {
             width: 300px;
             d: root.dispositivos[min(root.selecionado, root.dispositivos.length - 1)];
             conectar => { root.conectar(self.d); }
+            ligar => { root.ligar(self.d); }
             copiar(t) => { root.copiar(t); }
         }
     }
@@ -738,6 +757,8 @@ export component JanelaPrincipal inherits Window {
 
     callback busca-mudou(string);
     callback conectar(Dispositivo);
+    // Wake on LAN: acordar um computador desligado da lista.
+    callback ligar(Dispositivo);
     callback abrir-link(string);
     callback verificar();
     callback aceitando-mudou(bool);
@@ -842,6 +863,7 @@ export component JanelaPrincipal inherits Window {
                 busca <=> root.busca;
                 busca-mudou(t) => { root.busca-mudou(t); }
                 conectar(d) => { root.conectar(d); }
+                ligar(d) => { root.ligar(d); }
                 copiar(t) => { root.copiar(t); }
             }
             if root.secao == 1: SecaoConfiguracoes {

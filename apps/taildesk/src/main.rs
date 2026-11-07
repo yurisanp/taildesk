@@ -14,6 +14,7 @@
 // Sem console no Windows: é um app gráfico.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod acordar;
 mod area;
 mod atualizacao;
 mod config;
@@ -141,6 +142,26 @@ impl App {
                     .conectar(&app.rt, d.nome.to_string(), d.ip.to_string(), None)
             });
         });
+        j.on_ligar(|d| {
+            let (id, nome) = (d.id.to_string(), d.nome.to_string());
+            avisar(format!(
+                "Ligando {nome}… pode levar um minuto até ele aparecer online."
+            ));
+            com_app(move |app| {
+                app.rt.spawn(async move {
+                    let texto = match acordar::ligar(&id, &nome).await {
+                        Ok(acordar::Por::EsteComputador) => {
+                            format!("Pedido enviado a {nome} por este computador.")
+                        }
+                        Ok(acordar::Por::Repetidor(r)) => {
+                            format!("Pedido enviado a {nome} por {r}.")
+                        }
+                        Err(e) => e,
+                    };
+                    avisar(texto);
+                });
+            });
+        });
         let agora = self.agora.clone();
         j.on_verificar(move || agora.notify_one());
         let com_bandeja = self.bandeja.is_some();
@@ -181,7 +202,9 @@ impl App {
         if let Some(b) = &self.bandeja {
             b.set_estado(v.linha_bandeja().into());
         }
-        *self.todos.borrow_mut() = v.dispositivos.clone();
+        let mut todos = v.dispositivos.clone();
+        modelo::marcar_ligaveis(&mut todos, &config::ler().energia);
+        *self.todos.borrow_mut() = todos;
         *self.visao.borrow_mut() = v;
         self.filtrar();
     }

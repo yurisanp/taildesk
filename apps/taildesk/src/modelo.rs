@@ -209,6 +209,25 @@ fn dispositivo(p: &PeerStatus) -> Dispositivo {
             data_curta(&p.last_seen).into()
         },
         teclado: "—".into(),
+        id: p.id.as_str().into(),
+        pode_ligar: false,
+        aviso_ligar: "".into(),
+    }
+}
+
+/// Marca "Ligar" nos computadores desligados cuja placa de rede o TailDesk já conhece.
+pub fn marcar_ligaveis(
+    dispositivos: &mut [Dispositivo],
+    energia: &std::collections::BTreeMap<String, Vec<taildesk_proto::control::LanIface>>,
+) {
+    for d in dispositivos {
+        let placas = energia.get(d.id.as_str());
+        d.pode_ligar = d.estado == Estado::Offline
+            && placas.is_some_and(|p| taildesk_session::acordar::placa_para_acordar(p).is_some());
+        d.aviso_ligar = placas
+            .map(|p| crate::acordar::aviso(p))
+            .unwrap_or_default()
+            .into();
     }
 }
 
