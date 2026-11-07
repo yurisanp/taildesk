@@ -57,6 +57,7 @@ class MainActivity : NativeActivity() {
     }
 
     override fun onDestroy() {
+        SessionService.ouvindo(this, null)
         tailscale.parar()
         super.onDestroy()
     }
@@ -77,6 +78,19 @@ class MainActivity : NativeActivity() {
         capturarTeclas = ligar == "1"
         teclado.limpar()
         engolidas.clear()
+    }
+
+    /**
+     * Com o app em segundo plano e o som ligado, o Rust pede a notificação "Ouvindo <nome>"
+     * (vazio = tirar). Ver [SessionService].
+     */
+    fun ouvindo(nome: String) = runOnUiThread {
+        try {
+            SessionService.ouvindo(this, nome.ifEmpty { null })
+        } catch (e: RuntimeException) {
+            // Android 12+ recusa iniciar o serviço em alguns estados; o som segue enquanto der.
+            android.util.Log.w("taildesk", "serviço do som: $e")
+        }
     }
 
     /** `"1"` se há um teclado físico ligado e aberto. */

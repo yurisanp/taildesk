@@ -73,6 +73,9 @@ pub trait Plataforma: 'static {
     fn publicar_download(&self, _caminho: &Path, _nome: &str) -> bool {
         false
     }
+    /// Notificação "Ouvindo <nome> · Encerrar" com o app em segundo plano e o som tocando
+    /// (`None` tira). O "Encerrar" volta por [`App::encerrar_de_fora`].
+    fn ouvindo(&self, _nome: Option<&str>) {}
     /// Texto da área de transferência do sistema (só com o app em foco no Android 10+).
     fn ler_area(&self) -> Option<String> {
         None
@@ -207,6 +210,8 @@ struct Estado {
     /// Botão de som (fica entre as sessões) e a saída aberta.
     som: crate::som::Som,
     som_saida: Option<crate::som::Saida>,
+    /// Notificação "Ouvindo…" no ar (MF-72).
+    ouvindo: bool,
 }
 
 /// O app inteiro (um por processo, na thread da interface).
@@ -386,6 +391,7 @@ impl App {
                 clip: None,
                 som: crate::som::Som::default(),
                 som_saida: None,
+                ouvindo: false,
             }),
             relogio: slint::Timer::default(),
             relogio_lento: slint::Timer::default(),
@@ -1071,6 +1077,7 @@ impl App {
             }
         }
         drop(e);
+        self.atualizar_ouvindo();
         self.mostrar_compartilhar();
         folha::apagar(sobras);
         if let Some(ui) = self.ui() {
@@ -1205,7 +1212,27 @@ impl App {
             }
         }
         self.enviar(out);
+        self.atualizar_ouvindo();
         self.mostrar_sessao();
+    }
+
+    /// Liga ou tira a notificação "Ouvindo…": só em segundo plano, com o som tocando.
+    fn atualizar_ouvindo(&self) {
+        let mut e = self.estado.borrow_mut();
+        let agora = e.som_saida.is_some() && e.ciclo.em_segundo_plano();
+        if agora == e.ouvindo {
+            return;
+        }
+        e.ouvindo = agora;
+        let nome = e.host.as_ref().map(|h| h.nome.clone()).unwrap_or_default();
+        e.plat.ouvindo(agora.then_some(nome.as_str()));
+    }
+
+    /// "Encerrar" na notificação do som.
+    pub fn encerrar_de_fora(self: &Rc<Self>) {
+        if self.estado.borrow().controle.is_some() {
+            self.encerrar();
+        }
     }
 
     /// A saída de som abriu (ou não) depois do `AudioSelected`.
@@ -1233,6 +1260,7 @@ impl App {
             }
         }
         self.enviar(out);
+        self.atualizar_ouvindo();
     }
 
     /// Botão 🔊 da barra.
@@ -1371,7 +1399,11 @@ impl App {
     fn tick(&self) {
         let t = self.estado.borrow().t_ms();
         self.com_controle(|c, out| c.tick(t, out));
-        let encerrar = self.estado.borrow_mut().ciclo.tick(t);
+        let encerrar = {
+            let mut e = self.estado.borrow_mut();
+            let ouvindo = e.som_saida.is_some();
+            e.ciclo.tick(t, ouvindo)
+        };
         if encerrar {
             self.estado.borrow_mut().geracao += 1;
             self.fim_da_sessao();
@@ -1519,6 +1551,7 @@ impl App {
             }
         };
         self.enviar(msgs);
+        self.atualizar_ouvindo();
     }
 
     pub fn frente(self: &Rc<Self>) {
@@ -1545,6 +1578,7 @@ impl App {
             }
             AoVoltar::Nada => {}
         }
+        self.atualizar_ouvindo();
         self.ler_area();
     }
 

@@ -145,7 +145,7 @@ Play (`debugSymbolLevel`).
 | `TailscaleState` | Lê `PackageManager` (`com.tailscale.ipn`, com `<queries>`), `ConnectivityManager` (rede `TRANSPORT_VPN`, interfaces 100.x), `isActiveNetworkMetered`; entrega ao Rust por JNI a cada mudança |
 | `OpenTailscale` | `getLaunchIntentForPackage("com.tailscale.ipn")`, ou Play Store se não instalado |
 | `QrScanActivity` | CameraX + decodificação em Rust (`rqrr`, MIT/Apache) para não depender do ML Kit, que é proprietário |
-| `SessionService` (M3) | Foreground Service `mediaPlayback` para o som continuar em segundo plano (MF-72) |
+| `SessionService` (M3) | Foreground Service `mediaPlayback` para o som continuar em segundo plano (MF-72): o Rust pede `MainActivity.ouvindo(nome)` só com o app fora da tela e a saída de som aberta; notificação "Ouvindo <computador> · Encerrar" (`Ponte.nativeEncerrar`). Com o som tocando, o limite de 5 min em segundo plano não encerra a sessão. Na Play precisa da declaração de serviço em primeiro plano `mediaPlayback` |
 | (Rust) `taildesk_mobile::som` + `taildesk_platform::som` (M3) | Botão 🔊 da barra (desligado por padrão: nenhum `StartAudio`); Opus em `kind=1` decodificado na task dos datagramas e tocado pelo AAudio (48 kHz estéreo f32, `usage=Media`). `Feature::Audio` só vai no Hello do Android |
 | `ShareReceiverActivity` (M3) | Alvo de "Compartilhar com TailDesk" (MF-63) |
 | `SafBridge` (M3) | `ACTION_OPEN_DOCUMENT` e gravação em `Download/TailDesk` pelo MediaStore |

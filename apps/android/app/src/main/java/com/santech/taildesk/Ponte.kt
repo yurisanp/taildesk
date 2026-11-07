@@ -23,6 +23,9 @@ object Ponte {
     /** Teclas de um teclado físico na sessão, uma linha cada (ver [TecladoFisico]). */
     @JvmStatic external fun nativeTeclaFisica(texto: String)
 
+    /** "Encerrar" na notificação do som em segundo plano ([SessionService]). */
+    @JvmStatic external fun nativeEncerrar()
+
     /** Resultado de [MainActivity.publicarDownload]: `ok\tnome` ou `erro\tnome`. */
     @JvmStatic external fun nativeDownloadPublicado(texto: String)
 
