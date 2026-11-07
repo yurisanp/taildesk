@@ -367,6 +367,17 @@ impl Controle {
         self.enviar_teclas(out);
     }
 
+    /// Tecla de um teclado físico ligado ao celular.
+    pub fn fisica(&mut self, k: &crate::fisico::Lida, out: &mut Vec<Msg>) {
+        use crate::fisico::Lida;
+        use taildesk_keyboard::virtual_kb::Fisica;
+        match k {
+            Lida::Tecla(t, m) => self.teclado.fisica(Fisica::Tecla(*t), *m, &mut self.teclas),
+            Lida::Texto(s, m) => self.teclado.fisica(Fisica::Texto(s), *m, &mut self.teclas),
+        }
+        self.enviar_teclas(out);
+    }
+
     /// Apagar pedido pelo teclado do sistema.
     pub fn apagar(&mut self, n: usize, out: &mut Vec<Msg>) {
         self.teclado.apagar(n, &mut self.teclas);
@@ -640,5 +651,21 @@ mod tests {
         assert!(
             matches!(&out[0], Msg::KeyShortcut(k) if k.base_char == "c" && k.mods == 2 && k.down)
         );
+    }
+
+    #[test]
+    fn teclado_fisico_pela_ponte() {
+        let (mut c, _) = controle(Modo::Touchpad);
+        let mut out = Vec::new();
+        let k = crate::fisico::ler("texto\t\u{3}\tc").unwrap();
+        c.fisica(&k, &mut out);
+        assert!(
+            matches!(&out[0], Msg::KeyShortcut(k) if k.base_char == "c" && k.mods == 2 && k.down)
+        );
+        // A trava do Ctrl não fica ligada depois do atalho.
+        assert_eq!(c.teclado.trava(Mods::CTRL), Trava::Solta);
+        out.clear();
+        c.fisica(&crate::fisico::ler("texto\tá\t").unwrap(), &mut out);
+        assert!(matches!(&out[..], [Msg::KeyChar(k)] if k.text == "á"));
     }
 }

@@ -101,6 +101,8 @@ export component TelaSessao inherits Rectangle {
     in property <int> trava-meta;
     in property <int> trava-shift;
     in property <string> aviso;
+    /// Há um teclado físico: o ⌨ só mostra a faixa (as teclas dele vão pela casca Kotlin).
+    in property <bool> teclado-fisico;
     in-out property <bool> barra-aberta: true;
     in-out property <bool> teclado-aberto;
     in-out property <bool> mostrando-monitores;
@@ -116,6 +118,8 @@ export component TelaSessao inherits Rectangle {
     callback alternar-hud();
     callback encerrar();
     callback tecla(string);
+    /// Linha de `taildesk_mobile::fisico` (só Tab e Esc vêm por aqui).
+    callback tecla-fisica(string);
     callback modificador(string);
     callback modificador-segurado(string);
     callback ctrl-alt-del();
@@ -230,7 +234,7 @@ export component TelaSessao inherits Rectangle {
                     if root.varios-monitores: BotaoBarra { texto: "◀"; rotulo-acessivel: @tr("Monitor anterior"); clicado => { root.trocar-monitor(-1); } }
                     BotaoBarra { texto: "🖥 " + root.monitor-texto; rotulo-acessivel: @tr("Monitores"); clicado => { root.mostrando-monitores = !root.mostrando-monitores; } }
                     if root.varios-monitores: BotaoBarra { texto: "▶"; rotulo-acessivel: @tr("Próximo monitor"); clicado => { root.trocar-monitor(1); } }
-                    BotaoBarra { texto: "⌨"; ativo: root.teclado-aberto; rotulo-acessivel: @tr("Teclado"); clicado => { root.teclado-aberto = !root.teclado-aberto; if root.teclado-aberto { captador.focus(); } else { captador.clear-focus(); } } }
+                    BotaoBarra { texto: "⌨"; ativo: root.teclado-aberto; rotulo-acessivel: @tr("Teclado"); clicado => { root.teclado-aberto = !root.teclado-aberto; if root.teclado-aberto && !root.teclado-fisico { captador.focus(); } else { fisico.focus(); } } }
                     BotaoBarra { texto: root.modo-toque == 0 ? @tr("Touchpad") : @tr("Toque direto"); ativo: true; clicado => { root.alternar-modo(); } }
                     BotaoBarra { texto: "📁"; rotulo-acessivel: @tr("Arquivos"); clicado => { root.abrir-arquivos(); } }
                     BotaoBarra { texto: "HUD"; ativo: root.hud-visivel; rotulo-acessivel: @tr("Informações da conexão"); clicado => { root.alternar-hud(); } }
@@ -304,22 +308,42 @@ export component TelaSessao inherits Rectangle {
     // Recebe o teclado do sistema. Fica com um texto-sentinela para perceber o apagar com o
     // campo "vazio"; tudo que chega além dele vai para o host e o campo volta ao sentinela.
     property <string> sentinela: "  ";
-    captador := TextInput {
+    init => { fisico.focus(); }
+    // Fica com o foco durante a sessão para o Slint não usar Tab e Esc na navegação dele: as duas
+    // vão para o host; as outras teclas que ninguém aceita seguem para a casca Kotlin
+    // (`TecladoFisico.kt`), que aplica o layout do aparelho.
+    fisico := FocusScope {
         x: -1000px;
         width: 10px;
         height: 10px;
-        text: root.sentinela;
-        single-line: true;
-        input-type: text;
-        edited => {
-            if self.text.character-count < root.sentinela.character-count {
-                root.apagar(root.sentinela.character-count - self.text.character-count);
-            } else if self.text != root.sentinela {
-                root.texto(self.text);
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(e) => {
+            if e.text != Key.Tab && e.text != Key.Escape && e.text != Key.Backtab {
+                return reject;
             }
-            self.text = root.sentinela;
-            self.set-selection-offsets(2, 2);
+            root.tecla-fisica("tecla\u{9}" + (e.text == Key.Escape ? "esc" : "tab") + "\u{9}"
+                + (e.modifiers.control ? "c" : "") + (e.modifiers.alt ? "a" : "")
+                + (e.modifiers.shift || e.text == Key.Backtab ? "s" : "") + (e.modifiers.meta ? "m" : ""));
+            accept
         }
-        accepted => { root.tecla("enter"); }
+        captador := TextInput {
+            x: -1000px;
+            width: 10px;
+            height: 10px;
+            text: root.sentinela;
+            single-line: true;
+            input-type: text;
+            edited => {
+                if self.text.character-count < root.sentinela.character-count {
+                    root.apagar(root.sentinela.character-count - self.text.character-count);
+                } else if self.text != root.sentinela {
+                    root.texto(self.text);
+                }
+                self.text = root.sentinela;
+                self.set-selection-offsets(2, 2);
+            }
+            accepted => { root.tecla("enter"); }
+        }
     }
 }

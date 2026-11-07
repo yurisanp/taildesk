@@ -126,6 +126,8 @@ export component AppCelular inherits Window {
     callback alternar-hud();
     callback encerrar();
     callback tecla(string);
+    callback tecla-fisica(string);
+    in property <bool> teclado-fisico;
     callback modificador(string);
     callback modificador-segurado(string);
     callback ctrl-alt-del();
@@ -250,6 +252,8 @@ export component AppCelular inherits Window {
                 alternar-hud => { root.alternar-hud(); }
                 encerrar => { root.encerrar(); }
                 tecla(t) => { root.tecla(t); }
+                tecla-fisica(l) => { root.tecla-fisica(l); }
+                teclado-fisico: root.teclado-fisico;
                 modificador(m) => { root.modificador(m); }
                 modificador-segurado(m) => { root.modificador-segurado(m); }
                 ctrl-alt-del => { root.ctrl-alt-del(); }

@@ -114,6 +114,15 @@ pub fn hid_us(c: char) -> Hid {
     }
 }
 
+/// O que um teclado físico ligado ao celular mandou ([`VirtualKeyboard::fisica`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fisica<'a> {
+    /// Tecla sem texto (setas, Esc, F1–F12, Enter, Backspace…).
+    Tecla(TeclaFaixa),
+    /// O texto que a tecla produziu no layout do aparelho.
+    Texto(&'a str),
+}
+
 /// Modificadores da faixa e a tradução do que o teclado virtual entrega.
 #[derive(Clone, Debug, Default)]
 pub struct VirtualKeyboard {
@@ -287,6 +296,49 @@ impl VirtualKeyboard {
         out.push(key(t.hid(), false));
         out.extend(mods.iter().rev().map(|&h| key(h, false)));
         self.consumir();
+    }
+
+    /// Tecla de um teclado físico (USB ou Bluetooth) ligado ao celular, com os modificadores
+    /// apertados junto. O Android já aplicou o layout do aparelho, então segue o modo Auto de
+    /// `11-teclado.md`: tecla sem texto pela posição física (com os modificadores em volta),
+    /// atalho pela letra, e o resto como caractere. Cada aperto vira um toque completo (descer e
+    /// subir); a repetição do sistema manda outro.
+    pub fn fisica(&mut self, k: Fisica<'_>, apertados: Mods, out: &mut Vec<KeyMsg>) {
+        let segurar = |t: &mut Trava, m: Mods| {
+            if apertados.contains(m) && *t == Trava::Solta {
+                *t = Trava::UmaVez;
+            }
+        };
+        segurar(&mut self.ctrl, Mods::CTRL);
+        segurar(&mut self.alt, Mods::ALT);
+        segurar(&mut self.meta, Mods::META);
+        match k {
+            Fisica::Tecla(t) => {
+                segurar(&mut self.shift, Mods::SHIFT);
+                self.tecla(t, out);
+            }
+            Fisica::Texto(s) if self.em_atalho() => {
+                let Some(c) = s.chars().next() else {
+                    self.consumir();
+                    return;
+                };
+                // Com Ctrl o sistema pode entregar o caractere de controle (Ctrl+C = U+0003).
+                let c = match c {
+                    '\u{1}'..='\u{1a}' => char::from(b'a' + (c as u8) - 1),
+                    c => c,
+                };
+                // O Shift apertado faz parte do atalho (Ctrl+Shift+T), mesmo se a letra veio
+                // minúscula.
+                let c = if apertados.contains(Mods::SHIFT) {
+                    c.to_uppercase().next().unwrap_or(c)
+                } else {
+                    c
+                };
+                self.atalho(c, out);
+            }
+            // O Shift já está no texto (o Android aplicou).
+            Fisica::Texto(s) => self.texto(s, out),
+        }
     }
 
     /// Apagar uma letra que o teclado do sistema pediu (backspace do IME).

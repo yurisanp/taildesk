@@ -3,8 +3,10 @@ package com.santech.taildesk
 import android.app.NativeActivity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import java.util.Locale
 
 /**
@@ -20,6 +22,13 @@ class MainActivity : NativeActivity() {
     @Volatile
     private var rustNoAr = false
     private var compartilharPendente: Intent? = null
+
+    /** Sessão aberta: as teclas de um teclado físico vão para o computador ([TecladoFisico]). */
+    @Volatile
+    private var capturarTeclas = false
+    private val teclado = TecladoFisico()
+    /** Teclas engolidas ao descer, para engolir também a subida. */
+    private val engolidas = HashSet<Int>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         tailscale = TailscaleState(this)
@@ -61,6 +70,46 @@ class MainActivity : NativeActivity() {
             compartilharPendente?.let { compartilhar(it) }
             compartilharPendente = null
         }
+    }
+
+    /** O Rust abriu (`"1"`) ou fechou (`"0"`) a sessão. */
+    fun teclasFisicas(ligar: String) = runOnUiThread {
+        capturarTeclas = ligar == "1"
+        teclado.limpar()
+        engolidas.clear()
+    }
+
+    /** `"1"` se há um teclado físico ligado e aberto. */
+    fun temTecladoFisico(): String {
+        val c = resources.configuration
+        val tem = c.keyboard != Configuration.KEYBOARD_NOKEYS &&
+            c.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+        return if (tem) "1" else "0"
+    }
+
+    /**
+     * Só chegam aqui as teclas que o Slint não aceitou (a NativeActivity entrega a ele antes).
+     * Na sessão, as de um teclado físico vão para o Rust com o layout do aparelho aplicado.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!capturarTeclas || !Ponte.carregada || !TecladoFisico.eFisico(event)) {
+            return super.dispatchKeyEvent(event)
+        }
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                val linha = teclado.traduzir(
+                    event.keyCode,
+                    event.metaState,
+                    event.getUnicodeChar(event.metaState),
+                    event.getUnicodeChar(0),
+                ) ?: return super.dispatchKeyEvent(event)
+                engolidas.add(event.keyCode)
+                if (linha.isNotEmpty()) Ponte.nativeTeclaFisica(linha)
+                return true
+            }
+            KeyEvent.ACTION_UP -> if (engolidas.remove(event.keyCode)) return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     fun abrirTailscale() = runOnUiThread { Acoes.abrirTailscale(this) }
