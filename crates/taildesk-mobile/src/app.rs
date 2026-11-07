@@ -204,6 +204,9 @@ struct Estado {
     envio: Option<crate::compartilhar::Envio>,
     /// Área de transferência de texto da sessão ao vivo.
     clip: Option<crate::area::AreaCelular>,
+    /// Botão de som (fica entre as sessões) e a saída aberta.
+    som: crate::som::Som,
+    som_saida: Option<crate::som::Saida>,
 }
 
 /// O app inteiro (um por processo, na thread da interface).
@@ -381,6 +384,8 @@ impl App {
                 compartilhar: Vec::new(),
                 envio: None,
                 clip: None,
+                som: crate::som::Som::default(),
+                som_saida: None,
             }),
             relogio: slint::Timer::default(),
             relogio_lento: slint::Timer::default(),
@@ -997,6 +1002,15 @@ impl App {
                 .is_some_and(|p| p.clipboard);
             e.clip = matches!(e.alvo, Some(Alvo::Rede(_)))
                 .then(|| crate::area::AreaCelular::new(permitido));
+            let som = matches!(e.alvo, Some(Alvo::Rede(_)))
+                && crate::som::TEM_SAIDA
+                && e.ack
+                    .as_ref()
+                    .and_then(|a| a.permissions.as_ref())
+                    .is_some_and(|p| p.audio);
+            e.som.ao_vivo(som, &mut out);
+            ui.set_som_permitido(som);
+            ui.set_som_ligado(e.som.ligado);
         }
         ui.set_tem_quadro(false);
         ui.set_barra_aberta(true);
@@ -1041,6 +1055,8 @@ impl App {
         }
         e.prazo_consentimento = None;
         e.clip = None;
+        e.som.fim();
+        e.som_saida = None;
         if let Some(Alvo::Rede(Some(s))) = e.alvo.take() {
             e.rt.spawn(s.encerrar());
         }
@@ -1133,6 +1149,29 @@ impl App {
                         s.video_parou(v.display_id);
                     }
                 }
+                Msg::AudioSelected(a) => {
+                    if let (Some(stream), Some(Alvo::Rede(Some(s)))) = (e.som.escolhido(a), &e.alvo)
+                    {
+                        let destino = s.som();
+                        let geracao = e.geracao;
+                        let tarefa =
+                            e.rt.spawn_blocking(move || crate::som::Saida::abrir(stream, destino));
+                        e.rt.spawn(async move {
+                            let r = tarefa.await.map_err(|e| e.to_string()).and_then(|r| r);
+                            no_app(move |a| a.som_aberto(geracao, r));
+                        });
+                    }
+                }
+                Msg::AudioStopped(a) => {
+                    e.som_saida = None;
+                    let nome = e.host.as_ref().map(|h| h.nome.clone()).unwrap_or_default();
+                    if let Some(aviso) = e.som.parou(a, e.idioma, &nome)
+                        && let Some(ui) = self.ui()
+                    {
+                        ui.set_toast(aviso.into());
+                        ui.set_som_ligado(false);
+                    }
+                }
                 Msg::DisplaysChanged(d) => {
                     if let Some(c) = e.controle.as_mut() {
                         c.monitores_mudaram(&d.displays, &mut out);
@@ -1167,6 +1206,50 @@ impl App {
         }
         self.enviar(out);
         self.mostrar_sessao();
+    }
+
+    /// A saída de som abriu (ou não) depois do `AudioSelected`.
+    fn som_aberto(&self, geracao: u64, r: Result<crate::som::Saida, String>) {
+        let mut out = Vec::new();
+        {
+            let mut e = self.estado.borrow_mut();
+            if e.geracao != geracao || e.controle.is_none() {
+                return;
+            }
+            match r {
+                Ok(saida) if e.som.ligado => e.som_saida = Some(saida),
+                Ok(_) => {}
+                Err(err) => {
+                    crate::registrar!("taildesk: saída de som: {err}");
+                    e.som.definir(false, &mut out);
+                    let t = e
+                        .idioma
+                        .t("Não foi possível tocar o som.", "Could not play the sound.");
+                    if let Some(ui) = self.ui() {
+                        ui.set_toast(t.into());
+                        ui.set_som_ligado(false);
+                    }
+                }
+            }
+        }
+        self.enviar(out);
+    }
+
+    /// Botão 🔊 da barra.
+    fn alternar_som(&self) {
+        let mut out = Vec::new();
+        let ligado = {
+            let mut e = self.estado.borrow_mut();
+            let ligado = e.som.alternar(&mut out);
+            if !ligado {
+                e.som_saida = None;
+            }
+            ligado
+        };
+        if let Some(ui) = self.ui() {
+            ui.set_som_ligado(ligado);
+        }
+        self.enviar(out);
     }
 
     /// Manda ao host (ou ao host de demonstração).
@@ -1918,6 +2001,7 @@ impl App {
                 a.com_controle(|c, out| c.tecla(t, out));
             }
         }));
+        ui.on_alternar_som(com!(|a: &Rc<App>| a.alternar_som()));
         ui.on_tecla_fisica(com1!(|a: &Rc<App>, linha: SharedString| {
             a.tecla_fisica(&linha);
         }));

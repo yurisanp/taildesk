@@ -103,6 +103,9 @@ export component TelaSessao inherits Rectangle {
     in property <string> aviso;
     /// Há um teclado físico: o ⌨ só mostra a faixa (as teclas dele vão pela casca Kotlin).
     in property <bool> teclado-fisico;
+    /// A sessão permite o som e o aparelho tem saída.
+    in property <bool> som-permitido;
+    in property <bool> som-ligado;
     in-out property <bool> barra-aberta: true;
     in-out property <bool> teclado-aberto;
     in-out property <bool> mostrando-monitores;
@@ -126,6 +129,7 @@ export component TelaSessao inherits Rectangle {
     callback texto(string);
     callback apagar(int);
     callback abrir-arquivos();
+    callback alternar-som();
 
     background: #0d0f13;
 
@@ -237,6 +241,7 @@ export component TelaSessao inherits Rectangle {
                     BotaoBarra { texto: "⌨"; ativo: root.teclado-aberto; rotulo-acessivel: @tr("Teclado"); clicado => { root.teclado-aberto = !root.teclado-aberto; if root.teclado-aberto && !root.teclado-fisico { captador.focus(); } else { fisico.focus(); } } }
                     BotaoBarra { texto: root.modo-toque == 0 ? @tr("Touchpad") : @tr("Toque direto"); ativo: true; clicado => { root.alternar-modo(); } }
                     BotaoBarra { texto: "📁"; rotulo-acessivel: @tr("Arquivos"); clicado => { root.abrir-arquivos(); } }
+                    if root.som-permitido: BotaoBarra { texto: root.som-ligado ? "🔊" : "🔇"; ativo: root.som-ligado; rotulo-acessivel: root.som-ligado ? @tr("Desligar o som") : @tr("Ligar o som"); clicado => { root.alternar-som(); } }
                     BotaoBarra { texto: "HUD"; ativo: root.hud-visivel; rotulo-acessivel: @tr("Informações da conexão"); clicado => { root.alternar-hud(); } }
                     BotaoBarra { texto: @tr("Encerrar"); perigo: true; clicado => { root.encerrar(); } }
                 }

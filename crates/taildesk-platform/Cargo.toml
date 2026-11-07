@@ -44,6 +44,11 @@ rustix = { version = "1", features = ["event", "fs", "mm", "pipe"] }
 x11rb = { version = "0.13", features = ["damage", "randr", "shm", "xfixes", "xtest"] }
 zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-crypto-rust"] }
 
+# Saída de som no celular (controlador): AAudio do NDK (MIT OR Apache-2.0), a mesma versão do
+# `android-activity` do Slint.
+[target.'cfg(target_os = "android")'.dependencies]
+ndk = { version = "0.9", default-features = false, features = ["audio", "api-level-29"] }
+
 [target.'cfg(windows)'.dependencies]
 # Som do sistema: WASAPI, loopback na saída padrão (Apache-2.0). No Linux o som vai pelo PipeWire.
 cpal = "0.18.2"

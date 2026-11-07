@@ -146,6 +146,7 @@ Play (`debugSymbolLevel`).
 | `OpenTailscale` | `getLaunchIntentForPackage("com.tailscale.ipn")`, ou Play Store se não instalado |
 | `QrScanActivity` | CameraX + decodificação em Rust (`rqrr`, MIT/Apache) para não depender do ML Kit, que é proprietário |
 | `SessionService` (M3) | Foreground Service `mediaPlayback` para o som continuar em segundo plano (MF-72) |
+| (Rust) `taildesk_mobile::som` + `taildesk_platform::som` (M3) | Botão 🔊 da barra (desligado por padrão: nenhum `StartAudio`); Opus em `kind=1` decodificado na task dos datagramas e tocado pelo AAudio (48 kHz estéreo f32, `usage=Media`). `Feature::Audio` só vai no Hello do Android |
 | `ShareReceiverActivity` (M3) | Alvo de "Compartilhar com TailDesk" (MF-63) |
 | `SafBridge` (M3) | `ACTION_OPEN_DOCUMENT` e gravação em `Download/TailDesk` pelo MediaStore |
 | `TecladoFisico` (M3) | Teclado USB/Bluetooth na sessão: recebe em `dispatchKeyEvent` o que o Slint não aceitou (o backend dele só tem o mapa americano), aplica o layout do aparelho (`getUnicodeChar`), resolve teclas mortas (`getDeadChar`) e trata AltGr como texto; manda ao Rust por `Ponte.nativeTeclaFisica` (`taildesk_mobile::fisico`). Tab e Esc ficam com um `FocusScope` da sessão no Slint, que os comeria na navegação de foco |

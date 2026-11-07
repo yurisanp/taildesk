@@ -128,6 +128,9 @@ export component AppCelular inherits Window {
     callback tecla(string);
     callback tecla-fisica(string);
     in property <bool> teclado-fisico;
+    in property <bool> som-permitido;
+    in property <bool> som-ligado;
+    callback alternar-som();
     callback modificador(string);
     callback modificador-segurado(string);
     callback ctrl-alt-del();
@@ -254,6 +257,9 @@ export component AppCelular inherits Window {
                 tecla(t) => { root.tecla(t); }
                 tecla-fisica(l) => { root.tecla-fisica(l); }
                 teclado-fisico: root.teclado-fisico;
+                som-permitido: root.som-permitido;
+                som-ligado: root.som-ligado;
+                alternar-som => { root.alternar-som(); }
                 modificador(m) => { root.modificador(m); }
                 modificador-segurado(m) => { root.modificador-segurado(m); }
                 ctrl-alt-del => { root.ctrl-alt-del(); }
