@@ -2,7 +2,7 @@
 // com o estado real do Tailscale deste computador (§5.1 e "Tailscale parou durante o uso").
 import { AboutSlint, ComboBox, LineEdit, ScrollView, Switch, ListView } from "std-widgets.slint";
 import { Tema } from "tema.slint";
-import { Botao, Cartao, ChipStatus, Dispositivo, Estado, ItemNav, LinhaInfo, PontoStatus, Separador, Textos, Toast } from "componentes.slint";
+import { Botao, Cartao, ChipStatus, Dispositivo, Estado, InfoTeste, ItemNav, LinhaInfo, LinhaTeste, PontoStatus, Separador, Textos, Toast } from "componentes.slint";
 import { CartaoAtualizacoes, FaixaAtualizacao, InfoAtualizacao } from "atualizacao.slint";
 import { CartaoCelulares, InfoCelulares } from "celulares.slint";
 
@@ -186,56 +186,90 @@ component ItemDispositivo inherits Rectangle {
 
 component PainelDetalhe inherits Rectangle {
     in property <Dispositivo> d;
+    in property <InfoTeste> teste;
     callback conectar();
     callback ligar();
+    callback testar();
     callback copiar(string);
     background: Tema.superficie;
 
-    VerticalLayout {
-        padding: 20px;
-        spacing: 14px;
-        alignment: start;
+    property <bool> deste-teste: root.teste.ip != "" && root.teste.ip == root.d.ip;
+
+    ScrollView {
         VerticalLayout {
-            spacing: 4px;
-            Text { text: root.d.nome; font-size: 18px; font-weight: 700; color: Tema.texto; wrap: word-wrap; }
-            Text { text: root.d.so; font-size: Tema.fonte; color: Tema.texto-2; }
-        }
-        ChipStatus { estado: root.d.estado; }
-        Botao {
-            texto: @tr("Conectar");
-            primario: true;
-            habilitado: Textos.conectavel(root.d.estado);
-            clicado => { root.conectar(); }
-        }
-        if root.d.pode-ligar: Botao {
-            texto: @tr("Ligar pela rede");
-            clicado => { root.ligar(); }
-        }
-        if root.d.pode-ligar && root.d.aviso-ligar != "": Text {
-            wrap: word-wrap;
-            text: root.d.aviso-ligar;
-            font-size: Tema.fonte-pequena;
-            color: Tema.texto-2;
-        }
-        Separador { }
-        LinhaInfo {
-            rotulo: @tr("Endereço na tailnet");
-            valor: root.d.ip;
-            acao: root.d.ip != "" ? @tr("Copiar") : "";
-            acionar => { root.copiar(root.d.ip); }
-        }
-        LinhaInfo {
-            rotulo: @tr("MagicDNS");
-            valor: root.d.dns;
-            acao: root.d.dns != "" ? @tr("Copiar") : "";
-            acionar => { root.copiar(root.d.dns); }
-        }
-        LinhaInfo { rotulo: @tr("Visto por último"); valor: root.d.ultimo-acesso; }
-        if root.d.estado == Estado.nao-suportado: Text {
-            wrap: word-wrap;
-            text: @tr("O TailDesk ainda não roda neste sistema. Por enquanto: Windows e Linux.");
-            font-size: Tema.fonte-pequena;
-            color: Tema.texto-2;
+            padding: 20px;
+            spacing: 14px;
+            alignment: start;
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: root.d.nome; font-size: 18px; font-weight: 700; color: Tema.texto; wrap: word-wrap; }
+                Text { text: root.d.so; font-size: Tema.fonte; color: Tema.texto-2; }
+            }
+            ChipStatus { estado: root.d.estado; }
+            Botao {
+                texto: @tr("Conectar");
+                primario: true;
+                habilitado: Textos.conectavel(root.d.estado);
+                clicado => { root.conectar(); }
+            }
+            Botao {
+                texto: root.deste-teste && root.teste.testando ? @tr("Testando…") : @tr("Testar conexão");
+                habilitado: Textos.conectavel(root.d.estado) && !root.teste.testando;
+                clicado => { root.testar(); }
+            }
+            if root.d.pode-ligar: Botao {
+                texto: @tr("Ligar pela rede");
+                clicado => { root.ligar(); }
+            }
+            if root.d.pode-ligar && root.d.aviso-ligar != "": Text {
+                wrap: word-wrap;
+                text: root.d.aviso-ligar;
+                font-size: Tema.fonte-pequena;
+                color: Tema.texto-2;
+            }
+            if root.deste-teste && root.teste.linhas.length > 0: VerticalLayout {
+                spacing: 0px;
+                Separador { }
+                Text {
+                    text: @tr("Teste de conexão");
+                    font-size: Tema.fonte;
+                    font-weight: 700;
+                    color: Tema.texto;
+                    accessible-role: text;
+                }
+                for l in root.teste.linhas: VerticalLayout {
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    spacing: 2px;
+                    Text { text: l.rotulo; font-size: Tema.fonte-pequena; color: Tema.texto-2; }
+                    Text { text: l.valor; font-size: Tema.fonte; color: Tema.texto; wrap: word-wrap; }
+                }
+                if root.teste.relatorio != "": Botao {
+                    texto: @tr("Copiar relatório");
+                    discreto: true;
+                    clicado => { root.copiar(root.teste.relatorio); }
+                }
+            }
+            Separador { }
+            LinhaInfo {
+                rotulo: @tr("Endereço na tailnet");
+                valor: root.d.ip;
+                acao: root.d.ip != "" ? @tr("Copiar") : "";
+                acionar => { root.copiar(root.d.ip); }
+            }
+            LinhaInfo {
+                rotulo: @tr("MagicDNS");
+                valor: root.d.dns;
+                acao: root.d.dns != "" ? @tr("Copiar") : "";
+                acionar => { root.copiar(root.d.dns); }
+            }
+            LinhaInfo { rotulo: @tr("Visto por último"); valor: root.d.ultimo-acesso; }
+            if root.d.estado == Estado.nao-suportado: Text {
+                wrap: word-wrap;
+                text: @tr("O TailDesk ainda não roda neste sistema. Por enquanto: Windows e Linux.");
+                font-size: Tema.fonte-pequena;
+                color: Tema.texto-2;
+            }
         }
     }
 }
@@ -249,7 +283,9 @@ component SecaoDispositivos inherits Rectangle {
     callback busca-mudou(string);
     callback conectar(Dispositivo);
     callback ligar(Dispositivo);
+    callback testar(Dispositivo);
     callback copiar(string);
+    in property <InfoTeste> teste;
 
     HorizontalLayout {
         VerticalLayout {
@@ -299,8 +335,10 @@ component SecaoDispositivos inherits Rectangle {
         if root.dispositivos.length > 0: PainelDetalhe {
             width: 300px;
             d: root.dispositivos[min(root.selecionado, root.dispositivos.length - 1)];
+            teste: root.teste;
             conectar => { root.conectar(self.d); }
             ligar => { root.ligar(self.d); }
+            testar => { root.testar(self.d); }
             copiar(t) => { root.copiar(t); }
         }
     }
@@ -768,6 +806,8 @@ export component JanelaPrincipal inherits Window {
     callback busca-mudou(string);
     callback conectar(Dispositivo);
     // Wake on LAN: acordar um computador desligado da lista.
+    callback testar(Dispositivo);
+    in property <InfoTeste> teste;
     callback ligar(Dispositivo);
     callback abrir-link(string);
     callback verificar();
@@ -875,6 +915,8 @@ export component JanelaPrincipal inherits Window {
                 busca-mudou(t) => { root.busca-mudou(t); }
                 conectar(d) => { root.conectar(d); }
                 ligar(d) => { root.ligar(d); }
+                testar(d) => { root.testar(d); }
+                teste: root.teste;
                 copiar(t) => { root.copiar(t); }
             }
             if root.secao == 1: SecaoConfiguracoes {
