@@ -79,7 +79,7 @@ celular e os passos da conta (§3 item 5).
 
 | # | O que | Issue | Observação |
 |---|---|---|---|
-| 4.1 | Wake on LAN pela tailnet | #95 | Pesquisa pronta em `17-wake-on-lan.md` (pasta do projeto; a issue pede para trazê-la para cá); precisa de duas máquinas na mesma LAN |
+| 4.1 🟡 07/11 (código pronto: #107, #108; falta o teste com duas máquinas na mesma LAN) | Wake on LAN pela tailnet | #95 | `17-wake-on-lan.md`; protocolo em `07-protocolo.md` §3.5; botão "Ligar" no dispositivo desligado |
 | 4.2 | Zero-copy captura → encode → decode → render | #102 | Depois de #93 medido, para comparar |
 | 4.3 | M3 paridade no Android: arquivos, "Compartilhar com TailDesk", áudio, teclado/mouse físicos, tablet com 2 monitores, Teste de conexão completo, clipboard | #96 | Ver `mobile/android-detalhado.md` §3 |
 | 4.4 | M4 host Android (MediaProjection + AccessibilityService) | #96 | Na Play só depois que o Google aprovar a declaração de Accessibility (decisão do Yuri, 03/11); antes, só no APK do GitHub |
