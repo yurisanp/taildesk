@@ -20,6 +20,9 @@ object Ponte {
     /** Arquivos do menu de compartilhar, já no cache: `caminho\tnome\ttamanho` por linha. */
     @JvmStatic external fun nativeCompartilhar(texto: String)
 
+    /** Teclas de um teclado físico na sessão, uma linha cada (ver [TecladoFisico]). */
+    @JvmStatic external fun nativeTeclaFisica(texto: String)
+
     /** Resultado de [MainActivity.publicarDownload]: `ok\tnome` ou `erro\tnome`. */
     @JvmStatic external fun nativeDownloadPublicado(texto: String)
 

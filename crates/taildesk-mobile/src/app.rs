@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use taildesk_keyboard::Mods;
-use taildesk_keyboard::virtual_kb::{TeclaFaixa, Trava};
+use taildesk_keyboard::virtual_kb::Trava;
 use taildesk_overlay::MobileVpnOverlay;
 use taildesk_overlay::mobile::{EstadoTailscale, SinaisRede};
 use taildesk_proto::control::{HelloAck, Msg};
@@ -76,6 +76,13 @@ pub trait Plataforma: 'static {
     /// Texto da área de transferência do sistema (só com o app em foco no Android 10+).
     fn ler_area(&self) -> Option<String> {
         None
+    }
+    /// Liga (na sessão) ou desliga a captura do teclado físico na casca; as teclas voltam por
+    /// [`App::tecla_fisica`].
+    fn teclas_fisicas(&self, _ligar: bool) {}
+    /// Há um teclado físico ligado: o botão ⌨ só mostra a faixa, sem o teclado do sistema.
+    fn tem_teclado_fisico(&self) -> bool {
+        false
     }
 }
 
@@ -240,25 +247,6 @@ fn trava(t: Trava) -> i32 {
         Trava::UmaVez => 1,
         Trava::Travada => 2,
     }
-}
-
-fn tecla_da_faixa(nome: &str) -> Option<TeclaFaixa> {
-    Some(match nome {
-        "esc" => TeclaFaixa::Esc,
-        "tab" => TeclaFaixa::Tab,
-        "enter" => TeclaFaixa::Enter,
-        "del" => TeclaFaixa::Delete,
-        "esquerda" => TeclaFaixa::Esquerda,
-        "direita" => TeclaFaixa::Direita,
-        "cima" => TeclaFaixa::Cima,
-        "baixo" => TeclaFaixa::Baixo,
-        "home" => TeclaFaixa::Home,
-        "end" => TeclaFaixa::End,
-        "pgup" => TeclaFaixa::PageUp,
-        "pgdn" => TeclaFaixa::PageDown,
-        f if f.starts_with('f') => TeclaFaixa::F(f[1..].parse().ok()?),
-        _ => return None,
-    })
 }
 
 fn modificador(nome: &str) -> Mods {
@@ -1016,6 +1004,11 @@ impl App {
         ui.set_tela(Tela::Sessao);
         self.enviar(out);
         self.ler_area();
+        {
+            let e = self.estado.borrow();
+            ui.set_teclado_fisico(e.plat.tem_teclado_fisico());
+            e.plat.teclas_fisicas(true);
+        }
         self.mostrar_sessao();
         let fraco = Rc::downgrade(self);
         self.relogio.start(
@@ -1043,7 +1036,9 @@ impl App {
         self.relogio.stop();
         self.relogio_lento.stop();
         let mut e = self.estado.borrow_mut();
-        e.controle = None;
+        if e.controle.take().is_some() {
+            e.plat.teclas_fisicas(false);
+        }
         e.prazo_consentimento = None;
         e.clip = None;
         if let Some(Alvo::Rede(Some(s))) = e.alvo.take() {
@@ -1204,6 +1199,13 @@ impl App {
             }
         }
         self.mostrar_sessao();
+    }
+
+    /// Tecla de um teclado físico ligado ao celular (linhas de [`crate::fisico`]).
+    pub fn tecla_fisica(&self, linha: &str) {
+        for k in linha.lines().filter_map(crate::fisico::ler) {
+            self.com_controle(|c, out| c.fisica(&k, out));
+        }
     }
 
     fn com_controle(&self, f: impl FnOnce(&mut Controle, &mut Vec<Msg>)) {
@@ -1912,9 +1914,12 @@ impl App {
         }));
         ui.on_encerrar(com!(|a: &Rc<App>| a.encerrar()));
         ui.on_tecla(com1!(|a: &Rc<App>, nome: SharedString| {
-            if let Some(t) = tecla_da_faixa(&nome) {
+            if let Some(t) = crate::fisico::tecla_pelo_nome(&nome) {
                 a.com_controle(|c, out| c.tecla(t, out));
             }
+        }));
+        ui.on_tecla_fisica(com1!(|a: &Rc<App>, linha: SharedString| {
+            a.tecla_fisica(&linha);
         }));
         ui.on_modificador(com1!(|a: &Rc<App>, nome: SharedString| {
             a.com_controle(|c, _| c.modificador(modificador(&nome)));

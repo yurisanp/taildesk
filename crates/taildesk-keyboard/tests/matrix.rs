@@ -584,6 +584,12 @@ impl Celular {
         self.vk.tecla(t, &mut out);
         self.deliver(out);
     }
+
+    fn fisica(&mut self, k: taildesk_keyboard::virtual_kb::Fisica<'_>, mods: Mods) {
+        let mut out = Vec::new();
+        self.vk.fisica(k, mods, &mut out);
+        self.deliver(out);
+    }
 }
 
 fn hosts_do_celular() -> Vec<(&'static str, Keymap)> {
@@ -621,6 +627,32 @@ fn celular_ctrl_c_pela_faixa_e_comando_com_enter() {
         c.tecla(TeclaFaixa::Cima);
         assert_eq!(c.os.text, "sudo systemctl restart nginx", "{nome}");
         assert_eq!(c.os.events, ["<0x28>", "Ctrl+c", "<0x52>"], "{nome}");
+        assert!(c.host.held().next().is_none(), "{nome}: tecla presa");
+    }
+}
+
+#[test]
+fn celular_com_teclado_fisico() {
+    use taildesk_keyboard::virtual_kb::{Fisica, TeclaFaixa};
+    // Rafael R-mobile-2: tablet com teclado Bluetooth ABNT2 no notebook (Linux ABNT2) e no
+    // pc-mae (Win ABNT2). O Android entrega "ç" e "´a" já resolvido como "á".
+    for (nome, remote) in hosts_do_celular() {
+        let mut c = Celular::new(remote);
+        c.fisica(Fisica::Texto("ç"), Mods::NONE);
+        c.fisica(Fisica::Texto("Á"), Mods::SHIFT);
+        // Ctrl+C como caractere de controle e Ctrl+Shift+T pela letra minúscula.
+        c.fisica(Fisica::Texto("\u{3}"), Mods::CTRL);
+        c.fisica(Fisica::Texto("t"), Mods::CTRL.with(Mods::SHIFT));
+        // Shift+seta seleciona; Alt+F4 fecha.
+        c.fisica(Fisica::Tecla(TeclaFaixa::Esquerda), Mods::SHIFT);
+        c.fisica(Fisica::Tecla(TeclaFaixa::F(4)), Mods::ALT);
+        c.fisica(Fisica::Texto("x"), Mods::NONE);
+        assert_eq!(c.os.text, "çÁx", "{nome}");
+        assert_eq!(
+            c.os.events,
+            ["Ctrl+c", "Ctrl+Shift+t", "Shift+<0x50>", "Alt+<0x3d>"],
+            "{nome}"
+        );
         assert!(c.host.held().next().is_none(), "{nome}: tecla presa");
     }
 }

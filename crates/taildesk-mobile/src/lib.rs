@@ -8,7 +8,8 @@
 //! - [`controle`]: a sessão vista do celular (ações e teclas → mensagens; um monitor por vez).
 //! - [`dispositivos`]: lista com favoritos, recentes, estados e a `PeerList` do desktop pareado.
 //! - [`rede`]: rede tarifada e consumo de dados; [`ciclo`]: segundo plano, volta, HUD.
-//! - [`area`]: área de transferência de texto da sessão.
+//! - [`area`]: área de transferência de texto da sessão; [`fisico`]: teclado físico ligado ao
+//!   celular.
 //! - [`arquivos`]: folha de arquivos da sessão (navegar, baixar, enviar, confirmação).
 //! - [`compartilhar`]: "Compartilhar com TailDesk" (envio sem tela da sessão).
 //! - [`demo`]: modo demonstração (host de mentira); [`qr`]: leitura do QR de pareamento.
@@ -41,6 +42,7 @@ pub mod compartilhar;
 pub mod controle;
 pub mod demo;
 pub mod dispositivos;
+pub mod fisico;
 pub mod gestos;
 pub mod qr;
 pub mod rede;

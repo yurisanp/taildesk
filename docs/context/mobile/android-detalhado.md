@@ -148,6 +148,7 @@ Play (`debugSymbolLevel`).
 | `SessionService` (M3) | Foreground Service `mediaPlayback` para o som continuar em segundo plano (MF-72) |
 | `ShareReceiverActivity` (M3) | Alvo de "Compartilhar com TailDesk" (MF-63) |
 | `SafBridge` (M3) | `ACTION_OPEN_DOCUMENT` e gravação em `Download/TailDesk` pelo MediaStore |
+| `TecladoFisico` (M3) | Teclado USB/Bluetooth na sessão: recebe em `dispatchKeyEvent` o que o Slint não aceitou (o backend dele só tem o mapa americano), aplica o layout do aparelho (`getUnicodeChar`), resolve teclas mortas (`getDeadChar`) e trata AltGr como texto; manda ao Rust por `Ponte.nativeTeclaFisica` (`taildesk_mobile::fisico`). Tab e Esc ficam com um `FocusScope` da sessão no Slint, que os comeria na navegação de foco |
 | `HostProjectionActivity`, `HostAccessibilityService` (M4) | Consentimento do MediaProjection e injeção por `dispatchGesture` |
 
 Todo o resto (estado das telas, lista de dispositivos, sessão, gestos, teclado) é Rust/Slint e tem
