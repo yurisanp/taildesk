@@ -26,6 +26,7 @@ mod modelo;
 mod preferencias;
 mod qr;
 mod som;
+mod teste;
 mod video;
 
 use std::cell::{Cell, RefCell};
@@ -141,6 +142,11 @@ impl App {
                 app.controlador
                     .conectar(&app.rt, d.nome.to_string(), d.ip.to_string(), None)
             });
+        });
+        let fraca = j.as_weak();
+        j.on_testar(move |d| {
+            let (fraca, id, ip) = (fraca.clone(), d.id.to_string(), d.ip.to_string());
+            com_app(move |app| teste::iniciar(&app.rt, fraca, id, ip));
         });
         j.on_ligar(|d| {
             let (id, nome) = (d.id.to_string(), d.nome.to_string());

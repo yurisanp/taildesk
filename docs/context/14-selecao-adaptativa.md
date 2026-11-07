@@ -226,6 +226,9 @@ máxima é Média e a aba de teste explica o motivo.
 ### 7.1 Onde fica
 - **Tela inicial** (`12` §5.2): no painel de detalhe do dispositivo, botão **"Testar conexão"**
   ao lado de "Conectar". Abre a aba de teste já com aquele peer.
+  Implementado (primeira versão): o resultado aparece no próprio painel, com as linhas do §7.2
+  itens 1, 2 e 4, os encoders do outro computador e "Copiar relatório"; demonstração e
+  simulação de rede ficam para depois.
 - **Na sessão**: "⋯ → Diagnóstico da conexão" abre a mesma aba numa janela à parte, com os
   números da sessão ao vivo (sem sondagem ativa, para não atrapalhar).
 - **Configurações → Diagnóstico** (`12` §5.9): atalho para a aba e "Copiar relatório".

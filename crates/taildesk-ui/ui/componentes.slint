@@ -28,6 +28,21 @@ export struct Dispositivo {
     aviso-ligar: string,
 }
 
+// Uma linha do teste de conexão (`14-selecao-adaptativa.md` §7.2).
+export struct LinhaTeste {
+    rotulo: string,
+    valor: string,
+}
+
+// Teste de conexão do dispositivo `ip` (vazio = nenhum ainda).
+export struct InfoTeste {
+    ip: string,
+    testando: bool,
+    linhas: [LinhaTeste],
+    // Texto + JSON para "Copiar relatório"; vazio = sem resultado completo.
+    relatorio: string,
+}
+
 export global Textos {
     pure public function estado(e: Estado) -> string {
         if e == Estado.online { return @tr("online"); }
