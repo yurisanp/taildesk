@@ -71,6 +71,13 @@ class MainActivity : NativeActivity() {
 
     fun copiar(texto: String) = runOnUiThread { Acoes.copiar(this, texto) }
 
+    /**
+     * Texto da área de transferência, para a sessão anunciar ao computador. O Android 10+ só
+     * entrega com o app em foco (o Rust chama ao abrir a sessão e ao voltar à frente). Vazio =
+     * nada ou sem acesso.
+     */
+    fun lerAreaTransferencia(): String = Acoes.lerAreaTransferencia(this)
+
     fun abrirLink(url: String) = runOnUiThread { Acoes.abrirLink(this, url) }
 
     fun otimizacaoBateria() = runOnUiThread { Acoes.otimizacaoBateria(this) }
