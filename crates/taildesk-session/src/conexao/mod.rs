@@ -13,6 +13,7 @@
 pub mod clipboard;
 pub mod controlador;
 pub mod host;
+pub mod servico;
 
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};

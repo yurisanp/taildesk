@@ -5,6 +5,8 @@
 targets = [
     "x86_64-unknown-linux-gnu",
     "x86_64-pc-windows-msvc",
+    # App Android (crates/taildesk-mobile): backend android-activity e renderer Skia do Slint.
+    "aarch64-linux-android",
 ]
 all-features = false
 
@@ -81,6 +83,14 @@ crate = "i-slint-renderer-femtovg"
 [[licenses.exceptions]]
 allow = ["LicenseRef-Slint-Royalty-free-2.0"]
 crate = "i-slint-renderer-software"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-backend-android-activity"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-renderer-skia"
 
 [licenses.private]
 ignore = true

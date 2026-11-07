@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O ícone do desktop (packaging/linux/io.github.yurisanp.TailDesk.svg) na área segura de 72 dp
+     do ícone adaptativo de 108 dp: monitor, pé e os três pontos. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#E5E7EB"
+        android:strokeWidth="4.2"
+        android:pathData="M36.6,36.2h34.8a4.2,4.2 0,0 1,4.2 4.2v21.2a4.2,4.2 0,0 1,-4.2 4.2h-34.8a4.2,4.2 0,0 1,-4.2 -4.2v-21.2a4.2,4.2 0,0 1,4.2 -4.2z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#E5E7EB"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round"
+        android:pathData="M45.6,74.4h16.8" />
+    <path android:fillColor="#60A5FA" android:pathData="M45,51m-3.6,0a3.6,3.6 0,1 1,7.2 0a3.6,3.6 0,1 1,-7.2 0" />
+    <path android:fillColor="#60A5FA" android:pathData="M54,51m-3.6,0a3.6,3.6 0,1 1,7.2 0a3.6,3.6 0,1 1,-7.2 0" />
+    <path android:fillColor="#60A5FA" android:pathData="M63,51m-3.6,0a3.6,3.6 0,1 1,7.2 0a3.6,3.6 0,1 1,-7.2 0" />
+</vector>

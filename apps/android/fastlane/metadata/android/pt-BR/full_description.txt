@@ -1,0 +1,24 @@
+Veja e controle seus computadores Windows e Linux pelo celular, de qualquer lugar, pela sua própria rede Tailscale. Sem servidor do TailDesk no meio, sem conta nova e sem anúncios.
+
+COMO FUNCIONA
+• Instale o app oficial do Tailscale no celular e entre na mesma conta dos seus computadores.
+• No computador, abra o TailDesk e vá em Configurações → Celulares → Conectar um celular.
+• No celular, leia o QR. Pronto: seus computadores aparecem na lista.
+
+NA SESSÃO
+• Touchpad: um dedo move o cursor, toque clica, dois dedos rolam e tocar com dois dedos é o botão direito.
+• Toque direto: o dedo é o mouse onde você toca (padrão no tablet).
+• Pinça para ampliar a tela do computador, sem gastar banda.
+• Teclado com acentos certos em qualquer layout do computador (ABNT2, US-Intl, US), mais uma faixa com Esc, Tab, Ctrl, Alt, setas, F1–F12 e Ctrl+Alt+Del.
+• Vários monitores: troque com ◀ ▶.
+• Economiza dados no 4G e só pede ao computador a resolução da tela do celular.
+
+SEGURANÇA E PRIVACIDADE
+• A tela, os toques e o teclado vão direto do celular para os seus computadores, criptografados pelo Tailscale (WireGuard) e pelo QUIC (TLS).
+• Ninguém entra no computador sem a pessoa na frente dele aceitar (ou sem a senha de acesso que você definiu).
+• Sem telemetria, sem análise, sem anúncios. A câmera só é usada para ler o QR.
+
+Quer ver antes de configurar? Toque em "Ver como funciona" para uma demonstração completa sem conta.
+
+O TailDesk é código aberto (MIT OR Apache-2.0): https://github.com/yurisanp/taildesk
+Tailscale é marca da Tailscale Inc.; o TailDesk é um projeto independente.

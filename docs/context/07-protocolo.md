@@ -20,7 +20,8 @@ C → H  Hello {
           proto_version: 1, app_version, platform {os, arch, device_model},
           decode_caps: [CodecCap{codec, profile, max_w, max_h, chroma444, hw, gpu_output}],
           display_prefs {fit, scale_factor, max_fps}, features: [clipboard, files, audio, multi_display, ...],
-          clock: t_client_ns, keyboard, password  (senha de acesso salva; vazia = pedir acesso)
+          clock: t_client_ns, keyboard, password  (senha de acesso salva; vazia = pedir acesso),
+          client_kind: DESKTOP|PHONE|TABLET, viewport {w_px, h_px, dpi}  (celular, §3.4)
        }
 H → C  HelloAck {
           proto_version, host_name, platform, displays: [DisplayInfo] (completo em `13-multimonitor.md` §3: posição, tamanho físico e lógico, escala, rotação, `shared`),
@@ -56,6 +57,7 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | 90–99 | QoS e seleção adaptativa (`14-selecao-adaptativa.md` §4) |
 | 100–109 | Áudio (`15-audio.md` §6.5; reservado) |
 | 110–119 | Chat |
+| 120–129 | Celular: caminho, lista de dispositivos e pareamento (§3.4) |
 
 | Grupo | Mensagens |
 |---|---|
@@ -68,6 +70,7 @@ Implementado em `taildesk_proto::control`: cada mensagem vai num `Control` cujo 
 | QoS | `ReceiverReport{display, recv_kbps, loss_pct, jitter_ms, decode_ms, render_ms, queue_frames, audio_loss_pct, audio_jitter_ms, audio_buffer_ms, concealed_ms}` (a cada 250 ms) |
 | Áudio (`15-audio.md` §6.5) | `StartAudio{stream_id, prefs: AudioPrefs{profile: AUTO|VOICE|MUSIC, max_kbps, channels}}`, `AudioSelected{stream_id, codec=OPUS, sample_rate, channels, frame_ms_x10, bitrate_kbps, redundancy, inband_fec}`, `AudioConfig{stream_id, bitrate_kbps, frame_ms_x10, redundancy}` (troca a quente), `StopAudio{stream_id}`, `AudioStopped{stream_id, reason: BY_CONTROLLER|BY_HOST|NO_PERMISSION|DEVICE_ERROR}` |
 | Chat | `ChatMessage{text}` |
+| Celular (120–124) | `PathInfo{kind, relay_region, rtt_ms}` (H→C), `PeerListRequest{start}` / `PeerList{entries, more}`, `PairRequest{code, device_name}` / `PairResult{ok, cert_fingerprint, error}` (detalhe em §3.4) |
 
 Multi-monitor (`13-multimonitor.md` §3): **um stream de vídeo por monitor**, cada um com encoder, keyframes e `stream_id` próprios, respondido por um `CodecSelected` por `display_id`. Host recusa `StartVideo` acima do seu limite (`Error{TOO_MANY_STREAMS}`; padrão 2 com openh264). Parser: no máximo 16 `DisplayInfo` por mensagem, `name` ≤ 128 bytes.
 
@@ -134,6 +137,50 @@ Quem copia manda uma `ClipboardOffer` com os formatos (e, para arquivos, a lista
 - **`seq`**: cada lado numera as próprias ofertas; pedido de uma oferta que já foi trocada recebe `ClipboardError(GONE)`.
 - **Arquivos colados**: vêm pelos streams de arquivos (§3.1) com `FileRequest`/`FsList` na raiz `CLIPBOARD_ROOT` (`u32::MAX`), caminho `"<índice>/<nome>[/...]"`, onde o índice é a posição em `ClipboardOffer.files` da oferta em vigor.
 - **Limites** (`taildesk_proto::control::limits`): `CLIP_FORMATS = 8` formatos (e `sizes`) por oferta; `CLIP_FILES = 256` itens em `files` (o resto não vai); `CLIP_CHUNK = 32 KiB` por `ClipboardData`; `CLIP_TOTAL = 64 MiB` por formato.
+
+### 3.4 Celular (tags 120–124, `mobile/android-detalhado.md` §7)
+
+O celular não tem LocalAPI (o app do Tailscale não a expõe), então o host desktop informa o
+caminho e a lista de dispositivos, e o pareamento por QR fixa o certificado do host. Nada muda no
+header de 16 bytes nem nos streams.
+
+- **`Hello.client_kind`** (tag 10): `UNSPECIFIED = 0` (desktop antigo), `DESKTOP = 1`, `PHONE = 2`,
+  `TABLET = 3`. Só para exibir ("Celular" no diálogo do host); a identidade continua vindo de
+  `Overlay::identify()`.
+- **`Hello.viewport`** (tag 11): `{w_px, h_px, dpi}` da área útil da tela, cada lado ≤ 8192. O host
+  nunca codifica acima disso, em qualquer degrau do laço lento: `Viewport::fit` mantém a proporção,
+  compara lado maior com maior (a tela gira) e arredonda para lados pares (MF-82).
+- **`KeyboardInfo.source`** (tag 4): `UNSPECIFIED = 0` (= físico), `VIRTUAL = 1`, `HARDWARE = 2`. O
+  teclado virtual não tem layout físico: tudo que é imprimível vai como `KeyChar`; atalhos com as
+  travas da faixa de teclas vão como `KeyShortcut`.
+- **`PathInfo`** (tag 120, H→C, na sessão): `kind` é o `PathKind` do fio (`0` desconhecido,
+  `1` direto LAN, `2` direto internet, `3` relay), `relay_region` (≤ 128 bytes, vazio = nenhuma),
+  `rtt_ms` (0 = sem medida). O host mede pelo `ping` disco do `tailscaled` e manda no início da
+  sessão de um celular e quando muda. É pista para o HUD e o adaptador, nunca a classe de rede.
+
+**Conexões de serviço.** `PeerListRequest` e `PairRequest` vão como **primeira e única mensagem**
+de uma conexão QUIC curta, no lugar do `Hello`: o host responde e fecha (`Close{BY_HOST}`), sem
+diálogo e sem mídia. No meio de uma sessão são ignoradas.
+
+- **`PeerListRequest{start}`** (tag 121, `start` ≤ 256) → **`PeerList{entries, more}`** (tag 122):
+  até 64 `PeerEntry{name ≤ 128 B, dns_name ≤ 253 B, ip, os, online, taildesk: UNKNOWN|YES|NO}` por
+  página e 256 no total; `more` = há mais a partir de `start + entries.len()`. O host só responde
+  ao **mesmo usuário da tailnet** (login do `whois` igual ao do próprio host) ou a um celular
+  **pareado**; para os outros, `Close{NOT_ALLOWED}`. A lista é sugestão: quem conecta é
+  identificado de novo pela tailnet.
+- **`PairRequest{code ≤ 16 B, device_name ≤ 128 B}`** (tag 123) → **`PairResult{ok,
+  cert_fingerprint, error}`** (tag 124). Com `ok`, `cert_fingerprint` tem os 32 bytes do SHA-256 do
+  certificado do host; sem `ok`, vem vazio e `error` diz por quê: `BAD_CODE = 1` (errado ou já
+  usado), `EXPIRED = 2` (passou dos 5 minutos), `TOO_MANY_ATTEMPTS = 3`, `DISABLED = 4` (o host
+  não aceita celulares). O celular pareado fica guardado pelo `node_stable_id` do `whois`, nunca
+  pelo `device_name`.
+
+**QR de pareamento** (`taildesk_proto::pair`): URI
+`taildesk://pair?v=1&n=<nome>&a=<IP da tailnet>&p=<porta>&f=<SHA-256 em hex>&c=<código>`
+(≤ 512 bytes, campos desconhecidos ignorados, `v` maior = atualizar o app). O código tem 6
+símbolos do Base32 de Crockford (`0-9A-Z` sem `I L O U`), vale uma vez por 5 minutos e aparece em
+dois grupos (`K7P-2QX`); ao digitar, `O` vira `0` e `I`/`L` viram `1`. O celular confere o
+certificado contra `f` antes de mandar o código.
 
 ## 4. Header de datagrama de mídia (binário, little-endian, 16 bytes)
 

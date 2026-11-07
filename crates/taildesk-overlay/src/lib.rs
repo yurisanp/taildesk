@@ -6,6 +6,8 @@
 //! - [`SystemOverlay`]: `tailscaled` ≥ 1.102 + LocalAPI (`taildesk-tsapi`), dá caminho, usuário
 //!   e app caps. É o único em produção.
 //! - `LanOverlay`: sockets do SO, só para desenvolvimento e testes.
+//! - [`MobileVpnOverlay`]: o app oficial do Tailscale no celular, sem LocalAPI (estado pelo
+//!   Android, nomes pelo MagicDNS, lista pelo desktop pareado).
 //!
 //! A identidade do peer vem sempre de [`Overlay::identify`], nunca do conteúdo das mensagens.
 
@@ -18,6 +20,8 @@ use std::time::Duration;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerInfo {
     pub hostname: String,
+    /// Nome MagicDNS completo, sem o ponto final; vazio sem MagicDNS.
+    pub dns_name: String,
     pub addr: IpAddr,
     pub os: Option<String>,
     pub online: bool,
@@ -38,8 +42,10 @@ pub struct PeerIdentity {
 
 pub use taildesk_proto::net::PathKind;
 
+pub mod mobile;
 mod system;
 
+pub use mobile::MobileVpnOverlay;
 pub use system::{SystemOverlay, SystemSocket, path_from};
 
 /// Caminho de rede até um peer (`14-selecao-adaptativa.md` §1.1). É pista para a seleção
@@ -107,6 +113,10 @@ pub trait Overlay: Send + Sync + 'static {
     fn identify(&self, remote: SocketAddr)
     -> impl Future<Output = io::Result<PeerIdentity>> + Send;
     fn path(&self, remote: IpAddr) -> impl Future<Output = PathInfo> + Send;
+    /// Login do usuário dono deste nó, quando o backend sabe (o celular, por exemplo, não sabe).
+    fn self_user(&self) -> impl Future<Output = Option<String>> + Send {
+        std::future::ready(None)
+    }
 }
 
 #[cfg(test)]

@@ -7,13 +7,19 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 
+[features]
+default = ["audio", "openh264"]
+# Áudio Opus (`15-audio.md`): a libopus compila com cmake.
+audio = ["dep:opus", "dep:ringbuf"]
+openh264 = ["taildesk-codec/openh264"]
+
 [dependencies]
 taildesk-proto.workspace = true
 taildesk-codec.workspace = true
 # Opus (MIT/Apache-2.0); a libopus (BSD-3) é compilada junto pelo opusic-sys, com cmake.
-opus = "0.4"
+opus = { version = "0.4", optional = true }
 # Fila sem lock entre a thread de decode e o callback de som (MIT/Apache-2.0).
-ringbuf = "0.5"
+ringbuf = { version = "0.5", optional = true }
 
 
 [lints]

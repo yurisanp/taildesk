@@ -1,0 +1,24 @@
+See and control your Windows and Linux computers from your phone, from anywhere, over your own Tailscale network. No TailDesk server in between, no new account and no ads.
+
+HOW IT WORKS
+• Install the official Tailscale app on your phone and sign in with the same account as your computers.
+• On the computer, open TailDesk and go to Settings → Phones → Connect a phone.
+• On the phone, scan the QR code. Done: your computers show up in the list.
+
+IN A SESSION
+• Touchpad: one finger moves the pointer, tap clicks, two fingers scroll and a two-finger tap is a right click.
+• Direct touch: your finger is the mouse where you touch (default on tablets).
+• Pinch to zoom into the computer's screen without using more bandwidth.
+• Keyboard with the right accents for any keyboard layout on the computer, plus a key strip with Esc, Tab, Ctrl, Alt, arrows, F1–F12 and Ctrl+Alt+Del.
+• Multiple displays: switch with ◀ ▶.
+• Saves data on mobile networks and asks the computer only for your phone's screen resolution.
+
+SECURITY AND PRIVACY
+• The screen, touches and keys go straight from your phone to your computers, encrypted by Tailscale (WireGuard) and QUIC (TLS).
+• Nobody gets into a computer without the person in front of it accepting (or without the access password you set).
+• No telemetry, no analytics, no ads. The camera is only used to scan the QR code.
+
+Want to look around first? Tap "See how it works" for a full demo without any account.
+
+TailDesk is open source (MIT OR Apache-2.0): https://github.com/yurisanp/taildesk
+Tailscale is a trademark of Tailscale Inc.; TailDesk is an independent project.

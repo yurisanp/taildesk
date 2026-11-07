@@ -1,0 +1,548 @@
+// Telas fora da sessão (mockups 01–06, 12, 13, 18 em docs/context/mobile/telas/).
+import { LineEdit, ScrollView, Switch, ComboBox, AboutSlint } from "std-widgets.slint";
+import { Tema } from "tema.slint";
+import { Botao, Cartao, LinhaChecagem, Ponto, Separador } from "componentes.slint";
+
+// Como está o Tailscale deste celular (`taildesk_overlay::mobile::EstadoTailscale`).
+export enum EstadoTs { verificando, nao-instalado, desligado, outra-vpn, fora-do-tunel, conectado }
+
+export struct ItemDispositivo {
+    nome: string,
+    // "online · Windows 11", "offline", "sem TailDesk aberto"
+    detalhe: string,
+    // 0 com TailDesk, 1 sem TailDesk, 2 online, 3 offline, 4 desconhecido
+    situacao: int,
+    favorito: bool,
+    conectavel: bool,
+    ip: string,
+    // "windows", "linux"…
+    os: string,
+}
+
+export struct GrupoDispositivos {
+    titulo: string,
+    itens: [ItemDispositivo],
+}
+
+export struct Etapa {
+    texto: string,
+    // 0 pendente, 1 em andamento, 2 feita, 3 falhou
+    estado: int,
+}
+
+export struct LinhaTeste {
+    rotulo: string,
+    valor: string,
+}
+
+// Cabeçalho com título e passos (onboarding).
+component Passos inherits HorizontalLayout {
+    in property <int> atual;
+    alignment: center;
+    spacing: 6px;
+    for i in 3: Rectangle {
+        width: i == root.atual ? 28px : 18px;
+        height: 5px;
+        border-radius: 3px;
+        background: i == root.atual ? Tema.primaria : Tema.borda;
+    }
+}
+
+// MF-01, mockups 01 e 18.
+export component TelaOnboarding inherits Rectangle {
+    in property <EstadoTs> estado;
+    in property <string> versao;
+    in property <bool> versao-antiga;
+    callback abrir-tailscale();
+    callback instalar-tailscale();
+    callback verificar();
+    callback demonstracao();
+    callback continuar();
+
+    background: Tema.fundo;
+    VerticalLayout {
+        padding: Tema.margem;
+        padding-top: 24px;
+        spacing: 16px;
+        Passos { atual: 0; }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 84px;
+                height: 84px;
+                border-radius: 24px;
+                background: Tema.superficie-2;
+                Text {
+                    text: root.estado == EstadoTs.conectado ? "✓" : root.estado == EstadoTs.outra-vpn ? "!" : "⏻";
+                    font-size: 38px;
+                    color: root.estado == EstadoTs.conectado ? Tema.online : root.estado == EstadoTs.outra-vpn ? Tema.perigo : Tema.texto-2;
+                }
+            }
+        }
+        Text {
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            font-size: Tema.fonte-titulo;
+            font-weight: 700;
+            color: Tema.texto;
+            text: root.estado == EstadoTs.nao-instalado ? @tr("Instale o Tailscale")
+                : root.estado == EstadoTs.desligado ? @tr("Ligue o Tailscale")
+                : root.estado == EstadoTs.outra-vpn ? @tr("Outra VPN está ativa")
+                : root.estado == EstadoTs.fora-do-tunel ? @tr("O Tailscale está deixando o TailDesk de fora")
+                : root.estado == EstadoTs.conectado ? @tr("Tudo pronto")
+                : @tr("Verificando o Tailscale…");
+        }
+        Text {
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            font-size: Tema.fonte;
+            color: Tema.texto-2;
+            text: root.estado == EstadoTs.nao-instalado ? @tr("O TailDesk só conecta aparelhos da sua rede Tailscale. Instale o app oficial do Tailscale e entre na mesma conta dos seus computadores.")
+                : root.estado == EstadoTs.desligado ? @tr("O TailDesk só conecta aparelhos da sua rede Tailscale. O app do Tailscale está instalado, mas desligado.")
+                : root.estado == EstadoTs.outra-vpn ? @tr("O Android só deixa uma VPN ligada por vez. Desligue a outra VPN e ligue o Tailscale (para sair pela internet de outro lugar, use um exit node do Tailscale).")
+                : root.estado == EstadoTs.fora-do-tunel ? @tr("No app do Tailscale, em Configurações → Split tunneling (aplicativos excluídos), tire o TailDesk da lista.")
+                : root.estado == EstadoTs.conectado ? @tr("Este celular está na sua tailnet.")
+                : "";
+        }
+        Cartao {
+            VerticalLayout {
+                LinhaChecagem {
+                    texto: @tr("Tailscale instalado");
+                    detalhe: root.versao != "" ? "· " + root.versao + (root.versao-antiga ? " " + @tr("(atualize)") : "") : "";
+                    estado: root.estado == EstadoTs.verificando ? 0 : root.estado == EstadoTs.nao-instalado ? 2 : 1;
+                }
+                Separador { }
+                LinhaChecagem {
+                    texto: @tr("Conectado à tailnet");
+                    estado: root.estado == EstadoTs.conectado || root.estado == EstadoTs.fora-do-tunel ? 1 : root.estado == EstadoTs.verificando ? 0 : 2;
+                }
+                Separador { }
+                LinhaChecagem {
+                    texto: @tr("TailDesk dentro do túnel");
+                    estado: root.estado == EstadoTs.conectado ? 1 : root.estado == EstadoTs.fora-do-tunel ? 2 : 0;
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        if root.estado == EstadoTs.conectado: Botao { texto: @tr("Continuar"); primario: true; clicado => { root.continuar(); } }
+        if root.estado == EstadoTs.nao-instalado: Botao { texto: @tr("Instalar o Tailscale"); primario: true; clicado => { root.instalar-tailscale(); } }
+        if root.estado != EstadoTs.conectado && root.estado != EstadoTs.nao-instalado && root.estado != EstadoTs.verificando: Botao {
+            texto: @tr("Abrir o Tailscale");
+            primario: true;
+            clicado => { root.abrir-tailscale(); }
+        }
+        if root.estado != EstadoTs.conectado: Botao { texto: @tr("Já liguei, verificar de novo"); clicado => { root.verificar(); } }
+        Botao { texto: @tr("Ver como funciona (demonstração)"); discreto: true; clicado => { root.demonstracao(); } }
+    }
+}
+
+// MF-01 passo 2, mockup 02: parear pelo QR ou digitar.
+export component TelaEncontrar inherits Rectangle {
+    in property <string> erro;
+    in property <bool> ocupado;
+    callback ler-qr();
+    callback parear-codigo(string, string);
+    callback pular();
+
+    background: Tema.fundo;
+    property <bool> digitando;
+    VerticalLayout {
+        padding: Tema.margem;
+        padding-top: 24px;
+        spacing: 14px;
+        Passos { atual: 1; }
+        Text {
+            text: @tr("Encontre seus computadores");
+            font-size: Tema.fonte-titulo;
+            font-weight: 700;
+            color: Tema.texto;
+            wrap: word-wrap;
+        }
+        Text {
+            text: @tr("Sem acesso à API do Tailscale no celular, a lista vem de um computador com o TailDesk. No computador, abra Configurações → Celulares → Conectar um celular.");
+            font-size: Tema.fonte;
+            color: Tema.texto-2;
+            wrap: word-wrap;
+        }
+        if !root.digitando: Botao { texto: @tr("Ler o QR do computador"); primario: true; habilitado: !root.ocupado; clicado => { root.ler-qr(); } }
+        if !root.digitando: Botao { texto: @tr("Digitar o nome e o código"); habilitado: !root.ocupado; clicado => { root.digitando = true; } }
+        if root.digitando: Cartao {
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                Text { text: @tr("Nome do computador ou IP 100.x"); font-size: Tema.fonte-pequena; color: Tema.texto-2; }
+                nome := LineEdit { placeholder-text: "desktop-casa"; input-type: text; }
+                Text { text: @tr("Código de 6 caracteres"); font-size: Tema.fonte-pequena; color: Tema.texto-2; }
+                codigo := LineEdit { placeholder-text: "K7P-2QX"; input-type: text; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Botao { texto: @tr("Voltar"); discreto: true; clicado => { root.digitando = false; } }
+                    Botao {
+                        horizontal-stretch: 1;
+                        texto: root.ocupado ? @tr("Pareando…") : @tr("Parear");
+                        primario: true;
+                        habilitado: !root.ocupado && nome.text != "" && codigo.text != "";
+                        clicado => { root.parear-codigo(nome.text, codigo.text); }
+                    }
+                }
+            }
+        }
+        if root.erro != "": Text { text: root.erro; color: Tema.perigo; font-size: Tema.fonte; wrap: word-wrap; }
+        Rectangle { vertical-stretch: 1; }
+        Botao { texto: @tr("Agora não"); discreto: true; clicado => { root.pular(); } }
+    }
+}
+
+component IconeOs inherits Rectangle {
+    in property <string> os;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: Tema.superficie-2;
+    Text {
+        text: root.os == "windows" ? "⊞" : root.os == "linux" ? "🐧" : root.os == "macOS" ? "" : "▣";
+        font-size: 20px;
+        color: Tema.texto;
+    }
+}
+
+component LinhaDispositivo inherits Rectangle {
+    in property <ItemDispositivo> item;
+    callback conectar();
+    callback abrir();
+    height: 68px;
+    accessible-role: button;
+    accessible-label: item.nome + ", " + item.detalhe;
+    accessible-action-default => { abrir(); }
+    TouchArea { clicked => { root.abrir(); } }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 12px;
+        VerticalLayout { alignment: center; IconeOs { os: root.item.os; } }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: (root.item.favorito ? "★ " : "") + root.item.nome;
+                font-size: Tema.fonte-grande;
+                font-weight: 600;
+                color: Tema.texto;
+                overflow: elide;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                VerticalLayout {
+                    alignment: center;
+                    Ponto { cor: root.item.situacao == 0 || root.item.situacao == 2 ? Tema.online : Tema.offline; }
+                }
+                Text { text: root.item.detalhe; font-size: Tema.fonte-pequena; color: Tema.texto-2; overflow: elide; }
+            }
+        }
+        if root.item.conectavel: VerticalLayout {
+            alignment: center;
+            Botao { texto: @tr("Conectar"); primario: true; altura: 40px; clicado => { root.conectar(); } }
+        }
+    }
+}
+
+// MF-10..14, mockup 04.
+export component TelaDispositivos inherits Rectangle {
+    in property <[GrupoDispositivos]> grupos;
+    in property <bool> tarifada;
+    in property <bool> vazio;
+    in property <bool> atualizando;
+    in-out property <string> busca;
+    callback conectar(ItemDispositivo);
+    callback abrir(ItemDispositivo);
+    callback atualizar();
+    callback adicionar();
+
+    background: Tema.fundo;
+    VerticalLayout {
+        padding: Tema.margem;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 8px;
+                background: Tema.primaria;
+                Text { text: "T"; color: white; font-weight: 800; font-size: 18px; }
+            }
+            Text { text: @tr("Dispositivos"); font-size: Tema.fonte-titulo; font-weight: 700; color: Tema.texto; horizontal-stretch: 1; vertical-alignment: center; }
+            Botao { texto: root.atualizando ? "…" : "↻"; discreto: true; altura: 44px; clicado => { root.atualizar(); } }
+            Botao { texto: "+"; discreto: true; altura: 44px; clicado => { root.adicionar(); } }
+        }
+        LineEdit {
+            placeholder-text: @tr("Buscar dispositivos");
+            text <=> root.busca;
+        }
+        if root.tarifada: Rectangle {
+            background: Tema.aviso-fundo;
+            border-radius: Tema.raio;
+            min-height: 44px;
+            HorizontalLayout {
+                padding: 12px;
+                Text {
+                    text: @tr("Dados móveis: economizando dados (até 1 Mbit/s).");
+                    color: Tema.aviso-texto;
+                    font-size: Tema.fonte-pequena;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        if root.vazio: VerticalLayout {
+            spacing: 10px;
+            padding-top: 40px;
+            Text { text: @tr("Nenhum computador ainda"); font-size: Tema.fonte-grande; font-weight: 600; color: Tema.texto; horizontal-alignment: center; }
+            Text {
+                text: @tr("Leia o QR de um computador com o TailDesk (Configurações → Celulares) ou toque em + para digitar o nome.");
+                font-size: Tema.fonte;
+                color: Tema.texto-2;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 8px;
+                alignment: start;
+                for g in root.grupos: VerticalLayout {
+                    spacing: 6px;
+                    padding-bottom: 8px;
+                    Text { text: g.titulo; font-size: Tema.fonte-pequena; font-weight: 700; color: Tema.texto-2; letter-spacing: 0.5px; }
+                    Cartao {
+                        VerticalLayout {
+                            for d[i] in g.itens: VerticalLayout {
+                                if i > 0: Separador { }
+                                LinhaDispositivo {
+                                    item: d;
+                                    conectar => { root.conectar(d); }
+                                    abrir => { root.abrir(d); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MF-13, mockup 05: cartão de detalhe (folha de baixo).
+export component FolhaDetalhe inherits Rectangle {
+    in property <ItemDispositivo> item;
+    in property <string> via;
+    callback conectar();
+    callback testar();
+    callback copiar();
+    callback favoritar();
+    callback esquecer();
+    callback fechar();
+
+    background: #00000066;
+    TouchArea { clicked => { root.fechar(); } }
+    Rectangle {
+        y: parent.height - self.height;
+        height: conteudo.preferred-height;
+        background: Tema.superficie;
+        border-top-left-radius: 20px;
+        border-top-right-radius: 20px;
+        TouchArea { }
+        conteudo := VerticalLayout {
+            padding: 20px;
+            spacing: 10px;
+            Text { text: root.item.nome; font-size: 22px; font-weight: 700; color: Tema.texto; }
+            Text { text: root.item.detalhe + " · " + root.item.ip + (root.via != "" ? " · " + @tr("via {}", root.via) : ""); font-size: Tema.fonte-pequena; color: Tema.texto-2; wrap: word-wrap; }
+            Botao { texto: @tr("Conectar"); primario: true; habilitado: root.item.conectavel; clicado => { root.conectar(); } }
+            Botao { texto: @tr("Testar conexão"); clicado => { root.testar(); } }
+            HorizontalLayout {
+                spacing: 8px;
+                Botao { horizontal-stretch: 1; texto: @tr("Copiar endereço"); clicado => { root.copiar(); } }
+                Botao { horizontal-stretch: 1; texto: root.item.favorito ? @tr("Tirar dos favoritos") : @tr("Favoritar"); clicado => { root.favoritar(); } }
+            }
+            Botao { texto: @tr("Esquecer"); perigo: true; discreto: true; clicado => { root.esquecer(); } }
+        }
+    }
+}
+
+// MF-30, mockup 06.
+export component TelaConectando inherits Rectangle {
+    in property <string> nome;
+    in property <[Etapa]> etapas;
+    in property <string> erro;
+    in property <int> restante;
+    callback cancelar();
+    callback tentar-de-novo();
+
+    background: Tema.fundo;
+    VerticalLayout {
+        padding: Tema.margem;
+        padding-top: 60px;
+        spacing: 18px;
+        Text { text: root.nome; font-size: Tema.fonte-titulo; font-weight: 700; color: Tema.texto; horizontal-alignment: center; }
+        Cartao {
+            VerticalLayout {
+                padding: 8px;
+                for e in root.etapas: HorizontalLayout {
+                    height: Tema.toque;
+                    padding-left: 10px;
+                    spacing: 12px;
+                    Text {
+                        width: 24px;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                        text: e.estado == 2 ? "✓" : e.estado == 3 ? "✕" : e.estado == 1 ? "•" : "○";
+                        color: e.estado == 2 ? Tema.online : e.estado == 3 ? Tema.perigo : e.estado == 1 ? Tema.primaria : Tema.offline;
+                        font-size: 18px;
+                        font-weight: 700;
+                    }
+                    Text { text: e.texto; vertical-alignment: center; color: e.estado == 0 ? Tema.texto-2 : Tema.texto; font-size: Tema.fonte; wrap: word-wrap; }
+                }
+            }
+        }
+        if root.restante > 0 && root.erro == "": Text {
+            text: @tr("A pessoa no computador tem {} s para aceitar.", root.restante);
+            font-size: Tema.fonte-pequena;
+            color: Tema.texto-2;
+            horizontal-alignment: center;
+        }
+        if root.erro != "": Text { text: root.erro; color: Tema.perigo; font-size: Tema.fonte; wrap: word-wrap; horizontal-alignment: center; }
+        Rectangle { vertical-stretch: 1; }
+        if root.erro != "": Botao { texto: @tr("Tentar de novo"); primario: true; clicado => { root.tentar-de-novo(); } }
+        Botao { texto: root.erro != "" ? @tr("Voltar") : @tr("Cancelar"); clicado => { root.cancelar(); } }
+    }
+}
+
+// MF-83 mínimo do M1, mockup 12.
+export component TelaTeste inherits Rectangle {
+    in property <string> nome;
+    in property <[LinhaTeste]> linhas;
+    in property <bool> testando;
+    callback testar();
+    callback voltar();
+
+    background: Tema.fundo;
+    VerticalLayout {
+        padding: Tema.margem;
+        spacing: 14px;
+        HorizontalLayout {
+            Botao { texto: "←"; discreto: true; altura: 44px; clicado => { root.voltar(); } }
+            Text { text: @tr("Teste de conexão"); font-size: 22px; font-weight: 700; color: Tema.texto; vertical-alignment: center; }
+        }
+        Text { text: root.nome; font-size: Tema.fonte; color: Tema.texto-2; }
+        Cartao {
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                for l[i] in root.linhas: VerticalLayout {
+                    if i > 0: Separador { }
+                    HorizontalLayout {
+                        height: Tema.toque;
+                        Text { text: l.rotulo; color: Tema.texto-2; font-size: Tema.fonte; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: l.valor; color: Tema.texto; font-size: Tema.fonte; font-weight: 600; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        Botao { texto: root.testando ? @tr("Testando…") : @tr("Testar de novo"); primario: true; habilitado: !root.testando; clicado => { root.testar(); } }
+    }
+}
+
+// MF-100, mockup 13.
+export component TelaConfiguracoes inherits Rectangle {
+    in property <[string]> pareados;
+    in-out property <int> modo-toque;
+    in-out property <int> qualidade;
+    in-out property <bool> economizar-em-movel;
+    in property <string> versao;
+    callback modo-toque-mudou(int);
+    callback qualidade-mudou(int);
+    callback economizar-mudou(bool);
+    callback remover-pareado(int);
+    callback abrir-link(string);
+    callback otimizacao-bateria();
+
+    background: Tema.fundo;
+    ScrollView {
+        VerticalLayout {
+            padding: Tema.margem;
+            spacing: 12px;
+            alignment: start;
+            Text { text: @tr("Configurações"); font-size: Tema.fonte-titulo; font-weight: 700; color: Tema.texto; }
+            Text { text: @tr("SESSÃO"); font-size: Tema.fonte-pequena; font-weight: 700; color: Tema.texto-2; }
+            Cartao {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+                    Text { text: @tr("Modo de toque padrão"); color: Tema.texto; font-size: Tema.fonte; }
+                    ComboBox {
+                        model: [@tr("Touchpad"), @tr("Toque direto")];
+                        current-index <=> root.modo-toque;
+                        selected => { root.modo-toque-mudou(self.current-index); }
+                    }
+                    Text { text: @tr("Qualidade"); color: Tema.texto; font-size: Tema.fonte; }
+                    ComboBox {
+                        model: [@tr("Automática"), @tr("Nitidez"), @tr("Fluidez"), @tr("Economizar dados")];
+                        current-index <=> root.qualidade;
+                        selected => { root.qualidade-mudou(self.current-index); }
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: @tr("Economizar dados em dados móveis"); color: Tema.texto; font-size: Tema.fonte; wrap: word-wrap; horizontal-stretch: 1; vertical-alignment: center; }
+                        Switch { checked <=> root.economizar-em-movel; toggled => { root.economizar-mudou(self.checked); } }
+                    }
+                }
+            }
+            Text { text: @tr("COMPUTADORES PAREADOS"); font-size: Tema.fonte-pequena; font-weight: 700; color: Tema.texto-2; }
+            Cartao {
+                VerticalLayout {
+                    padding-left: 16px;
+                    padding-right: 8px;
+                    if root.pareados.length == 0: Text { height: Tema.toque; vertical-alignment: center; text: @tr("Nenhum."); color: Tema.texto-2; font-size: Tema.fonte; }
+                    for p[i] in root.pareados: HorizontalLayout {
+                        height: Tema.toque;
+                        Text { text: p; color: Tema.texto; font-size: Tema.fonte; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                        Botao { texto: @tr("Remover"); perigo: true; discreto: true; altura: 40px; clicado => { root.remover-pareado(i); } }
+                    }
+                }
+            }
+            Text { text: @tr("BATERIA"); font-size: Tema.fonte-pequena; font-weight: 700; color: Tema.texto-2; }
+            Cartao {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+                    Text {
+                        text: @tr("Alguns celulares (Samsung, Xiaomi) fecham o Tailscale e o TailDesk em segundo plano. Deixe os dois fora da otimização de bateria.");
+                        color: Tema.texto-2;
+                        font-size: Tema.fonte-pequena;
+                        wrap: word-wrap;
+                    }
+                    Botao { texto: @tr("Abrir otimização de bateria"); clicado => { root.otimizacao-bateria(); } }
+                }
+            }
+            Text { text: @tr("SOBRE"); font-size: Tema.fonte-pequena; font-weight: 700; color: Tema.texto-2; }
+            Cartao {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 8px;
+                    Text { text: @tr("TailDesk {}", root.versao); color: Tema.texto; font-size: Tema.fonte; font-weight: 600; }
+                    Text { text: @tr("Código aberto, MIT OR Apache-2.0. Sem anúncios e sem telemetria."); color: Tema.texto-2; font-size: Tema.fonte-pequena; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Botao { horizontal-stretch: 1; texto: @tr("Código no GitHub"); clicado => { root.abrir-link("https://github.com/yurisanp/taildesk"); } }
+                        Botao { horizontal-stretch: 1; texto: @tr("Privacidade"); clicado => { root.abrir-link("https://yurisanp.github.io/taildesk/privacidade/"); } }
+                    }
+                }
+            }
+            // Atribuição exigida pela licença royalty-free do Slint (MNF-09).
+            AboutSlint { }
+        }
+    }
+}

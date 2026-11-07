@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use slint::{CloseRequestResponse, ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use taildesk_keyboard::{Inject, Keymap, Locks};
 use taildesk_overlay::{Overlay, SystemOverlay};
-use taildesk_proto::control::{KeyboardInfo, Msg, Permissions, Platform};
+use taildesk_proto::control::{
+    ClientKind, KeyboardInfo, KeyboardSource, Msg, Permissions, Platform,
+};
 use taildesk_session::conexao::PORTA;
 use taildesk_session::conexao::host::{
     CanalMidia, ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, IdSessao, Maquina, servir,
@@ -68,6 +70,23 @@ async fn abrir_porta(overlay: &SystemOverlay, id: &Identity) -> quinn::Endpoint 
     }
 }
 
+/// O que a tela "Celulares" precisa para montar o QR (`taildesk_proto::pair`). Só existe depois
+/// que a porta abriu no IP da tailnet.
+#[derive(Debug)]
+pub struct InfoPareamento {
+    pub pareamento: Arc<Mutex<taildesk_session::Pareamento>>,
+    pub addr: SocketAddr,
+    pub fingerprint: [u8; 32],
+    pub nome: String,
+}
+
+static PAREAMENTO: std::sync::OnceLock<InfoPareamento> = std::sync::OnceLock::new();
+
+/// Dados do QR; `None` enquanto o Tailscale não deu IP a este computador.
+pub fn pareamento() -> Option<&'static InfoPareamento> {
+    PAREAMENTO.get()
+}
+
 /// Sobe o host quando o Tailscale tiver IP e atende até o app fechar.
 pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
     let id = tokio::task::spawn_blocking(identidade)
@@ -87,6 +106,15 @@ pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
     let endpoint = abrir_porta(&overlay, &id).await;
     crate::midia_host::preparar_encode_caps().await;
     let inbox = crate::preferencias::pasta_entrada();
+    let pareamento = Arc::new(Mutex::new(taildesk_session::Pareamento::default()));
+    if let Ok(addr) = endpoint.local_addr() {
+        let _ = PAREAMENTO.set(InfoPareamento {
+            pareamento: pareamento.clone(),
+            addr,
+            fingerprint: id.fingerprint(),
+            nome: nome_do_computador(),
+        });
+    }
     let config = Arc::new(ConfigHost {
         settings,
         inbox,
@@ -94,6 +122,8 @@ pub async fn rodar(settings: Arc<Mutex<HostSettings>>) {
         auditoria: crate::historico::auditoria_arquivos(),
         acessos: crate::historico::registro(),
         tela_de_entrada: false,
+        pareamento,
+        fingerprint: id.fingerprint(),
     });
     let (tx, mut rx) = mpsc::channel(64);
     tokio::spawn(servir(
@@ -186,6 +216,9 @@ pub fn rodar_agente(perfil: std::path::PathBuf) -> std::io::Result<()> {
                 auditoria: None,
                 acessos: Some(acessos),
                 tela_de_entrada: true,
+                // Ninguém na tela para mostrar o QR: nenhum código fica em vigor.
+                pareamento: Arc::default(),
+                fingerprint: id.fingerprint(),
             });
             let (tx, mut rx) = mpsc::channel(64);
             tokio::spawn(servir(
@@ -459,6 +492,7 @@ impl Maquina for MaquinaApp {
                 layout_tag: taildesk_keyboard::layout_tag(&os_layout_id),
                 os_layout_id,
                 extra_hid: Vec::new(),
+                source: KeyboardSource::Hardware.into(),
             },
             encode_caps: crate::midia_host::encode_caps(),
             keymap,
@@ -863,6 +897,12 @@ impl Ui {
                 crate::com_app(crate::App::atualizar_configuracoes);
                 self.faixa(sessao, &peer.hostname, permissoes, comandos);
             }
+            EventoHost::Pareado { peer } => {
+                gravar_settings(settings);
+                crate::preferencias::celular_pareado();
+                crate::com_app(crate::App::atualizar_configuracoes);
+                avisar(format!("Celular pareado: {}.", peer.hostname));
+            }
             EventoHost::Fim { sessao, .. } => {
                 self.fechar_pedido(sessao);
                 crate::com_app(crate::App::atualizar_configuracoes);
@@ -908,6 +948,12 @@ impl Ui {
         let p = &prompt.peer;
         janela.set_peer(p.hostname.as_str().into());
         let mut detalhe = Vec::new();
+        // Dito pelo próprio controlador no `Hello`: só ajuda a reconhecer o pedido.
+        match prompt.client_kind {
+            ClientKind::Phone => detalhe.push("Celular".to_owned()),
+            ClientKind::Tablet => detalhe.push("Tablet".to_owned()),
+            ClientKind::Unspecified | ClientKind::Desktop => {}
+        }
         if let Some(u) = &p.user_login {
             detalhe.push(format!("Usuário: {u}"));
         }

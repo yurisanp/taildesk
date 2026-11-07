@@ -13,8 +13,10 @@ pub mod cor;
 mod h264;
 #[cfg(target_os = "linux")]
 pub mod linux;
+pub mod mediacodec;
 #[cfg(any(target_os = "linux", windows))]
 pub mod nvidia;
+#[cfg(feature = "openh264")]
 mod openh264;
 #[cfg(any(target_os = "linux", windows))]
 pub mod pyrowave;
@@ -22,6 +24,7 @@ mod selecao;
 #[cfg(windows)]
 pub mod windows;
 
+#[cfg(feature = "openh264")]
 pub use crate::openh264::{DecoderOpenH264, EncoderOpenH264};
 pub use crate::selecao::{
     Opcao, abrir_decoder, candidatos_encoder, codecs_para_decodificar, nome_codec, opcoes_decoder,

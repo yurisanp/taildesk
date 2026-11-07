@@ -1,0 +1,1 @@
+First TailDesk release for Android: pair with a computer by QR code, see and control Windows and Linux over your Tailscale network, with touchpad, direct touch, zoom, a keyboard with accents and a key strip, display switching and data saving on mobile networks.

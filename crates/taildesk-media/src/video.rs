@@ -15,7 +15,7 @@ pub use fragmentos::{Fragmentador, Remontador, Remontagem};
 pub use medidor::Medidor;
 pub use recepcao::{AoQuadro, PedirChave, RecepcaoVideo};
 
-#[cfg(test)]
+#[cfg(all(test, feature = "openh264"))]
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
@@ -86,6 +86,7 @@ mod tests {
             ConfigEnvio {
                 stream_id: 2,
                 fps_max: 1000.0,
+                viewport: None,
             },
             Box::new(
                 EncoderOpenH264::novo(ConfigEncoder {
@@ -168,6 +169,7 @@ mod tests {
             ConfigEnvio {
                 stream_id: 0,
                 fps_max: 1000.0,
+                viewport: None,
             },
             Box::new(
                 EncoderOpenH264::novo(ConfigEncoder {

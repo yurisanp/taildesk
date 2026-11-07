@@ -12,10 +12,14 @@
 //! `TAILDESK_ENCODER` e `TAILDESK_DECODER` (ex.: `vaapi`, `nvenc,openh264`) restringem e
 //! reordenam as listas pelo nome do backend, para diagnóstico.
 
-use crate::{
-    CodecVideo, ConfigEncoder, DecoderOpenH264, EncoderOpenH264, ErroCodec, VideoDecoder,
-    VideoEncoder,
-};
+use crate::{CodecVideo, ConfigEncoder, ErroCodec, VideoDecoder, VideoEncoder};
+#[cfg(feature = "openh264")]
+use crate::{DecoderOpenH264, EncoderOpenH264};
+
+#[cfg(not(feature = "openh264"))]
+fn sem_openh264() -> ErroCodec {
+    ErroCodec::Backend("openh264 não entrou neste build".into())
+}
 
 /// Onde um backend roda.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,7 +56,13 @@ impl Opcao {
     /// Abre o encoder desta opção (com o quadro de teste dos backends de hardware).
     pub fn abrir_encoder(&self, config: ConfigEncoder) -> Result<Box<dyn VideoEncoder>, ErroCodec> {
         match &self.onde {
+            #[cfg(feature = "openh264")]
             Onde::Cpu => Ok(Box::new(EncoderOpenH264::novo(config)?)),
+            #[cfg(not(feature = "openh264"))]
+            Onde::Cpu => {
+                let _ = config;
+                Err(sem_openh264())
+            }
             #[cfg(any(target_os = "linux", windows))]
             Onde::Nvidia(dev) => Ok(Box::new(crate::nvidia::nvenc::EncoderNvenc::novo(
                 *dev,
@@ -76,7 +86,10 @@ impl Opcao {
     /// Abre o decoder desta opção.
     pub fn abrir_decoder(&self) -> Result<Box<dyn VideoDecoder>, ErroCodec> {
         match &self.onde {
+            #[cfg(feature = "openh264")]
             Onde::Cpu => Ok(Box::new(DecoderOpenH264::novo()?)),
+            #[cfg(not(feature = "openh264"))]
+            Onde::Cpu => Err(sem_openh264()),
             #[cfg(any(target_os = "linux", windows))]
             Onde::Nvidia(dev) => Ok(Box::new(crate::nvidia::nvdec::DecoderNvdec::novo(
                 *dev,

@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use taildesk_codec::CodecVideo;
 use taildesk_proto::control::Codec;
-use taildesk_ui::JanelaPrincipal;
+use taildesk_ui::{InfoCelulares, JanelaPrincipal};
 
 use crate::config::{self, ModoMonitores, PrefsMonitores, PrefsVideo};
 use crate::{avisar, com_app, no_app};
@@ -156,6 +156,7 @@ pub fn mostrar(j: &JanelaPrincipal) {
         .map(|t| t.name.as_str().into())
         .collect();
     j.set_confiaveis(ModelRc::new(VecModel::from(nomes)));
+    j.set_celulares(info_celulares(&settings));
     j.set_pasta_entrada(
         pasta_entrada()
             .map(|p| p.display().to_string())
@@ -186,6 +187,150 @@ pub fn mostrar(j: &JanelaPrincipal) {
             j.set_teclado_local(teclado.into());
         });
     });
+}
+
+/// QR na tela (Configurações → Celulares): a imagem fica guardada para não redesenhar a cada
+/// segundo da contagem.
+struct QrNaTela {
+    imagem: slint::Image,
+    codigo: String,
+    endereco: String,
+    prazo: std::time::Instant,
+    _relogio: slint::Timer,
+}
+
+thread_local! {
+    static QR: std::cell::RefCell<Option<QrNaTela>> = const { std::cell::RefCell::new(None) };
+    /// Motivo de não haver QR (Tailscale sem IP), enquanto a área estiver aberta.
+    static ERRO_QR: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+fn info_celulares(settings: &taildesk_session::HostSettings) -> InfoCelulares {
+    let nomes: Vec<SharedString> = settings
+        .phones
+        .iter()
+        .map(|p| {
+            if p.device_name.is_empty() || p.device_name == p.name {
+                p.name.as_str().into()
+            } else {
+                format!("{} · {}", p.device_name, p.name).into()
+            }
+        })
+        .collect();
+    let mut info = InfoCelulares {
+        permitir: settings.allow_phones,
+        nomes: ModelRc::new(VecModel::from(nomes)),
+        ..InfoCelulares::default()
+    };
+    ERRO_QR.with_borrow(|e| {
+        if let Some(e) = e {
+            info.mostrando_qr = true;
+            info.erro = e.as_str().into();
+        }
+    });
+    QR.with_borrow(|q| {
+        if let Some(q) = q {
+            info.mostrando_qr = true;
+            info.qr = q.imagem.clone();
+            info.codigo = q.codigo.as_str().into();
+            info.endereco = q.endereco.as_str().into();
+            info.restante = q
+                .prazo
+                .saturating_duration_since(std::time::Instant::now())
+                .as_secs_f32()
+                .ceil() as i32;
+        }
+    });
+    info
+}
+
+/// Atualiza só o cartão dos celulares (a contagem roda a cada segundo).
+fn mostrar_celulares() {
+    no_app(|app| {
+        if let Some(j) = app.janela.borrow().as_ref() {
+            let settings = app
+                .settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            j.set_celulares(info_celulares(&settings));
+        }
+    });
+}
+
+/// "Conectar um celular": código novo e o QR com ele.
+fn mostrar_qr() {
+    fechar_qr();
+    let Some(info) = crate::host::pareamento() else {
+        ERRO_QR.set(Some(
+            "O Tailscale deste computador ainda não está conectado. Conecte-o e tente de novo."
+                .into(),
+        ));
+        mostrar_celulares();
+        return;
+    };
+    let mut aleatorio = [0u8; taildesk_proto::pair::CODE_LEN];
+    if let Err(e) = getrandom::fill(&mut aleatorio) {
+        ERRO_QR.set(Some(format!("Não foi possível gerar o código: {e}")));
+        mostrar_celulares();
+        return;
+    }
+    let agora = std::time::Instant::now();
+    let codigo = info
+        .pareamento
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .novo_codigo(aleatorio, agora);
+    let oferta = taildesk_proto::pair::PairOffer {
+        host_name: info.nome.clone(),
+        addr: info.addr.ip(),
+        port: info.addr.port(),
+        fingerprint: info.fingerprint,
+        code: codigo.clone(),
+    };
+    let Some(qr) = crate::qr::gerar(&oferta.to_uri()) else {
+        ERRO_QR.set(Some("Não foi possível desenhar o QR.".into()));
+        mostrar_celulares();
+        return;
+    };
+    let relogio = slint::Timer::default();
+    relogio.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_secs(1),
+        mostrar_celulares,
+    );
+    let endereco = if info.nome.is_empty() {
+        info.addr.ip().to_string()
+    } else {
+        format!("{} ({})", info.nome, info.addr.ip())
+    };
+    QR.set(Some(QrNaTela {
+        imagem: crate::qr::imagem(&qr),
+        codigo: taildesk_proto::pair::display_code(&codigo),
+        endereco,
+        prazo: agora + std::time::Duration::from_secs(taildesk_proto::pair::CODE_TTL_SECS),
+        _relogio: relogio,
+    }));
+    mostrar_celulares();
+}
+
+/// Fecha a área do QR; o código para de valer.
+fn fechar_qr() {
+    ERRO_QR.set(None);
+    if QR.take().is_some()
+        && let Some(info) = crate::host::pareamento()
+    {
+        info.pareamento
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cancelar();
+    }
+}
+
+/// Um celular pareou: o QR (já gasto) some.
+pub fn celular_pareado() {
+    ERRO_QR.set(None);
+    QR.take();
 }
 
 /// `~/Downloads/TailDesk`, onde chegam os arquivos recebidos.
@@ -311,6 +456,38 @@ pub fn ligar(j: &JanelaPrincipal) {
             app.atualizar_configuracoes();
             if let Some(n) = nome {
                 avisar(format!("{n} vai precisar pedir acesso de novo."));
+            }
+        });
+    });
+    j.on_conectar_celular(mostrar_qr);
+    j.on_cancelar_qr(|| {
+        fechar_qr();
+        mostrar_celulares();
+    });
+    j.on_permitir_celulares_mudou(|v| {
+        if !v {
+            fechar_qr();
+        }
+        no_app(move |app| {
+            app.settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .allow_phones = v;
+            crate::host::gravar_settings(&app.settings);
+            app.atualizar_configuracoes();
+        });
+    });
+    j.on_remover_celular(|i| {
+        no_app(move |app| {
+            let nome = {
+                let mut s = app.settings.lock().unwrap_or_else(|e| e.into_inner());
+                let i = i as usize;
+                (i < s.phones.len()).then(|| s.phones.remove(i).name)
+            };
+            crate::host::gravar_settings(&app.settings);
+            app.atualizar_configuracoes();
+            if let Some(n) = nome {
+                avisar(format!("{n} não vê mais os computadores desta tailnet."));
             }
         });
     });

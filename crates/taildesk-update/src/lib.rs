@@ -347,6 +347,21 @@ mod tests {
     }
 
     #[test]
+    fn release_do_app_android_nao_conta() {
+        // O app Android publica `android-vX.Y.Z` no mesmo repositório (android-release.yml).
+        let mut r = releases();
+        let android: Vec<ReleaseApi> = serde_json::from_str(
+            r#"[{"tag_name": "android-v9.0.0", "html_url": "https://example.invalid", "draft": false,
+                 "prerelease": false, "assets": [{"name": "TailDesk-9.0.0.apk",
+                 "browser_download_url": "https://example.invalid/apk", "size": 10}]}]"#,
+        )
+        .unwrap();
+        r.splice(0..0, android);
+        let a = escolher(r, Canal::Estavel, &Version::new(0, 1, 0)).unwrap();
+        assert_eq!(a.tag, "v0.2.0");
+    }
+
+    #[test]
     fn escolhe_a_mais_nova_do_canal() {
         let atual = Version::new(0, 1, 0);
         let a = escolher(releases(), Canal::Estavel, &atual).unwrap();

@@ -1,0 +1,323 @@
+// Sessão no celular (mockups 07, 08 e 09; MF-40..50). O vídeo chega numa `image` (textura do
+// wgpu no Android); no modo demonstração o "computador" é desenhado aqui mesmo.
+import { Tema } from "tema.slint";
+import { BotaoBarra, TeclaFaixa } from "componentes.slint";
+
+// Área de trabalho de mentira do modo demonstração (`taildesk_mobile::demo`).
+component AreaDemo inherits Rectangle {
+    in property <int> monitor;
+    in property <string> texto;
+    in property <[string]> registro;
+    property <float> k: self.width / 1920px;
+    clip: true;
+    background: @linear-gradient(160deg, #24508a 0%, #16335c 100%);
+    if root.monitor == 0: Rectangle {
+        x: 160px * root.k;
+        y: 110px * root.k;
+        width: 1050px * root.k;
+        height: 620px * root.k;
+        background: white;
+        border-radius: 10px * root.k;
+        drop-shadow-blur: 30px * root.k;
+        drop-shadow-color: #0006;
+        Rectangle {
+            y: 0;
+            height: 44px * root.k;
+            background: #eef0f4;
+            border-top-left-radius: 10px * root.k;
+            border-top-right-radius: 10px * root.k;
+            Text { x: 20px * root.k; text: "●●●   " + @tr("Documento"); color: #7a808c; font-size: 20px * root.k; vertical-alignment: center; }
+        }
+        Text {
+            x: 30px * root.k;
+            y: 70px * root.k;
+            width: parent.width - 60px * root.k;
+            text: root.texto + "▏";
+            color: #1a1d23;
+            font-size: 30px * root.k;
+            wrap: word-wrap;
+        }
+    }
+    if root.monitor == 0: Rectangle {
+        x: 1300px * root.k;
+        y: 200px * root.k;
+        width: 480px * root.k;
+        height: 330px * root.k;
+        background: white;
+        border-radius: 10px * root.k;
+        Text { x: 18px * root.k; y: 12px * root.k; text: @tr("Arquivos"); color: #7a808c; font-size: 20px * root.k; }
+        for i in 4: Rectangle {
+            x: 18px * root.k;
+            y: (60px + i * 52px) * root.k;
+            width: (400px - i * 60px) * root.k;
+            height: 18px * root.k;
+            border-radius: 9px * root.k;
+            background: #e3e6ec;
+        }
+    }
+    if root.monitor == 1: Rectangle {
+        x: 120px * root.k;
+        y: 90px * root.k;
+        width: 1680px * root.k;
+        height: 760px * root.k;
+        background: #1b1e25;
+        border-radius: 10px * root.k;
+        VerticalLayout {
+            padding: 30px * root.k;
+            spacing: 8px * root.k;
+            alignment: start;
+            Text { text: "yuri@" + "pc-demonstracao:~$ journalctl -f"; color: #8fe39a; font-size: 26px * root.k; font-family: "monospace"; }
+            for r in root.registro: Text { text: "taildesk: " + r; color: #d7dbe3; font-size: 26px * root.k; font-family: "monospace"; }
+        }
+    }
+}
+
+export component TelaSessao inherits Rectangle {
+    in property <string> nome;
+    in property <image> quadro;
+    in property <bool> tem-quadro;
+    in property <bool> demo;
+    in property <int> demo-monitor;
+    in property <string> demo-texto;
+    in property <[string]> demo-registro;
+    // Onde a imagem do monitor fica (zoom e pan já aplicados).
+    in property <length> img-x;
+    in property <length> img-y;
+    in property <length> img-w;
+    in property <length> img-h;
+    in property <length> cursor-x;
+    in property <length> cursor-y;
+    in property <bool> cursor-visivel;
+    in property <string> monitor-texto;
+    in property <bool> varios-monitores;
+    in property <[string]> monitores;
+    in property <int> monitor-atual;
+    in property <int> modo-toque;
+    in property <bool> hud-visivel;
+    in property <string> hud;
+    in property <string> indicador-teclado;
+    in property <int> trava-ctrl;
+    in property <int> trava-alt;
+    in property <int> trava-meta;
+    in property <int> trava-shift;
+    in property <string> aviso;
+    in-out property <bool> barra-aberta: true;
+    in-out property <bool> teclado-aberto;
+    in-out property <bool> mostrando-monitores;
+
+    callback toque(int, length, length);
+    callback pinca-comecou(length, length);
+    callback pinca(float, length, length);
+    callback pinca-acabou(bool);
+    callback area-mudou(length, length);
+    callback trocar-monitor(int);
+    callback ir-monitor(int);
+    callback alternar-modo();
+    callback alternar-hud();
+    callback encerrar();
+    callback tecla(string);
+    callback modificador(string);
+    callback modificador-segurado(string);
+    callback ctrl-alt-del();
+    callback texto(string);
+    callback apagar(int);
+
+    background: #0d0f13;
+
+    // Área do vídeo: tudo menos a faixa de teclas (o teclado do sistema empurra a janela).
+    area := Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height - (root.teclado-aberto ? faixa.height : 0px);
+        clip: true;
+        changed width => { root.area-mudou(self.width, self.height); }
+        changed height => { root.area-mudou(self.width, self.height); }
+        init => { root.area-mudou(self.width, self.height); }
+
+        if root.tem-quadro && !root.demo: Image {
+            x: root.img-x;
+            y: root.img-y;
+            width: root.img-w;
+            height: root.img-h;
+            source: root.quadro;
+            image-fit: fill;
+        }
+        if root.demo: AreaDemo {
+            x: root.img-x;
+            y: root.img-y;
+            width: root.img-w;
+            height: root.img-h;
+            monitor: root.demo-monitor;
+            texto: root.demo-texto;
+            registro: root.demo-registro;
+        }
+        if !root.tem-quadro && !root.demo: Text {
+            text: @tr("Esperando a imagem…");
+            color: #ffffffb3;
+            font-size: Tema.fonte;
+        }
+        // Cursor do host, ampliado no touchpad (MF-41).
+        if root.cursor-visivel: Path {
+            x: root.cursor-x;
+            y: root.cursor-y;
+            width: root.modo-toque == 0 ? 26px : 18px;
+            height: root.modo-toque == 0 ? 38px : 26px;
+            viewbox-width: 13;
+            viewbox-height: 19;
+            commands: "M 0 0 L 0 16 L 4 12 L 7 19 L 9.5 18 L 6.5 11 L 12 11 Z";
+            fill: white;
+            stroke: black;
+            stroke-width: 1px;
+        }
+
+        gestos := ScaleRotateGestureHandler {
+            started => { root.pinca-comecou(self.center.x, self.center.y); }
+            updated => { root.pinca(self.scale, self.center.x, self.center.y); }
+            ended => { root.pinca-acabou(false); }
+            cancelled => { root.pinca-acabou(true); }
+            TouchArea {
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down { root.toque(0, self.mouse-x, self.mouse-y); }
+                    if e.kind == PointerEventKind.up { root.toque(2, self.mouse-x, self.mouse-y); }
+                    if e.kind == PointerEventKind.cancel { root.toque(3, self.mouse-x, self.mouse-y); }
+                }
+                moved => { root.toque(1, self.mouse-x, self.mouse-y); }
+            }
+        }
+
+        if root.hud-visivel: Rectangle {
+            x: parent.width - self.width - 12px;
+            y: parent.height - self.height - 12px;
+            width: hud-texto.preferred-width + 20px;
+            height: 30px;
+            border-radius: 8px;
+            background: #000000a6;
+            hud-texto := Text { text: root.hud; color: white; font-size: Tema.fonte-pequena; }
+        }
+        if root.teclado-aberto && root.indicador-teclado != "": Rectangle {
+            y: parent.height - self.height - 16px;
+            width: ind.preferred-width + 24px;
+            height: 34px;
+            border-radius: 10px;
+            background: #000000b3;
+            ind := Text { text: "⌨ " + root.indicador-teclado; color: white; font-size: Tema.fonte-pequena; }
+        }
+        if root.aviso != "": Rectangle {
+            y: 64px;
+            width: min(parent.width - 32px, av.preferred-width + 28px);
+            height: av.preferred-height + 16px;
+            border-radius: 10px;
+            background: #000000c0;
+            av := Text { width: parent.width - 28px; text: root.aviso; color: white; font-size: Tema.fonte-pequena; wrap: word-wrap; horizontal-alignment: center; }
+        }
+
+        // Barra recolhível (MF-42): sempre há a alça para reabrir.
+        if root.barra-aberta: Rectangle {
+            y: 10px;
+            width: min(parent.width - 16px, barra.preferred-width + 12px);
+            height: 52px;
+            border-radius: 14px;
+            background: Tema.barra-sessao;
+            Flickable {
+                content-width: barra.preferred-width;
+                barra := HorizontalLayout {
+                    padding: 6px;
+                    spacing: 4px;
+                    BotaoBarra { texto: "⌃"; rotulo-acessivel: @tr("Recolher a barra"); clicado => { root.barra-aberta = false; } }
+                    Text { text: root.nome; color: white; font-size: Tema.fonte; font-weight: 600; vertical-alignment: center; overflow: elide; max-width: 140px; }
+                    if root.varios-monitores: BotaoBarra { texto: "◀"; rotulo-acessivel: @tr("Monitor anterior"); clicado => { root.trocar-monitor(-1); } }
+                    BotaoBarra { texto: "🖥 " + root.monitor-texto; rotulo-acessivel: @tr("Monitores"); clicado => { root.mostrando-monitores = !root.mostrando-monitores; } }
+                    if root.varios-monitores: BotaoBarra { texto: "▶"; rotulo-acessivel: @tr("Próximo monitor"); clicado => { root.trocar-monitor(1); } }
+                    BotaoBarra { texto: "⌨"; ativo: root.teclado-aberto; rotulo-acessivel: @tr("Teclado"); clicado => { root.teclado-aberto = !root.teclado-aberto; if root.teclado-aberto { captador.focus(); } else { captador.clear-focus(); } } }
+                    BotaoBarra { texto: root.modo-toque == 0 ? @tr("Touchpad") : @tr("Toque direto"); ativo: true; clicado => { root.alternar-modo(); } }
+                    BotaoBarra { texto: "HUD"; ativo: root.hud-visivel; rotulo-acessivel: @tr("Informações da conexão"); clicado => { root.alternar-hud(); } }
+                    BotaoBarra { texto: @tr("Encerrar"); perigo: true; clicado => { root.encerrar(); } }
+                }
+            }
+        }
+        if !root.barra-aberta: Rectangle {
+            y: 0;
+            width: 120px;
+            height: 28px;
+            accessible-role: button;
+            accessible-label: @tr("Abrir a barra da sessão");
+            Rectangle { y: 8px; width: 64px; height: 6px; border-radius: 3px; background: #ffffffb3; }
+            TouchArea { clicked => { root.barra-aberta = true; } }
+        }
+        // Lista de monitores (mockup 09).
+        if root.mostrando-monitores && root.barra-aberta: Rectangle {
+            y: 70px;
+            width: 260px;
+            height: lista.preferred-height;
+            border-radius: 14px;
+            background: Tema.barra-sessao;
+            lista := VerticalLayout {
+                padding: 8px;
+                for m[i] in root.monitores: Rectangle {
+                    height: Tema.toque;
+                    border-radius: 10px;
+                    background: i == root.monitor-atual ? #ffffff2e : transparent;
+                    accessible-role: button;
+                    accessible-label: m;
+                    TouchArea { clicked => { root.ir-monitor(i); root.mostrando-monitores = false; } }
+                    Text { x: 14px; text: m; color: white; font-size: Tema.fonte; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    // Faixa de teclas especiais (MF-43, mockup 08), rolável.
+    faixa := Rectangle {
+        y: parent.height - self.height;
+        height: root.teclado-aberto ? 60px : 0px;
+        visible: root.teclado-aberto;
+        background: Tema.superficie-2;
+        Flickable {
+            content-width: teclas.preferred-width;
+            teclas := HorizontalLayout {
+                padding: 8px;
+                spacing: 6px;
+                TeclaFaixa { texto: "Esc"; tocada => { root.tecla("esc"); } }
+                TeclaFaixa { texto: "Tab"; tocada => { root.tecla("tab"); } }
+                TeclaFaixa { texto: "Ctrl"; trava: root.trava-ctrl; tocada => { root.modificador("ctrl"); } segurada => { root.modificador-segurado("ctrl"); } }
+                TeclaFaixa { texto: "Alt"; trava: root.trava-alt; tocada => { root.modificador("alt"); } segurada => { root.modificador-segurado("alt"); } }
+                TeclaFaixa { texto: "⊞"; rotulo-acessivel: "Super"; trava: root.trava-meta; tocada => { root.modificador("meta"); } segurada => { root.modificador-segurado("meta"); } }
+                TeclaFaixa { texto: "⇧"; rotulo-acessivel: "Shift"; trava: root.trava-shift; tocada => { root.modificador("shift"); } segurada => { root.modificador-segurado("shift"); } }
+                TeclaFaixa { texto: "←"; rotulo-acessivel: @tr("Esquerda"); tocada => { root.tecla("esquerda"); } }
+                TeclaFaixa { texto: "↑"; rotulo-acessivel: @tr("Cima"); tocada => { root.tecla("cima"); } }
+                TeclaFaixa { texto: "↓"; rotulo-acessivel: @tr("Baixo"); tocada => { root.tecla("baixo"); } }
+                TeclaFaixa { texto: "→"; rotulo-acessivel: @tr("Direita"); tocada => { root.tecla("direita"); } }
+                TeclaFaixa { texto: "Home"; tocada => { root.tecla("home"); } }
+                TeclaFaixa { texto: "End"; tocada => { root.tecla("end"); } }
+                TeclaFaixa { texto: "PgUp"; tocada => { root.tecla("pgup"); } }
+                TeclaFaixa { texto: "PgDn"; tocada => { root.tecla("pgdn"); } }
+                TeclaFaixa { texto: "Del"; tocada => { root.tecla("del"); } }
+                for f in 12: TeclaFaixa { texto: "F" + (f + 1); tocada => { root.tecla("f" + (f + 1)); } }
+                TeclaFaixa { texto: "Ctrl+Alt+Del"; tocada => { root.ctrl-alt-del(); } }
+            }
+        }
+    }
+
+    // Recebe o teclado do sistema. Fica com um texto-sentinela para perceber o apagar com o
+    // campo "vazio"; tudo que chega além dele vai para o host e o campo volta ao sentinela.
+    property <string> sentinela: "  ";
+    captador := TextInput {
+        x: -1000px;
+        width: 10px;
+        height: 10px;
+        text: root.sentinela;
+        single-line: true;
+        input-type: text;
+        edited => {
+            if self.text.character-count < root.sentinela.character-count {
+                root.apagar(root.sentinela.character-count - self.text.character-count);
+            } else if self.text != root.sentinela {
+                root.texto(self.text);
+            }
+            self.text = root.sentinela;
+            self.set-selection-offsets(2, 2);
+        }
+        accepted => { root.tecla("enter"); }
+    }
+}

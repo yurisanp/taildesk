@@ -2,26 +2,29 @@
 //! encerrar pelos dois lados e peer fora da tailnet.
 
 use std::io;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use taildesk_files::service::Event;
 use taildesk_keyboard::{Inject, Locks, fixtures};
-use taildesk_overlay::PeerIdentity;
+use taildesk_overlay::{PeerIdentity, PeerInfo};
 use taildesk_proto::control::{
-    Button, ChatMessage, CloseReason, CodecSelected, Feature, Hello, Key, MouseButton, Msg,
-    Permissions, SecureAttention, StartVideo,
+    Button, ChatMessage, ClientKind, CloseReason, CodecSelected, Feature, Hello, Key, MouseButton,
+    Msg, PairError, PathInfo, Permissions, SecureAttention, StartVideo,
 };
 use taildesk_proto::files::INBOX_ROOT;
+use taildesk_proto::net::PathKind;
+use taildesk_proto::pair::PairOffer;
 use taildesk_session::acessos::{Acesso, Evento, RegistroAcessos, Via};
 use taildesk_session::conexao::controlador::{EventoControlador, Sessao};
 use taildesk_session::conexao::host::{
     CanalMidia, ComandoHost, ConfigHost, Descricao, Entrada, EventoHost, FimHost, Identificador,
     Maquina, Midia, servir,
 };
-use taildesk_session::{ConsentAnswer, ControllerState, EndReason, HostSettings};
+use taildesk_session::conexao::servico::{ErroServico, parear, pedir_lista};
+use taildesk_session::{ConsentAnswer, ControllerState, EndReason, HostSettings, Pareamento};
 use taildesk_transport::{Identity, Pin, client_endpoint, server_endpoint};
 use tokio::sync::mpsc;
 
@@ -30,6 +33,8 @@ const PRAZO: Duration = Duration::from_secs(20);
 /// Diz que todo peer é "notebook", ou que ninguém é da tailnet.
 struct Tailnet {
     conhecido: bool,
+    /// Login do dono do host (quem pode pedir a lista sem parear).
+    dono: Option<String>,
 }
 
 impl Identificador for Tailnet {
@@ -44,6 +49,31 @@ impl Identificador for Tailnet {
             tags: Vec::new(),
             app_caps: Vec::new(),
         })
+    }
+
+    async fn dono(&self) -> Option<String> {
+        self.dono.clone()
+    }
+
+    async fn caminho(&self, _remoto: IpAddr) -> Option<PathInfo> {
+        Some(PathInfo {
+            kind: PathKind::Relayed as u32,
+            relay_region: "sao".into(),
+            rtt_ms: 80,
+        })
+    }
+
+    async fn dispositivos(&self) -> io::Result<Vec<PeerInfo>> {
+        Ok((0..70)
+            .map(|i| PeerInfo {
+                hostname: format!("pc-{i:02}"),
+                dns_name: format!("pc-{i:02}.tail1234.ts.net"),
+                addr: IpAddr::V4(Ipv4Addr::new(100, 64, 0, i)),
+                os: Some("linux".into()),
+                online: i % 2 == 0,
+                tags: Vec::new(),
+            })
+            .collect())
     }
 }
 
@@ -176,6 +206,7 @@ struct Host {
     registro: Registro,
     settings: Arc<Mutex<HostSettings>>,
     acessos: Arc<RegistroAcessos>,
+    pareamento: Arc<Mutex<Pareamento>>,
     _dir_acessos: TempDir,
 }
 
@@ -185,6 +216,16 @@ impl Host {
     }
 
     fn iniciar_com(conhecido: bool, inbox: Option<PathBuf>, entrada_presa: bool) -> Host {
+        Host::iniciar_tudo(conhecido, inbox, entrada_presa, None)
+    }
+
+    fn iniciar_tudo(
+        conhecido: bool,
+        inbox: Option<PathBuf>,
+        entrada_presa: bool,
+        dono: Option<&str>,
+    ) -> Host {
+        let pareamento = Arc::new(Mutex::new(Pareamento::default()));
         let id = Identity::generate().unwrap();
         let endpoint = server_endpoint((Ipv4Addr::LOCALHOST, 0).into(), &id).unwrap();
         let addr = endpoint.local_addr().unwrap();
@@ -199,7 +240,10 @@ impl Host {
         let acessos = Arc::new(RegistroAcessos::new(dir_acessos.0.join("acessos.jsonl")));
         tokio::spawn(servir(
             endpoint,
-            Arc::new(Tailnet { conhecido }),
+            Arc::new(Tailnet {
+                conhecido,
+                dono: dono.map(Into::into),
+            }),
             Arc::new(MaquinaFalsa(registro.clone(), entrada_presa)),
             Arc::new(ConfigHost {
                 settings: settings.clone(),
@@ -208,6 +252,8 @@ impl Host {
                 auditoria: None,
                 acessos: Some(acessos.clone()),
                 tela_de_entrada: false,
+                pareamento: pareamento.clone(),
+                fingerprint: id.fingerprint(),
             }),
             tx,
         ));
@@ -218,6 +264,7 @@ impl Host {
             registro,
             settings,
             acessos,
+            pareamento,
             _dir_acessos: dir_acessos,
         }
     }
@@ -653,4 +700,170 @@ async fn chat_vai_e_volta() {
     let EventoHost::Fim { .. } = host.proximo().await else {
         panic!("esperava o fim")
     };
+}
+
+fn oferta(host: &Host, codigo: &str) -> PairOffer {
+    PairOffer {
+        host_name: "notebook".into(),
+        addr: host.addr.ip(),
+        port: host.addr.port(),
+        fingerprint: host.fingerprint,
+        code: codigo.into(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn celular_pareia_pelo_qr_uma_vez() {
+    let mut host = Host::iniciar(true, None);
+    let codigo = host
+        .pareamento
+        .lock()
+        .unwrap()
+        .novo_codigo([3, 1, 4, 1, 5, 9], std::time::Instant::now());
+    let endpoint = client_endpoint(host.addr).unwrap();
+
+    // Código errado: recusa com motivo, nada é pareado.
+    let r = parear(&endpoint, &oferta(&host, "ZZZZZZ"), "Pixel")
+        .await
+        .unwrap();
+    assert!(!r.ok);
+    assert_eq!(r.error(), PairError::BadCode);
+    assert!(host.settings.lock().unwrap().phones.is_empty());
+
+    // Certo: o host devolve o próprio fingerprint e grava o celular pelo whois.
+    let r = parear(&endpoint, &oferta(&host, &codigo), "Pixel do Rafael")
+        .await
+        .unwrap();
+    assert!(r.ok, "{r:?}");
+    assert_eq!(r.cert_fingerprint, host.fingerprint.to_vec());
+    let EventoHost::Pareado { peer } = host.proximo().await else {
+        panic!("esperava o aviso de pareamento")
+    };
+    assert_eq!(peer.node_stable_id, "nNOTE");
+    {
+        let s = host.settings.lock().unwrap();
+        assert_eq!(s.phones.len(), 1);
+        assert_eq!(s.phones[0].node_stable_id, "nNOTE");
+        assert_eq!(s.phones[0].device_name, "Pixel do Rafael");
+    }
+
+    // O código foi gasto.
+    let r = parear(&endpoint, &oferta(&host, &codigo), "Pixel")
+        .await
+        .unwrap();
+    assert_eq!(r.error(), PairError::BadCode);
+
+    // Host falso (fingerprint diferente do QR) não chega a receber o código.
+    let mut falsa = oferta(&host, &codigo);
+    falsa.fingerprint = [0; 32];
+    assert!(matches!(
+        parear(&endpoint, &falsa, "Pixel").await,
+        Err(ErroServico::Rede(_))
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lista_de_dispositivos_so_para_o_dono_ou_pareado() {
+    // O peer é do mesmo usuário que o dono: recebe as 70 entradas em duas páginas.
+    let dono = Host::iniciar_tudo(true, None, false, Some("yuri@example.com"));
+    let endpoint = client_endpoint(dono.addr).unwrap();
+    let lista = pedir_lista(&endpoint, dono.addr, Pin::Sha256(dono.fingerprint))
+        .await
+        .unwrap();
+    assert_eq!(lista.len(), 70);
+    // Online primeiro.
+    assert!(lista[..35].iter().all(|e| e.online));
+    assert!(lista[35..].iter().all(|e| !e.online));
+    assert_eq!(lista[0].name, "pc-00");
+    assert_eq!(lista[0].dns_name, "pc-00.tail1234.ts.net");
+    assert_eq!(lista[0].ip, "100.64.0.0");
+
+    // Outro dono e não pareado: recusa.
+    let outro = Host::iniciar_tudo(true, None, false, Some("ana@example.com"));
+    let endpoint = client_endpoint(outro.addr).unwrap();
+    assert!(matches!(
+        pedir_lista(&endpoint, outro.addr, Pin::Sha256(outro.fingerprint)).await,
+        Err(ErroServico::Recusado(CloseReason::NotAllowed))
+    ));
+
+    // Depois de parear, pode.
+    let codigo = outro
+        .pareamento
+        .lock()
+        .unwrap()
+        .novo_codigo([2; 6], std::time::Instant::now());
+    assert!(
+        parear(&endpoint, &oferta(&outro, &codigo), "Pixel")
+            .await
+            .unwrap()
+            .ok
+    );
+    let lista = pedir_lista(&endpoint, outro.addr, Pin::Sha256(outro.fingerprint))
+        .await
+        .unwrap();
+    assert_eq!(lista.len(), 70);
+}
+
+/// Sessão confiável com o `Hello` dado; devolve a sessão e os eventos já ao vivo.
+async fn ao_vivo_com(host: &mut Host, hello: Hello) -> (Sessao, mpsc::Receiver<EventoControlador>) {
+    {
+        let mut s = host.settings.lock().unwrap();
+        s.ask_always = false;
+        s.trusted.push(taildesk_session::TrustedDevice {
+            node_stable_id: "nNOTE".into(),
+            name: "notebook".into(),
+        });
+    }
+    let endpoint = client_endpoint(host.addr).unwrap();
+    let (sessao, mut ev) = Sessao::conectar(
+        &endpoint,
+        host.addr,
+        Pin::Sha256(host.fingerprint),
+        hello,
+        "celular",
+    )
+    .await
+    .unwrap();
+    assert_eq!(estado(&mut ev).await, ControllerState::Connecting);
+    assert!(matches!(
+        estado(&mut ev).await,
+        ControllerState::Live { .. }
+    ));
+    (sessao, ev)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn celular_recebe_o_caminho_do_host() {
+    let mut host = Host::iniciar(true, None);
+    let hello = Hello {
+        client_kind: ClientKind::Phone.into(),
+        ..Hello::default()
+    };
+    let (_sessao, mut ev) = ao_vivo_com(&mut host, hello).await;
+    loop {
+        match tokio::time::timeout(PRAZO, ev.recv()).await.unwrap() {
+            Some(EventoControlador::Mensagem(m)) => {
+                if let Msg::PathInfo(p) = *m {
+                    assert!(!p.direct());
+                    assert_eq!(p.relay_region, "sao");
+                    assert_eq!(p.rtt_ms, 80);
+                    break;
+                }
+            }
+            Some(_) => {}
+            None => panic!("sessão acabou sem PathInfo"),
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn desktop_nao_recebe_caminho() {
+    let mut host = Host::iniciar(true, None);
+    let (_sessao, mut ev) = ao_vivo_com(&mut host, Hello::default()).await;
+    let ate = tokio::time::Instant::now() + Duration::from_millis(500);
+    while let Ok(Some(e)) = tokio::time::timeout_at(ate, ev.recv()).await {
+        if let EventoControlador::Mensagem(m) = e {
+            assert!(!matches!(*m, Msg::PathInfo(_)), "desktop recebeu PathInfo");
+        }
+    }
 }

@@ -7,14 +7,16 @@
 //! `atualizar_auto\t1`, `canal\testavel|pre`, `codec\tauto|h264|hevc|av1|pyrowave`,
 //! `taxa_kbps\t<n>` (0 = automática), `senha_hash\t<argon2 PHC>` ("Acesso com senha": só o
 //! hash, nunca a senha), `monitores\tabas|janelas|todos\t<seguir 0|1>` e
-//! `monitores_host\t<node_stable_id>\t<modo>\t<seguir>` (o último usado com aquele computador).
+//! `monitores_host\t<node_stable_id>\t<modo>\t<seguir>` (o último usado com aquele computador),
+//! `celulares\t0|1` ("Permitir celulares") e
+//! `celular\t<node_stable_id>\t<nome>\t<aparelho>\t<ms>` (celular pareado por QR).
 
 use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
 
 use taildesk_proto::control::Codec;
-use taildesk_session::{HostSettings, TrustedDevice};
+use taildesk_session::{HostSettings, PairedPhone, TrustedDevice};
 use taildesk_transport::tls::{Fingerprint, from_hex, to_hex};
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -189,6 +191,15 @@ fn analisar(texto: &str) -> Config {
                 node_stable_id: (*id).to_owned(),
                 name: (*nome).to_owned(),
             }),
+            ["celulares", v] => c.host.allow_phones = *v != "0",
+            ["celular", id, nome, aparelho, ms] if !id.is_empty() => {
+                c.host.phones.push(PairedPhone {
+                    node_stable_id: (*id).to_owned(),
+                    name: (*nome).to_owned(),
+                    device_name: (*aparelho).to_owned(),
+                    paired_at_ms: ms.parse().unwrap_or(0),
+                });
+            }
             ["host", id, fp] if !id.is_empty() => {
                 if let Some(fp) = from_hex(fp) {
                     c.hosts.insert((*id).to_owned(), fp);
@@ -234,6 +245,16 @@ fn escrever(c: &Config) -> String {
             "confiavel\t{}\t{}\n",
             limpo(&t.node_stable_id),
             limpo(&t.name)
+        );
+    }
+    s += &format!("celulares\t{}\n", u8::from(c.host.allow_phones));
+    for p in &c.host.phones {
+        s += &format!(
+            "celular\t{}\t{}\t{}\t{}\n",
+            limpo(&p.node_stable_id),
+            limpo(&p.name),
+            limpo(&p.device_name),
+            p.paired_at_ms
         );
     }
     for (id, fp) in &c.hosts {
@@ -289,6 +310,13 @@ mod tests {
             name: "notebook\tyuri\n".into(),
         });
         c.hosts.insert("nXYZ".into(), [7; 32]);
+        c.host.allow_phones = false;
+        c.host.phones.push(PairedPhone {
+            node_stable_id: "nCEL".into(),
+            name: "pixel-8".into(),
+            device_name: "Pixel\tdo Rafael".into(),
+            paired_at_ms: 1_762_000_000_000,
+        });
         c.host.password_hash = Some("$argon2id$v=19$m=19456,t=2,p=1$c2Fs$aGFzaA".into());
         c.atualizacao = PrefsAtualizacao {
             automatica: false,
@@ -322,6 +350,11 @@ mod tests {
         assert_eq!(volta.host.trusted[0].name, "notebookyuri");
         assert_eq!(volta.hosts, c.hosts);
         assert_eq!(volta.host.password_hash, c.host.password_hash);
+        assert!(!volta.host.allow_phones);
+        assert_eq!(volta.host.phones.len(), 1);
+        assert_eq!(volta.host.phones[0].device_name, "Pixeldo Rafael");
+        assert_eq!(volta.host.phones[0].paired_at_ms, 1_762_000_000_000);
+        assert!(analisar("").host.allow_phones);
         assert_eq!(analisar("senha_hash\tqualquer\n").host.password_hash, None);
         // Linhas desconhecidas ou estragadas não derrubam a leitura.
         let estragado = format!("{texto}futuro\tx\nhost\tnQ\tzz\nconfiavel\t\tsem id\n");

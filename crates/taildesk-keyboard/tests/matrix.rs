@@ -542,3 +542,85 @@ fn physical_mode_forced() {
     assert_eq!(s.os.text, "ç");
     assert!(s.wire.iter().all(|m| matches!(m, KeyMsg::Key { .. })));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Teclado virtual do celular (`mobile/android-detalhado.md` §8: "teclado virtual → host ABNT2")
+
+/// Celular → host: o que o `VirtualKeyboard` gera vai direto ao `Host`, sem `Controller`.
+struct Celular {
+    vk: taildesk_keyboard::virtual_kb::VirtualKeyboard,
+    host: Host,
+    os: HostOs,
+}
+
+impl Celular {
+    fn new(remote: Keymap) -> Self {
+        Celular {
+            vk: Default::default(),
+            host: Host::new(remote.clone()),
+            os: HostOs::new(remote),
+        }
+    }
+
+    fn deliver(&mut self, msgs: Vec<KeyMsg>) {
+        let mut inject = Vec::new();
+        for m in &msgs {
+            inject.clear();
+            self.host.apply(m, self.os.locks, &mut inject);
+            for &i in &inject {
+                self.os.inject(i);
+            }
+        }
+    }
+
+    fn texto(&mut self, s: &str) {
+        let mut out = Vec::new();
+        self.vk.texto(s, &mut out);
+        self.deliver(out);
+    }
+
+    fn tecla(&mut self, t: taildesk_keyboard::virtual_kb::TeclaFaixa) {
+        let mut out = Vec::new();
+        self.vk.tecla(t, &mut out);
+        self.deliver(out);
+    }
+}
+
+fn hosts_do_celular() -> Vec<(&'static str, Keymap)> {
+    vec![
+        ("Win ABNT2", abnt2()),
+        ("Linux ABNT2", xkb_br_abnt2()),
+        ("Win US-Intl", us_intl_windows()),
+        ("Linux US-Intl", xkb_us_intl()),
+        ("Linux US", xkb_us()),
+    ]
+}
+
+#[test]
+fn celular_digita_acao_com_acento_certo() {
+    // Ana Paula A-mobile-1: "ação" no pc-mae (Win10 ABNT2), e o mesmo nos outros hosts.
+    for (nome, remote) in hosts_do_celular() {
+        let mut c = Celular::new(remote);
+        c.texto("ação");
+        c.texto(" Olá, mundo! \"x\" ~a ^e");
+        assert_eq!(c.os.text, "ação Olá, mundo! \"x\" ~a ^e", "{nome}");
+        assert!(c.os.events.is_empty(), "{nome}: {:?}", c.os.events);
+        assert!(c.host.held().next().is_none(), "{nome}: tecla presa");
+    }
+}
+
+#[test]
+fn celular_ctrl_c_pela_faixa_e_comando_com_enter() {
+    use taildesk_keyboard::virtual_kb::TeclaFaixa;
+    // Rafael R-mobile-1: `sudo systemctl restart nginx`, Enter, e Ctrl+C pela faixa.
+    for (nome, remote) in hosts_do_celular() {
+        let mut c = Celular::new(remote);
+        c.texto("sudo systemctl restart nginx\n");
+        c.vk.tocar(Mods::CTRL);
+        c.texto("c");
+        c.tecla(TeclaFaixa::Cima);
+        assert_eq!(c.os.text, "sudo systemctl restart nginx", "{nome}");
+        assert_eq!(c.os.events, ["<0x28>", "Ctrl+c", "<0x52>"], "{nome}");
+        assert!(c.host.held().next().is_none(), "{nome}: tecla presa");
+    }
+}

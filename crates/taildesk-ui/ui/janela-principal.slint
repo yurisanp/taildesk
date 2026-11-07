@@ -4,6 +4,7 @@ import { AboutSlint, ComboBox, LineEdit, ScrollView, Switch, ListView } from "st
 import { Tema } from "tema.slint";
 import { Botao, Cartao, ChipStatus, Dispositivo, Estado, ItemNav, LinhaInfo, PontoStatus, Separador, Textos, Toast } from "componentes.slint";
 import { CartaoAtualizacoes, FaixaAtualizacao, InfoAtualizacao } from "atualizacao.slint";
+import { CartaoCelulares, InfoCelulares } from "celulares.slint";
 
 // Como está o Tailscale deste computador, lido pela LocalAPI.
 export enum EstadoTailscale {
@@ -457,6 +458,11 @@ component SecaoConfiguracoes inherits ScrollView {
     in-out property <bool> seguir-mouse;
     in property <string> video-local;
     in property <string> teclado-local;
+    in property <InfoCelulares> celulares;
+    callback permitir-celulares-mudou(bool);
+    callback conectar-celular();
+    callback cancelar-qr();
+    callback remover-celular(int);
     callback aceitando-mudou(bool);
     callback pedir-sempre-mudou(bool);
     callback revogar(int);
@@ -548,6 +554,15 @@ component SecaoConfiguracoes inherits ScrollView {
                         valor: root.bandeja ? @tr("O TailDesk continua na bandeja do sistema. Para sair, use Sair no menu do ícone.") : @tr("O sistema não tem bandeja: fechar a janela encerra o TailDesk.");
                     }
                 }
+            }
+
+            TituloGrupo { text: @tr("Celulares"); }
+            CartaoCelulares {
+                info: root.celulares;
+                permitir-mudou(v) => { root.permitir-celulares-mudou(v); }
+                conectar => { root.conectar-celular(); }
+                cancelar => { root.cancelar-qr(); }
+                remover(i) => { root.remover-celular(i); }
             }
 
             TituloGrupo { text: @tr("Histórico de acessos"); }
@@ -707,6 +722,7 @@ export component JanelaPrincipal inherits Window {
     in-out property <bool> seguir-mouse-config: false;
     in property <string> video-local: @tr("Verificando…");
     in property <string> teclado-local;
+    in property <InfoCelulares> celulares;
     in-out property <string> toast;
     in property <EstadoTailscale> tailscale: EstadoTailscale.verificando;
     in property <string> tailscale-resumo;
@@ -742,6 +758,10 @@ export component JanelaPrincipal inherits Window {
     callback atualizar-agora();
     callback reiniciar-app();
     callback dispensar-atualizacao();
+    callback permitir-celulares-mudou(bool);
+    callback conectar-celular();
+    callback cancelar-qr();
+    callback remover-celular(int);
 
     function copiar(t: string) {
         copiador.copiar(t);
@@ -850,6 +870,11 @@ export component JanelaPrincipal inherits Window {
                 seguir-mouse-mudou(v) => { root.seguir-mouse-config-mudou(v); }
                 video-local: root.video-local;
                 teclado-local: root.teclado-local;
+                celulares: root.celulares;
+                permitir-celulares-mudou(v) => { root.permitir-celulares-mudou(v); }
+                conectar-celular => { root.conectar-celular(); }
+                cancelar-qr => { root.cancelar-qr(); }
+                remover-celular(i) => { root.remover-celular(i); }
                 pedir-sempre-mudou(v) => { root.pedir-sempre-mudou(v); }
                 revogar(i) => { root.revogar(i); }
                 abrir-pasta-entrada => { root.abrir-pasta-entrada(); }
