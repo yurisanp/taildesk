@@ -6,6 +6,7 @@
 //! - Linux: PipeWire direto (a mesma `libpipewire` da captura de tela). Um stream com
 //!   `stream.capture.sink` ouve o sink padrão e segue a troca de saída; não depende do portal.
 //!   Sem PipeWire não há captura.
+//! - Android: só saída (o celular é controlador), pelo AAudio do NDK em 48 kHz estéreo f32.
 //!
 //! Cada stream vive numa thread própria, e soltar o valor fecha o dispositivo: com o áudio
 //! desligado nada fica aberto (`15` §4).
@@ -456,12 +457,103 @@ mod pipewire_som {
     }
 }
 
+#[cfg(target_os = "android")]
+pub use aaudio::tocar;
+
+#[cfg(target_os = "android")]
+mod aaudio {
+    use super::*;
+    use ndk::audio::{
+        AudioCallbackResult, AudioContentType, AudioDirection, AudioFormat, AudioPerformanceMode,
+        AudioSharingMode, AudioStreamBuilder, AudioUsage,
+    };
+
+    fn erro(e: impl std::fmt::Display) -> String {
+        e.to_string()
+    }
+
+    /// Abre a saída de som (mídia) em 48 kHz estéreo. `preencher(buf, formato)` roda na thread
+    /// de tempo real do AAudio: nada de alocar nem travar lá dentro.
+    pub fn tocar(
+        preencher: impl FnMut(&mut [f32], FormatoSom) + Send + 'static,
+    ) -> Result<StreamSom, String> {
+        let (pronto_tx, pronto_rx) = mpsc::channel();
+        let (parar_tx, parar_rx) = mpsc::channel::<()>();
+        let thread = std::thread::Builder::new()
+            .name("taildesk-som-saida".into())
+            .spawn(move || {
+                let mut cb = preencher;
+                let aberto = (|| {
+                    let fmt = FormatoSom {
+                        taxa: 48_000,
+                        canais: 2,
+                    };
+                    let canais = usize::from(fmt.canais);
+                    let stream = AudioStreamBuilder::new()
+                        .map_err(erro)?
+                        .direction(AudioDirection::Output)
+                        .format(AudioFormat::PCM_Float)
+                        .sample_rate(48_000)
+                        .channel_count(2)
+                        .sharing_mode(AudioSharingMode::Shared)
+                        .performance_mode(AudioPerformanceMode::LowLatency)
+                        .usage(AudioUsage::Media)
+                        .content_type(AudioContentType::Music)
+                        .data_callback(Box::new(move |_, dados, quadros| {
+                            let n = usize::try_from(quadros).unwrap_or(0) * canais;
+                            // SAFETY: o AAudio entrega `quadros` quadros de `canais` amostras f32
+                            // (o formato pedido acima), válidos só durante esta chamada.
+                            let buf =
+                                unsafe { std::slice::from_raw_parts_mut(dados.cast::<f32>(), n) };
+                            cb(buf, fmt);
+                            AudioCallbackResult::Continue
+                        }))
+                        .error_callback(Box::new(|_, e| {
+                            eprintln!("taildesk: saída de som (AAudio): {e}");
+                        }))
+                        .open_stream()
+                        .map_err(erro)?;
+                    stream.request_start().map_err(erro)?;
+                    Ok::<_, String>((stream, fmt))
+                })();
+                match aberto {
+                    Ok((stream, fmt)) => {
+                        let _ = pronto_tx.send(Ok(fmt));
+                        let _ = parar_rx.recv();
+                        let _ = stream.request_stop();
+                        drop(stream);
+                    }
+                    Err(e) => {
+                        let _ = pronto_tx.send(Err(e));
+                    }
+                }
+            })
+            .map_err(erro)?;
+        match pronto_rx.recv() {
+            Ok(Ok(formato)) => Ok(StreamSom {
+                parar: Some(Box::new(move || drop(parar_tx))),
+                thread: Some(thread),
+                formato,
+                dispositivo: "AAudio".into(),
+            }),
+            Ok(Err(e)) => {
+                let _ = thread.join();
+                Err(e)
+            }
+            Err(_) => {
+                let _ = thread.join();
+                Err("a saída de som não abriu".into())
+            }
+        }
+    }
+}
+
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn capturar(_: impl FnMut(&[f32]) + Send + 'static) -> Result<StreamSom, String> {
     Err("captura de som não suportada neste sistema".into())
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "android")))]
 pub fn tocar(_: impl FnMut(&mut [f32], FormatoSom) + Send + 'static) -> Result<StreamSom, String> {
     Err("saída de som não suportada neste sistema".into())
 }

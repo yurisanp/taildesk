@@ -11,6 +11,7 @@
 //! - [`area`]: área de transferência de texto da sessão; [`fisico`]: teclado físico ligado ao
 //!   celular.
 //! - [`arquivos`]: folha de arquivos da sessão (navegar, baixar, enviar, confirmação).
+//! - [`som`]: som do computador (botão da barra, Opus → AAudio).
 //! - [`compartilhar`]: "Compartilhar com TailDesk" (envio sem tela da sessão).
 //! - [`demo`]: modo demonstração (host de mentira); [`qr`]: leitura do QR de pareamento.
 //! - [`textos`]: pt-BR e en dos textos montados aqui.
@@ -47,6 +48,7 @@ pub mod gestos;
 pub mod qr;
 pub mod rede;
 pub mod sessao;
+pub mod som;
 pub mod textos;
 pub mod video;
 pub mod zoom;

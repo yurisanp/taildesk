@@ -33,10 +33,14 @@ fn entrada(nome: &str) -> Result<Entry, ErroCofre> {
         let store = zbus_secret_service_keyring_store::Store::new();
         #[cfg(windows)]
         let store = windows_native_keyring_store::Store::new();
+        #[cfg(any(target_os = "linux", windows))]
         match store {
             Ok(s) => keyring_core::set_default_store(s),
             Err(e) => eprintln!("taildesk: cofre de senhas indisponível ({e})"),
         }
+        // Android: o app guarda o que precisa pelo Keystore na casca Kotlin; aqui não há cofre.
+        #[cfg(not(any(target_os = "linux", windows)))]
+        eprintln!("taildesk: sem cofre de senhas neste sistema");
     });
     Entry::new(SERVICO, nome).map_err(erro)
 }

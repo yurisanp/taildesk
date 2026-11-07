@@ -284,3 +284,9 @@ msgstr "Transfers"
 
 msgid "Usar dados móveis?"
 msgstr "Use mobile data?"
+
+msgid "Desligar o som"
+msgstr "Turn sound off"
+
+msgid "Ligar o som"
+msgstr "Turn sound on"

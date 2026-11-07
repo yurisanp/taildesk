@@ -59,6 +59,7 @@ fn travar(r: &Recepcoes) -> MutexGuard<'_, HashMap<u8, (u32, RecepcaoVideo)>> {
 pub struct SessaoRede {
     sessao: Sessao,
     recepcoes: Recepcoes,
+    som: crate::som::Destino,
     pub caixa: Arc<Caixa>,
     /// Bytes recebidos em datagramas (consumo da sessão, MF-81).
     pub bytes: Arc<AtomicU64>,
@@ -88,15 +89,21 @@ impl SessaoRede {
     ) -> io::Result<(SessaoRede, mpsc::Receiver<EventoControlador>)> {
         let (sessao, eventos) = Sessao::conectar(endpoint, remoto, pin, hello, nome).await?;
         let recepcoes: Recepcoes = Arc::default();
+        let som = crate::som::Destino::default();
         let bytes = Arc::new(AtomicU64::new(0));
         let datagramas = tokio::spawn({
             let conn = sessao.conexao().clone();
             let recepcoes = recepcoes.clone();
+            let som = som.clone();
             let bytes = bytes.clone();
             async move {
                 while let Ok(d) = conn.read_datagram().await {
                     bytes.fetch_add(d.len() as u64, Ordering::Relaxed);
                     let Some(&stream) = d.get(1) else { continue };
+                    if stream >= taildesk_proto::media::AUDIO_STREAM_MIN {
+                        crate::som::receber(&som, stream, &d);
+                        continue;
+                    }
                     if let Some((_, r)) = travar(&recepcoes).get_mut(&stream) {
                         r.receber(&d);
                     }
@@ -107,6 +114,7 @@ impl SessaoRede {
             SessaoRede {
                 sessao,
                 recepcoes,
+                som,
                 caixa: Arc::default(),
                 bytes,
                 datagramas,
@@ -120,6 +128,11 @@ impl SessaoRede {
     /// Fingerprint do certificado do host (para fixar no primeiro contato).
     pub fn fingerprint(&self) -> Option<[u8; 32]> {
         self.sessao.fingerprint()
+    }
+
+    /// Onde os datagramas de áudio vão (o som abre e fecha por [`crate::som::Saida`]).
+    pub fn som(&self) -> crate::som::Destino {
+        self.som.clone()
     }
 
     /// Serviço de arquivos da sessão (barato de clonar).
@@ -184,6 +197,10 @@ impl SessaoRede {
     pub async fn encerrar(self) {
         self.datagramas.abort();
         travar(&self.recepcoes).clear();
+        *self
+            .som
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.sessao.encerrar().await;
     }
 }

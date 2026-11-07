@@ -51,13 +51,18 @@ pub fn hello(a: &Aparelho) -> Hello {
             hw: a.decode_hw,
             gpu_output: a.decode_hw,
         }],
-        // Só o que o celular já trata: sem `Files`/`Clipboard` o host nega a permissão (o som
-        // vem depois).
-        features: vec![
-            Feature::MultiDisplay.into(),
-            Feature::Files.into(),
-            Feature::Clipboard.into(),
-        ],
+        // Só o que o celular já trata: sem `Files`/`Clipboard`/`Audio` o host nega a permissão.
+        // O som só onde há saída (no Android).
+        features: [
+            Feature::MultiDisplay,
+            Feature::Files,
+            Feature::Clipboard,
+            Feature::Audio,
+        ]
+        .into_iter()
+        .filter(|f| *f != Feature::Audio || crate::som::TEM_SAIDA)
+        .map(Into::into)
+        .collect(),
         keyboard: Some(KeyboardInfo {
             os_layout_id: format!("android:{}", a.idioma_teclado),
             layout_tag: String::new(),

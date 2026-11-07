@@ -25,9 +25,9 @@ taildesk-keyboard.workspace = true
 taildesk-session.workspace = true
 taildesk-files.workspace = true
 taildesk-transport.workspace = true
-# Sem openh264 nem Opus no Android: o MediaCodec decodifica e o som vem na M3.
+# Sem openh264 no Android: o MediaCodec decodifica. O som do computador vem em Opus (`audio`).
 taildesk-codec.workspace = true
-taildesk-media.workspace = true
+taildesk-media = { workspace = true, features = ["audio"] }
 quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros", "net"] }
 # Leitor de QR em Rust ((MIT OR Apache-2.0) AND ISC), no lugar do ML Kit proprietário.
@@ -49,6 +49,8 @@ log = "0.4"
 android_logger = { version = "0.15", default-features = false }
 ndk = { version = "0.9", default-features = false, features = ["media", "api-level-29"] }
 ndk-context = "0.1"
+# Saída de som (AAudio) fica no código de SO, como manda a regra 8.
+taildesk-platform.workspace = true
 
 [build-dependencies]
 slint-build = "=1.18.1"
