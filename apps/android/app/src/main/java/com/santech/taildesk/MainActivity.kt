@@ -16,6 +16,11 @@ class MainActivity : NativeActivity() {
 
     private lateinit var tailscale: TailscaleState
 
+    /** O Rust já subiu (antes disso, o que chega espera em [compartilharPendente]). */
+    @Volatile
+    private var rustNoAr = false
+    private var compartilharPendente: Intent? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         tailscale = TailscaleState(this)
         // A NativeActivity abre a biblioteca por conta própria, e a JVM só procura as funções
@@ -24,6 +29,22 @@ class MainActivity : NativeActivity() {
         System.loadLibrary("taildesk_mobile")
         super.onCreate(savedInstanceState)
         Ponte.carregada = true
+        if (intent?.action == ACAO_COMPARTILHAR) compartilharPendente = intent
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action != ACAO_COMPARTILHAR) return
+        if (rustNoAr) compartilhar(intent) else compartilharPendente = intent
+    }
+
+    /** Copia os arquivos compartilhados para o cache e entrega ao Rust (MF-63). */
+    private fun compartilhar(intent: Intent) {
+        val clip = intent.clipData ?: return
+        val uris = (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
+        if (uris.isEmpty()) return
+        val app = applicationContext
+        Thread { Ponte.nativeCompartilhar(SafBridge.copiarEscolhidos(app, uris)) }.start()
     }
 
     override fun onDestroy() {
@@ -36,6 +57,9 @@ class MainActivity : NativeActivity() {
         runOnUiThread {
             Ponte.nativeSinais(TailscaleState.texto(tailscale.ler()))
             tailscale.observar { Ponte.nativeSinais(TailscaleState.texto(it)) }
+            rustNoAr = true
+            compartilharPendente?.let { compartilhar(it) }
+            compartilharPendente = null
         }
     }
 
@@ -112,5 +136,6 @@ class MainActivity : NativeActivity() {
 
     companion object {
         const val EXTRA_MODO = "taildesk.modo"
+        const val ACAO_COMPARTILHAR = "com.santech.taildesk.COMPARTILHAR"
     }
 }

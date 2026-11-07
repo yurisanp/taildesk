@@ -9,6 +9,7 @@
 //! - [`dispositivos`]: lista com favoritos, recentes, estados e a `PeerList` do desktop pareado.
 //! - [`rede`]: rede tarifada e consumo de dados; [`ciclo`]: segundo plano, volta, HUD.
 //! - [`arquivos`]: folha de arquivos da sessão (navegar, baixar, enviar, confirmação).
+//! - [`compartilhar`]: "Compartilhar com TailDesk" (envio sem tela da sessão).
 //! - [`demo`]: modo demonstração (host de mentira); [`qr`]: leitura do QR de pareamento.
 //! - [`textos`]: pt-BR e en dos textos montados aqui.
 //!
@@ -34,6 +35,7 @@ pub mod arquivos;
 #[cfg(not(target_os = "android"))]
 pub mod captura;
 pub mod ciclo;
+pub mod compartilhar;
 pub mod controle;
 pub mod demo;
 pub mod dispositivos;

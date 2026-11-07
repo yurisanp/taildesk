@@ -187,6 +187,10 @@ struct Estado {
     /// Folha de arquivos da sessão.
     arquivos: crate::arquivos::Folha,
     ultimo_desenho_arquivos: Option<Instant>,
+    /// Arquivos do menu de compartilhar esperando a escolha do computador (MF-63).
+    compartilhar: Vec<crate::arquivos::Escolhido>,
+    /// A conexão atual só envia arquivos (sem tela da sessão).
+    envio: Option<crate::compartilhar::Envio>,
 }
 
 /// O app inteiro (um por processo, na thread da interface).
@@ -380,6 +384,8 @@ impl App {
                 tela_fixa: false,
                 arquivos: crate::arquivos::Folha::new(),
                 ultimo_desenho_arquivos: None,
+                compartilhar: Vec::new(),
+                envio: None,
             }),
             relogio: slint::Timer::default(),
             relogio_lento: slint::Timer::default(),
@@ -759,8 +765,12 @@ impl App {
                 self.t("Esperando", "Waiting for"),
                 self.t("aceitar…", "to accept…")
             ),
-            self.t("Abrindo a imagem…", "Opening the screen…")
-                .to_owned(),
+            if self.estado.borrow().envio.is_some() {
+                self.t("Enviando os arquivos…", "Sending the files…")
+            } else {
+                self.t("Abrindo a imagem…", "Opening the screen…")
+            }
+            .to_owned(),
         ];
         let etapas: Vec<Etapa> = textos
             .iter()
@@ -791,6 +801,10 @@ impl App {
             e.geracao += 1;
             e.host = Some(d.clone());
             e.ack = None;
+            if !e.compartilhar.is_empty() {
+                let arquivos = std::mem::take(&mut e.compartilhar);
+                e.envio = Some(crate::compartilhar::Envio::novo(arquivos));
+            }
             (
                 e.endpoint.clone(),
                 hello(&e.plat.aparelho()),
@@ -909,7 +923,11 @@ impl App {
             EventoControlador::Estado(ControllerState::Live { .. }) => {
                 self.estado.borrow_mut().prazo_consentimento = None;
                 self.etapas(2, false);
-                self.abrir_sessao();
+                if self.estado.borrow().envio.is_some() {
+                    self.enviar_compartilhados();
+                } else {
+                    self.abrir_sessao();
+                }
             }
             EventoControlador::Estado(ControllerState::Ended(r)) => {
                 let em_sessao = ui.get_tela() == Tela::Sessao;
@@ -1015,8 +1033,18 @@ impl App {
         if let Some(Alvo::Rede(Some(s))) = e.alvo.take() {
             e.rt.spawn(s.encerrar());
         }
-        let sobras = e.arquivos.fechar();
+        let mut sobras = e.arquivos.fechar();
+        // Não chegou a oferecer: os arquivos voltam a esperar outro computador (ou "tentar de
+        // novo"); já oferecidos, as cópias saem com o resto.
+        if let Some(mut env) = e.envio.take() {
+            if env.comecou() {
+                sobras.extend(env.comecar().into_iter().map(|a| a.caminho));
+            } else {
+                e.compartilhar = env.comecar();
+            }
+        }
         drop(e);
+        self.mostrar_compartilhar();
         folha::apagar(sobras);
         if let Some(ui) = self.ui() {
             ui.set_arquivos_aberto(false);
@@ -1592,6 +1620,7 @@ impl App {
                 }
             }};
         }
+        ui.on_cancelar_compartilhar(com!(|a: &Rc<App>| a.cancelar_compartilhar()));
         ui.on_abrir_arquivos(com!(|a: &Rc<App>| a.abrir_arquivos()));
         ui.on_arquivo_tocado(com1!(|a: &Rc<App>, i: i32| a.arquivo_tocado(i)));
         ui.on_arquivos_voltar(com!(|a: &Rc<App>| a.arquivos_voltar()));

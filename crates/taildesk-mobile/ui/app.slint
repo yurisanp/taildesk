@@ -74,6 +74,9 @@ export component AppCelular inherits Window {
     callback copiar(ItemDispositivo);
     callback favoritar(ItemDispositivo);
     callback esquecer(ItemDispositivo);
+    // "Compartilhar com TailDesk" esperando a escolha do computador (MF-63); vazio = não.
+    in property <string> compartilhando;
+    callback cancelar-compartilhar();
 
     // Conectando
     in property <string> conectando-nome;
@@ -190,6 +193,8 @@ export component AppCelular inherits Window {
                 vazio: root.lista-vazia;
                 atualizando: root.atualizando;
                 busca <=> root.busca;
+                compartilhando: root.compartilhando;
+                cancelar-compartilhar => { root.cancelar-compartilhar(); }
                 conectar(d) => { root.conectar(d); }
                 abrir(d) => { root.abrir-detalhe(d); }
                 atualizar => { root.atualizar-lista(); }

@@ -6,4 +6,5 @@
     <string name="qr_sem_camera">No camera permission. Type the computer name and the code.</string>
     <string name="qr_cancelar">Cancel</string>
     <string name="sem_navegador">No app can open that address.</string>
+    <string name="compartilhar_com">Send to computer</string>
 </resources>
