@@ -58,7 +58,12 @@ impl Ciclo {
     }
 
     /// Chame de vez em quando: `true` = encerre a sessão agora (tempo demais em segundo plano).
-    pub fn tick(&mut self, t_ms: u64) -> bool {
+    /// `ouvindo` = o som está tocando (MF-72): a pessoa está usando a sessão, o prazo recomeça.
+    pub fn tick(&mut self, t_ms: u64, ouvindo: bool) -> bool {
+        if ouvindo && self.fundo_desde.is_some() {
+            self.fundo_desde = Some(t_ms);
+            return false;
+        }
         if let Some(desde) = self.fundo_desde
             && !self.encerrada
             && t_ms.saturating_sub(desde) >= LIMITE_FUNDO_MS
@@ -198,7 +203,7 @@ mod tests {
         assert_eq!(out[1], Msg::StopVideo(StopVideo { display_id: 4 }));
         // Pausar duas vezes não repete.
         assert!(ciclo.segundo_plano(&mut c, 1_100).is_empty());
-        assert!(!ciclo.tick(60_000));
+        assert!(!ciclo.tick(60_000, false));
         let AoVoltar::Enviar(msgs) = ciclo.frente(&c) else {
             panic!()
         };
@@ -216,9 +221,19 @@ mod tests {
 
         let mut ciclo = Ciclo::default();
         ciclo.segundo_plano(&mut c, 0);
-        assert!(ciclo.tick(LIMITE_FUNDO_MS));
-        assert!(!ciclo.tick(LIMITE_FUNDO_MS + 1), "encerra uma vez só");
+        assert!(ciclo.tick(LIMITE_FUNDO_MS, false));
+        assert!(
+            !ciclo.tick(LIMITE_FUNDO_MS + 1, false),
+            "encerra uma vez só"
+        );
         assert_eq!(ciclo.frente(&c), AoVoltar::Nada);
+
+        // Com o som tocando a sessão fica; quando o som para, o prazo conta dali.
+        let mut ciclo = Ciclo::default();
+        ciclo.segundo_plano(&mut c, 0);
+        assert!(!ciclo.tick(LIMITE_FUNDO_MS * 3, true));
+        assert!(!ciclo.tick(LIMITE_FUNDO_MS * 3 + 1, false));
+        assert!(ciclo.tick(LIMITE_FUNDO_MS * 4, false));
     }
 
     #[test]

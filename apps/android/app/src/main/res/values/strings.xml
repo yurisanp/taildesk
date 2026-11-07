@@ -8,4 +8,8 @@
     <string name="qr_cancelar">Cancelar</string>
     <string name="sem_navegador">Nenhum app abre esse endereço.</string>
     <string name="compartilhar_com">Enviar ao computador</string>
+    <string name="ouvindo">Ouvindo %1$s</string>
+    <string name="encerrar">Encerrar</string>
+    <string name="canal_som">Som da sessão</string>
+    <string name="canal_som_desc">O som do computador enquanto o TailDesk está em segundo plano.</string>
 </resources>

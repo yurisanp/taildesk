@@ -7,4 +7,8 @@
     <string name="qr_cancelar">Cancel</string>
     <string name="sem_navegador">No app can open that address.</string>
     <string name="compartilhar_com">Send to computer</string>
+    <string name="ouvindo">Listening to %1$s</string>
+    <string name="encerrar">End</string>
+    <string name="canal_som">Session sound</string>
+    <string name="canal_som_desc">The computer\'s sound while TailDesk is in the background.</string>
 </resources>

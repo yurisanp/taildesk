@@ -5,7 +5,7 @@
 //!   anexada à JVM, sem procurar classe pelo nome).
 //! - Kotlin → Rust: funções nativas do objeto `com.santech.taildesk.Ponte` (`nativeSinais`,
 //!   `nativeQr`, `nativeLerQuadro`, `nativeArquivosEscolhidos`, `nativeDownloadPublicado`,
-//!   `nativeCompartilhar`, `nativeTeclaFisica`).
+//!   `nativeCompartilhar`, `nativeTeclaFisica`, `nativeEncerrar`).
 //!   Chegam na thread de Java e vão para a thread da interface por [`no_app`].
 //!
 //! Formato das mensagens: texto com campos separados por tabulação, para manter a ponte pequena.
@@ -153,6 +153,10 @@ impl Plataforma for PlataformaAndroid {
             jni_str!("teclasFisicas"),
             Some(if ligar { "1" } else { "0" }),
         );
+    }
+    fn ouvindo(&self, nome: Option<&str>) {
+        self.android
+            .chamar(jni_str!("ouvindo"), Some(nome.unwrap_or("")));
     }
     fn tem_teclado_fisico(&self) -> bool {
         self.android.texto(jni_str!("temTecladoFisico")) == "1"
@@ -315,6 +319,19 @@ pub extern "system" fn Java_com_santech_taildesk_Ponte_nativeTeclaFisica<'c>(
     env.with_env(|_env| -> jni::errors::Result<()> {
         let t = texto.to_string();
         no_app(move |a| a.tecla_fisica(&t));
+        Ok(())
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
+}
+
+/// `Ponte.nativeEncerrar()`: "Encerrar" na notificação do som em segundo plano (MF-72).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_santech_taildesk_Ponte_nativeEncerrar<'c>(
+    mut env: EnvUnowned<'c>,
+    _classe: JClass<'c>,
+) {
+    env.with_env(|_env| -> jni::errors::Result<()> {
+        no_app(|a| a.encerrar_de_fora());
         Ok(())
     })
     .resolve::<jni::errors::LogErrorAndDefault>();
