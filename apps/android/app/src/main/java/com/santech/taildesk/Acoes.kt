@@ -47,6 +47,14 @@ object Acoes {
         cb.setPrimaryClip(ClipData.newPlainText("TailDesk", texto))
     }
 
+    fun lerAreaTransferencia(context: Context): String = try {
+        val cb = context.getSystemService(ClipboardManager::class.java)
+        val clip = cb?.primaryClip
+        if (clip == null || clip.itemCount == 0) "" else clip.getItemAt(0).coerceToText(context)?.toString().orEmpty()
+    } catch (_: SecurityException) {
+        ""
+    }
+
     /**
      * Tela do sistema da otimização de bateria (sem declarar REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
      * que a Play só aceita em casos listados; android-detalhado.md §4.4).

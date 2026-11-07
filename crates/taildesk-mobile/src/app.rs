@@ -73,6 +73,10 @@ pub trait Plataforma: 'static {
     fn publicar_download(&self, _caminho: &Path, _nome: &str) -> bool {
         false
     }
+    /// Texto da área de transferência do sistema (só com o app em foco no Android 10+).
+    fn ler_area(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Plataforma que não faz nada (testes, capturas, janela de desenvolvimento).
@@ -191,6 +195,8 @@ struct Estado {
     compartilhar: Vec<crate::arquivos::Escolhido>,
     /// A conexão atual só envia arquivos (sem tela da sessão).
     envio: Option<crate::compartilhar::Envio>,
+    /// Área de transferência de texto da sessão ao vivo.
+    clip: Option<crate::area::AreaCelular>,
 }
 
 /// O app inteiro (um por processo, na thread da interface).
@@ -386,6 +392,7 @@ impl App {
                 ultimo_desenho_arquivos: None,
                 compartilhar: Vec::new(),
                 envio: None,
+                clip: None,
             }),
             relogio: slint::Timer::default(),
             relogio_lento: slint::Timer::default(),
@@ -995,12 +1002,20 @@ impl App {
             e.controle = Some(c);
             e.ciclo = Ciclo::default();
             e.hud = Hud::default();
+            let permitido = e
+                .ack
+                .as_ref()
+                .and_then(|a| a.permissions.as_ref())
+                .is_some_and(|p| p.clipboard);
+            e.clip = matches!(e.alvo, Some(Alvo::Rede(_)))
+                .then(|| crate::area::AreaCelular::new(permitido));
         }
         ui.set_tem_quadro(false);
         ui.set_barra_aberta(true);
         ui.set_teclado_aberto(false);
         ui.set_tela(Tela::Sessao);
         self.enviar(out);
+        self.ler_area();
         self.mostrar_sessao();
         let fraco = Rc::downgrade(self);
         self.relogio.start(
@@ -1030,6 +1045,7 @@ impl App {
         let mut e = self.estado.borrow_mut();
         e.controle = None;
         e.prazo_consentimento = None;
+        e.clip = None;
         if let Some(Alvo::Rede(Some(s))) = e.alvo.take() {
             e.rt.spawn(s.encerrar());
         }
@@ -1067,7 +1083,41 @@ impl App {
     }
 
     /// Mensagens do host durante a sessão.
+    /// Anuncia ao host o texto copiado no celular, se mudou.
+    fn ler_area(&self) {
+        let texto = {
+            let e = self.estado.borrow();
+            if e.clip.is_none() {
+                return;
+            }
+            e.plat.ler_area()
+        };
+        let Some(t) = texto else { return };
+        let oferta = self
+            .estado
+            .borrow_mut()
+            .clip
+            .as_mut()
+            .and_then(|a| a.texto_local(&t));
+        self.enviar(oferta.into_iter().collect());
+    }
+
     fn do_host(&self, m: Msg) {
+        if crate::area::e_da_area(&m) {
+            let saida = self
+                .estado
+                .borrow_mut()
+                .clip
+                .as_mut()
+                .map(|a| a.do_host(&m));
+            if let Some(s) = saida {
+                if let Some(t) = s.copiar {
+                    self.estado.borrow().plat.copiar(&t);
+                }
+                self.enviar(s.enviar);
+            }
+            return;
+        }
         let mut out = Vec::new();
         {
             let mut e = self.estado.borrow_mut();
@@ -1410,6 +1460,7 @@ impl App {
             }
             AoVoltar::Nada => {}
         }
+        self.ler_area();
     }
 
     // -----------------------------------------------------------------------------------------

@@ -51,8 +51,13 @@ pub fn hello(a: &Aparelho) -> Hello {
             hw: a.decode_hw,
             gpu_output: a.decode_hw,
         }],
-        // Arquivos e som vêm na M3; aqui só o que o celular já trata.
-        features: vec![Feature::MultiDisplay.into()],
+        // Só o que o celular já trata: sem `Files`/`Clipboard` o host nega a permissão (o som
+        // vem depois).
+        features: vec![
+            Feature::MultiDisplay.into(),
+            Feature::Files.into(),
+            Feature::Clipboard.into(),
+        ],
         keyboard: Some(KeyboardInfo {
             os_layout_id: format!("android:{}", a.idioma_teclado),
             layout_tag: String::new(),
@@ -478,6 +483,10 @@ mod tests {
             KeyboardSource::Virtual
         );
         assert!(h.decode_caps[0].hw);
+        // Sem anunciar, o host nega arquivos e área de transferência.
+        for f in [Feature::Files, Feature::Clipboard] {
+            assert!(h.features.contains(&(f as i32)), "{f:?}");
+        }
         // Passa nos limites do parser.
         let ctl = taildesk_proto::control::Control::from(Msg::Hello(h));
         assert!(ctl.validate().is_ok());

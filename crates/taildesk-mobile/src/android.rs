@@ -142,6 +142,9 @@ impl Plataforma for PlataformaAndroid {
     fn pasta_dados(&self) -> Option<PathBuf> {
         self.pasta.clone()
     }
+    fn ler_area(&self) -> Option<String> {
+        Some(self.android.texto(jni_str!("lerAreaTransferencia"))).filter(|t| !t.is_empty())
+    }
     fn escolher_arquivos(&self) {
         self.android.chamar(jni_str!("escolherArquivos"), None);
     }
