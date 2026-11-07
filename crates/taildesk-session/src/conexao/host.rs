@@ -23,7 +23,7 @@ use taildesk_proto::control::{
     AudioStopReason, AudioStopped, ChatMessage, ClientKind, Close, CloseReason, Consent,
     DisplayInfo, HelloAck, KeyboardInfo, LanIface, Msg, PROTO_VERSION, PairError, PairRequest,
     PairResult, PathInfo, PeerEntry, PeerList, PeerListRequest, Permissions, Platform, Pong,
-    TaildeskPresence, WakeError, WakeRequest, WakeResult, limits,
+    PowerInfo, TaildeskPresence, WakeError, WakeRequest, WakeResult, limits,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -445,6 +445,16 @@ async fn atender<I: Identificador, M: Maquina>(
             .com_via(sessao.via())
             .com_permissoes(sessao.permissions()),
     );
+    // Para o controlador poder acordar este computador depois (`07-protocolo.md` §3.5). Só
+    // depois do consentimento: MAC e LAN não vão para quem não foi aceito.
+    let placas = maquina.placas_lan();
+    if !placas.is_empty() {
+        let mut ifaces = placas;
+        ifaces.truncate(limits::LAN_IFACES);
+        let _ = saida
+            .send(controle(Msg::PowerInfo(PowerInfo { ifaces })))
+            .await;
+    }
     let celular = matches!(hello.client_kind(), ClientKind::Phone | ClientKind::Tablet);
     let motivo = ao_vivo(
         &conn,

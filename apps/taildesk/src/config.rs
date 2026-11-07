@@ -9,13 +9,15 @@
 //! hash, nunca a senha), `monitores\tabas|janelas|todos\t<seguir 0|1>` e
 //! `monitores_host\t<node_stable_id>\t<modo>\t<seguir>` (o último usado com aquele computador),
 //! `celulares\t0|1` ("Permitir celulares") e
-//! `celular\t<node_stable_id>\t<nome>\t<aparelho>\t<ms>` (celular pareado por QR).
+//! `celular\t<node_stable_id>\t<nome>\t<aparelho>\t<ms>` (celular pareado por QR) e
+//! `placa\t<node_stable_id>\t<mac>\t<ipv4>/<prefixo>\t<mac do gateway ou ->\t<cabo 0|1>\t<wol>`
+//! (placas de rede de um host, para o Wake on LAN; `wol` = 0 não sabe, 1 armada, 2 desligada).
 
 use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
 
-use taildesk_proto::control::Codec;
+use taildesk_proto::control::{Codec, LanIface, limits};
 use taildesk_session::{HostSettings, PairedPhone, TrustedDevice};
 use taildesk_transport::tls::{Fingerprint, from_hex, to_hex};
 
@@ -30,6 +32,8 @@ pub struct Config {
     pub monitores: PrefsMonitores,
     /// O que foi usado por último com cada host (`node_stable_id`), por cima do padrão.
     pub monitores_host: BTreeMap<String, PrefsMonitores>,
+    /// Placas de rede de cada host (`node_stable_id`), do último `PowerInfo` (Wake on LAN).
+    pub energia: BTreeMap<String, Vec<LanIface>>,
 }
 
 /// Como a sessão mostra os monitores do host ao conectar (`13-multimonitor.md` §2.2).
@@ -200,6 +204,14 @@ fn analisar(texto: &str) -> Config {
                     paired_at_ms: ms.parse().unwrap_or(0),
                 });
             }
+            ["placa", id, mac, rede, gw, cabo, wol] if !id.is_empty() => {
+                if let Some(p) = placa_de(mac, rede, gw, cabo, wol) {
+                    let lista = c.energia.entry((*id).to_owned()).or_default();
+                    if lista.len() < limits::LAN_IFACES {
+                        lista.push(p);
+                    }
+                }
+            }
             ["host", id, fp] if !id.is_empty() => {
                 if let Some(fp) = from_hex(fp) {
                     c.hosts.insert((*id).to_owned(), fp);
@@ -260,7 +272,55 @@ fn escrever(c: &Config) -> String {
     for (id, fp) in &c.hosts {
         s += &format!("host\t{}\t{}\n", limpo(id), to_hex(fp));
     }
+    for (id, placas) in &c.energia {
+        for p in placas.iter().take(limits::LAN_IFACES) {
+            let Some(mac) = mac_texto(&p.mac) else {
+                continue;
+            };
+            s += &format!(
+                "placa\t{}\t{mac}\t{}/{}\t{}\t{}\t{}\n",
+                limpo(id),
+                std::net::Ipv4Addr::from(p.ipv4),
+                p.prefix_len.min(32),
+                mac_texto(&p.gateway_mac).unwrap_or_else(|| "-".into()),
+                u8::from(p.wired),
+                p.wol.clamp(0, 2)
+            );
+        }
+    }
     s
+}
+
+/// `aa:bb:cc:dd:ee:ff`; `None` se não tiver 6 bytes.
+fn mac_texto(mac: &[u8]) -> Option<String> {
+    let mac: [u8; 6] = mac.try_into().ok()?;
+    Some(taildesk_session::acordar::mac_texto(mac))
+}
+
+fn mac_de_texto(s: &str) -> Option<Vec<u8>> {
+    let bytes: Vec<u8> = s
+        .split(':')
+        .map(|b| u8::from_str_radix(b, 16).ok().filter(|_| b.len() == 2))
+        .collect::<Option<_>>()?;
+    (bytes.len() == 6).then_some(bytes)
+}
+
+fn placa_de(mac: &str, rede: &str, gw: &str, cabo: &str, wol: &str) -> Option<LanIface> {
+    let (ip, prefixo) = rede.split_once('/')?;
+    let ip: std::net::Ipv4Addr = ip.parse().ok()?;
+    let prefix_len: u32 = prefixo.parse().ok().filter(|p| *p <= 32)?;
+    Some(LanIface {
+        mac: mac_de_texto(mac)?,
+        ipv4: u32::from(ip),
+        prefix_len,
+        gateway_mac: if gw == "-" {
+            Vec::new()
+        } else {
+            mac_de_texto(gw)?
+        },
+        wired: cabo == "1",
+        wol: wol.parse::<i32>().ok().filter(|w| (0..=2).contains(w))?,
+    })
 }
 
 /// Lê um arquivo de configuração em outro lugar (o agente do serviço do Windows lê o do último
@@ -361,6 +421,47 @@ mod tests {
         let v = analisar(&estragado);
         assert_eq!(v.hosts.len(), 1);
         assert_eq!(v.host.trusted.len(), 1);
+    }
+
+    #[test]
+    fn placas_de_rede_ida_e_volta() {
+        let mut c = Config::default();
+        let placas = vec![
+            LanIface {
+                mac: vec![0x3c, 0x7c, 0x3f, 1, 0xab, 3],
+                ipv4: u32::from(std::net::Ipv4Addr::new(192, 168, 0, 20)),
+                prefix_len: 24,
+                gateway_mac: vec![0xa4, 0x2b, 0xb0, 9, 8, 7],
+                wired: true,
+                wol: 1,
+            },
+            LanIface {
+                mac: vec![2, 0, 0, 0, 0, 1],
+                ipv4: u32::from(std::net::Ipv4Addr::new(10, 0, 0, 5)),
+                prefix_len: 8,
+                gateway_mac: Vec::new(),
+                wired: false,
+                wol: 0,
+            },
+        ];
+        c.energia.insert("nPC".into(), placas.clone());
+        let texto = escrever(&c);
+        assert!(
+            texto.contains(
+                "placa\tnPC\t3c:7c:3f:01:ab:03\t192.168.0.20/24\ta4:2b:b0:09:08:07\t1\t1\n"
+            )
+        );
+        assert_eq!(analisar(&texto).energia.get("nPC"), Some(&placas));
+        // Estragadas: MAC curto, prefixo > 32, IP inválido, wol fora da faixa.
+        for linha in [
+            "placa\tnX\t3c:7c:3f:01:ab\t192.168.0.20/24\t-\t1\t0",
+            "placa\tnX\t3c:7c:3f:01:ab:03\t192.168.0.20/33\t-\t1\t0",
+            "placa\tnX\t3c:7c:3f:01:ab:03\t192.168.0/24\t-\t1\t0",
+            "placa\tnX\t3c:7c:3f:01:ab:03\t192.168.0.20/24\t-\t1\t7",
+            "placa\tnX\t3c:7c:3f:1:ab:03\t192.168.0.20/24\t-\t1\t0",
+        ] {
+            assert!(analisar(linha).energia.is_empty(), "{linha}");
+        }
     }
 
     #[test]

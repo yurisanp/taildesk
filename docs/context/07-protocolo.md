@@ -190,9 +190,9 @@ O pacote mágico é broadcast de camada 2 e não atravessa a tailnet: quem manda
 mesma LAN do alvo (o **repetidor**). O host informa as próprias placas enquanto está ligado, e o
 controlador guarda para quando ele estiver desligado.
 
-- **`PowerInfo{ifaces}`** (tag 130, H→C, logo depois do `HelloAck`): até 8 `LanIface{mac (6 B),
-  ipv4 (fixed32, ordem de rede; 0 = sem endereço), prefix_len (0–32), gateway_mac (vazio ou 6 B),
-  wired, wol: UNKNOWN|ARMED|OFF}`. Só IPv4 e sem a placa da tailnet. No `PowerInfo` o `mac` é
+- **`PowerInfo{ifaces}`** (tag 130, H→C, quando a sessão fica ao vivo, depois do
+  consentimento): até 8 `LanIface{mac (6 B), ipv4 (fixed32, ordem de rede; 0 = sem endereço),
+  prefix_len (0–32), gateway_mac (vazio ou 6 B), wired, wol: UNKNOWN|ARMED|OFF}`. Só IPv4 e sem a placa da tailnet. No `PowerInfo` o `mac` é
   obrigatório.
 - **`WakeRequest{mac (6 B), lan?}`** (tag 131) → **`WakeResult{ok, sent, error}`** (tag 132), numa
   **conexão de serviço** como as do §3.4. `lan` é a `LanIface` do alvo (o `mac` dela é opcional e
