@@ -8,6 +8,7 @@
 //! - [`controle`]: a sessão vista do celular (ações e teclas → mensagens; um monitor por vez).
 //! - [`dispositivos`]: lista com favoritos, recentes, estados e a `PeerList` do desktop pareado.
 //! - [`rede`]: rede tarifada e consumo de dados; [`ciclo`]: segundo plano, volta, HUD.
+//! - [`arquivos`]: folha de arquivos da sessão (navegar, baixar, enviar, confirmação).
 //! - [`demo`]: modo demonstração (host de mentira); [`qr`]: leitura do QR de pareamento.
 //! - [`textos`]: pt-BR e en dos textos montados aqui.
 //!
@@ -29,6 +30,7 @@ macro_rules! registrar {
 #[cfg(target_os = "android")]
 pub mod android;
 pub mod app;
+pub mod arquivos;
 #[cfg(not(target_os = "android"))]
 pub mod captura;
 pub mod ciclo;

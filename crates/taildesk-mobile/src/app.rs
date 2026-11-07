@@ -5,9 +5,11 @@
 //! Tailscale, câmera, área de transferência, links) passa pela [`Plataforma`], que a casca Kotlin
 //! implementa por JNI (`crate::android`) e os testes e capturas implementam sem fazer nada.
 
+mod folha;
+
 use std::cell::RefCell;
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -61,6 +63,15 @@ pub trait Plataforma: 'static {
     /// Pixels físicos por pixel lógico.
     fn densidade(&self) -> f32 {
         1.0
+    }
+    /// Abre o seletor de arquivos do sistema (SAF); o resultado volta por
+    /// [`App::arquivos_escolhidos`], já copiado para uma pasta do app.
+    fn escolher_arquivos(&self) {}
+    /// Passa um arquivo baixado para a pasta pública (`Download/TailDesk`). `true` = a
+    /// plataforma cuidou dele e avisa por [`App::download_publicado`]; `false` = ele fica onde
+    /// está.
+    fn publicar_download(&self, _caminho: &Path, _nome: &str) -> bool {
+        false
     }
 }
 
@@ -173,6 +184,9 @@ struct Estado {
     teste: Option<IpAddr>,
     /// Tela presa (lista de exemplo dos testes e capturas): o estado do Tailscale não a troca.
     tela_fixa: bool,
+    /// Folha de arquivos da sessão.
+    arquivos: crate::arquivos::Folha,
+    ultimo_desenho_arquivos: Option<Instant>,
 }
 
 /// O app inteiro (um por processo, na thread da interface).
@@ -364,6 +378,8 @@ impl App {
                 busca: String::new(),
                 teste: None,
                 tela_fixa: false,
+                arquivos: crate::arquivos::Folha::new(),
+                ultimo_desenho_arquivos: None,
             }),
             relogio: slint::Timer::default(),
             relogio_lento: slint::Timer::default(),
@@ -928,7 +944,8 @@ impl App {
                 e.ack = Some(*ack);
             }
             EventoControlador::Mensagem(m) => self.do_host(*m),
-            EventoControlador::Forma(_) | EventoControlador::Arquivos(_) => {}
+            EventoControlador::Arquivos(ev) => self.evento_arquivos(&ev),
+            EventoControlador::Forma(_) => {}
         }
     }
 
@@ -998,6 +1015,13 @@ impl App {
         if let Some(Alvo::Rede(Some(s))) = e.alvo.take() {
             e.rt.spawn(s.encerrar());
         }
+        let sobras = e.arquivos.fechar();
+        drop(e);
+        folha::apagar(sobras);
+        if let Some(ui) = self.ui() {
+            ui.set_arquivos_aberto(false);
+        }
+        self.desenhar_arquivos();
     }
 
     fn encerrar(self: &Rc<Self>) {
@@ -1568,6 +1592,16 @@ impl App {
                 }
             }};
         }
+        ui.on_abrir_arquivos(com!(|a: &Rc<App>| a.abrir_arquivos()));
+        ui.on_arquivo_tocado(com1!(|a: &Rc<App>, i: i32| a.arquivo_tocado(i)));
+        ui.on_arquivos_voltar(com!(|a: &Rc<App>| a.arquivos_voltar()));
+        ui.on_enviar_arquivos(com!(|a: &Rc<App>| a
+            .estado
+            .borrow()
+            .plat
+            .escolher_arquivos()));
+        ui.on_cancelar_transferencia(com1!(|a: &Rc<App>, id: i32| a.cancelar_transferencia(id)));
+        ui.on_responder_arquivo(com1!(|a: &Rc<App>, sim: bool| a.responder_arquivo(sim)));
         ui.on_abrir_tailscale(com!(|a: &Rc<App>| a.estado.borrow().plat.abrir_tailscale()));
         ui.on_instalar_tailscale(com!(|a: &Rc<App>| a
             .estado

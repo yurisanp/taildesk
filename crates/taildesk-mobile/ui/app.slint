@@ -7,8 +7,9 @@ import {
     TelaOnboarding, TelaEncontrar, TelaDispositivos, FolhaDetalhe, TelaConectando, TelaTeste, TelaConfiguracoes,
 } from "telas.slint";
 import { TelaSessao } from "sessao.slint";
+import { FolhaArquivos, ItemArquivo, LinhaArquivo } from "arquivos.slint";
 
-export { EstadoTs, ItemDispositivo, GrupoDispositivos, Etapa, LinhaTeste, Tema }
+export { EstadoTs, ItemDispositivo, GrupoDispositivos, Etapa, LinhaTeste, Tema, ItemArquivo, LinhaArquivo }
 
 export enum Tela { onboarding, encontrar, dispositivos, conectando, sessao, teste, configuracoes }
 
@@ -128,6 +129,21 @@ export component AppCelular inherits Window {
     callback texto(string);
     callback apagar(int);
 
+    // Arquivos da sessão (MF-60..64)
+    in-out property <bool> arquivos-aberto;
+    in property <string> arquivos-titulo;
+    in property <[ItemArquivo]> arquivos-itens;
+    in property <bool> arquivos-carregando;
+    in property <string> arquivos-erro;
+    in property <[LinhaArquivo]> arquivos-transferencias;
+    in property <string> arquivos-pergunta;
+    callback abrir-arquivos();
+    callback arquivo-tocado(int);
+    callback arquivos-voltar();
+    callback enviar-arquivos();
+    callback cancelar-transferencia(int);
+    callback responder-arquivo(bool);
+
     // Teste de conexão
     in property <string> teste-nome;
     in property <[LinhaTeste]> teste-linhas;
@@ -234,6 +250,21 @@ export component AppCelular inherits Window {
                 ctrl-alt-del => { root.ctrl-alt-del(); }
                 texto(t) => { root.texto(t); }
                 apagar(n) => { root.apagar(n); }
+                abrir-arquivos => { root.arquivos-aberto = true; root.abrir-arquivos(); }
+            }
+            if root.tela == Tela.sessao && root.arquivos-aberto: FolhaArquivos {
+                titulo: root.arquivos-titulo;
+                itens: root.arquivos-itens;
+                carregando: root.arquivos-carregando;
+                erro: root.arquivos-erro;
+                transferencias: root.arquivos-transferencias;
+                pergunta: root.arquivos-pergunta;
+                tocado(i) => { root.arquivo-tocado(i); }
+                voltar => { root.arquivos-voltar(); }
+                enviar => { root.enviar-arquivos(); }
+                cancelar(id) => { root.cancelar-transferencia(id); }
+                responder(s) => { root.responder-arquivo(s); }
+                fechar => { root.arquivos-aberto = false; }
             }
             if root.tela == Tela.teste: TelaTeste {
                 nome: root.teste-nome;

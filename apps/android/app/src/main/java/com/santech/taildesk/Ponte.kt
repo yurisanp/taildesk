@@ -14,6 +14,12 @@ object Ponte {
     /** Decodifica um quadro (plano Y) da câmera; devolve a URI ou `null`. */
     @JvmStatic external fun nativeLerQuadro(largura: Int, altura: Int, stride: Int, luma: ByteArray): String?
 
+    /** Arquivos escolhidos no seletor, já no cache: `caminho\tnome\ttamanho` por linha. */
+    @JvmStatic external fun nativeArquivosEscolhidos(texto: String)
+
+    /** Resultado de [MainActivity.publicarDownload]: `ok\tnome` ou `erro\tnome`. */
+    @JvmStatic external fun nativeDownloadPublicado(texto: String)
+
     /** A biblioteca é carregada pela NativeActivity; fora dela (testes JVM) não existe. */
     @Volatile
     var carregada = false

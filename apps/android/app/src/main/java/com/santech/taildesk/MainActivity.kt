@@ -1,6 +1,7 @@
 package com.santech.taildesk
 
 import android.app.NativeActivity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -49,6 +50,37 @@ class MainActivity : NativeActivity() {
     fun abrirLink(url: String) = runOnUiThread { Acoes.abrirLink(this, url) }
 
     fun otimizacaoBateria() = runOnUiThread { Acoes.otimizacaoBateria(this) }
+
+    /** Seletor de arquivos do sistema para enviar ao computador (a resposta vai para o Rust). */
+    fun escolherArquivos() = runOnUiThread {
+        try {
+            @Suppress("DEPRECATION") // NativeActivity não é ComponentActivity: sem ActivityResult API.
+            startActivityForResult(SafBridge.intentEscolher(), SafBridge.PEDIDO_ESCOLHER)
+        } catch (_: ActivityNotFoundException) {
+            Ponte.nativeArquivosEscolhidos("")
+        }
+    }
+
+    /** `caminho\tnome`: leva um download para `Download/TailDesk` e avisa o Rust. */
+    fun publicarDownload(texto: String) {
+        val (caminho, nome) = texto.split('\t', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+        val app = applicationContext
+        Thread {
+            val ok = SafBridge.publicar(app, caminho, SafBridge.nomeSeguro(nome))
+            Ponte.nativeDownloadPublicado((if (ok) "ok" else "erro") + "\t" + nome)
+        }.start()
+    }
+
+    @Deprecated("NativeActivity não tem a ActivityResult API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != SafBridge.PEDIDO_ESCOLHER) return
+        val uris = if (resultCode == RESULT_OK) SafBridge.uris(data) else emptyList()
+        if (uris.isEmpty()) return
+        val app = applicationContext
+        Thread { Ponte.nativeArquivosEscolhidos(SafBridge.copiarEscolhidos(app, uris)) }.start()
+    }
 
     /**
      * Tela inicial pedida por quem abriu o app (testes no emulador e capturas da loja):

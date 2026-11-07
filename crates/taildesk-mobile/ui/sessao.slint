@@ -121,6 +121,7 @@ export component TelaSessao inherits Rectangle {
     callback ctrl-alt-del();
     callback texto(string);
     callback apagar(int);
+    callback abrir-arquivos();
 
     background: #0d0f13;
 
@@ -231,6 +232,7 @@ export component TelaSessao inherits Rectangle {
                     if root.varios-monitores: BotaoBarra { texto: "▶"; rotulo-acessivel: @tr("Próximo monitor"); clicado => { root.trocar-monitor(1); } }
                     BotaoBarra { texto: "⌨"; ativo: root.teclado-aberto; rotulo-acessivel: @tr("Teclado"); clicado => { root.teclado-aberto = !root.teclado-aberto; if root.teclado-aberto { captador.focus(); } else { captador.clear-focus(); } } }
                     BotaoBarra { texto: root.modo-toque == 0 ? @tr("Touchpad") : @tr("Toque direto"); ativo: true; clicado => { root.alternar-modo(); } }
+                    BotaoBarra { texto: "📁"; rotulo-acessivel: @tr("Arquivos"); clicado => { root.abrir-arquivos(); } }
                     BotaoBarra { texto: "HUD"; ativo: root.hud-visivel; rotulo-acessivel: @tr("Informações da conexão"); clicado => { root.alternar-hud(); } }
                     BotaoBarra { texto: @tr("Encerrar"); perigo: true; clicado => { root.encerrar(); } }
                 }

@@ -122,6 +122,11 @@ impl SessaoRede {
         self.sessao.fingerprint()
     }
 
+    /// Serviço de arquivos da sessão (barato de clonar).
+    pub fn arquivos(&self) -> taildesk_files::service::Files<quinn::Connection> {
+        self.sessao.arquivos().clone()
+    }
+
     /// Manda sem esperar (da thread da interface); fila cheia descarta.
     pub fn enviar(&self, msg: Msg) {
         let _ = self.sessao.saida().try_send(Control { msg: Some(msg) });

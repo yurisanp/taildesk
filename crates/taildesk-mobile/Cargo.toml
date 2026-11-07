@@ -23,6 +23,7 @@ taildesk-proto.workspace = true
 taildesk-overlay.workspace = true
 taildesk-keyboard.workspace = true
 taildesk-session.workspace = true
+taildesk-files.workspace = true
 taildesk-transport.workspace = true
 # Sem openh264 nem Opus no Android: o MediaCodec decodifica e o som vem na M3.
 taildesk-codec.workspace = true

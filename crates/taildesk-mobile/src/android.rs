@@ -4,8 +4,8 @@
 //!   pelo objeto da Activity que o `android-activity` entrega (funciona de qualquer thread
 //!   anexada à JVM, sem procurar classe pelo nome).
 //! - Kotlin → Rust: funções nativas do objeto `com.santech.taildesk.Ponte` (`nativeSinais`,
-//!   `nativeQr`, `nativeLerQuadro`). Chegam na thread de Java e vão para a thread da interface
-//!   por [`no_app`].
+//!   `nativeQr`, `nativeLerQuadro`, `nativeArquivosEscolhidos`, `nativeDownloadPublicado`).
+//!   Chegam na thread de Java e vão para a thread da interface por [`no_app`].
 //!
 //! Formato das mensagens: texto com campos separados por tabulação, para manter a ponte pequena.
 
@@ -141,6 +141,17 @@ impl Plataforma for PlataformaAndroid {
     fn pasta_dados(&self) -> Option<PathBuf> {
         self.pasta.clone()
     }
+    fn escolher_arquivos(&self) {
+        self.android.chamar(jni_str!("escolherArquivos"), None);
+    }
+    fn publicar_download(&self, caminho: &std::path::Path, nome: &str) -> bool {
+        let Some(c) = caminho.to_str() else {
+            return false;
+        };
+        self.android
+            .chamar(jni_str!("publicarDownload"), Some(&format!("{c}\t{nome}")));
+        true
+    }
     fn aparelho(&self) -> Aparelho {
         self.aparelho.clone()
     }
@@ -259,6 +270,38 @@ pub extern "system" fn Java_com_santech_taildesk_Ponte_nativeQr<'c>(
     env.with_env(|_env| -> jni::errors::Result<()> {
         let t = texto.to_string();
         no_app(move |a| a.qr_lido(&t));
+        Ok(())
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
+}
+
+/// `Ponte.nativeArquivosEscolhidos(texto)`: o seletor do sistema devolveu arquivos, já
+/// copiados para o cache do app (`caminho\tnome\ttamanho` por linha).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_santech_taildesk_Ponte_nativeArquivosEscolhidos<'c>(
+    mut env: EnvUnowned<'c>,
+    _classe: JClass<'c>,
+    texto: JString<'c>,
+) {
+    env.with_env(|_env| -> jni::errors::Result<()> {
+        let t = texto.to_string();
+        no_app(move |a| a.arquivos_escolhidos(&t));
+        Ok(())
+    })
+    .resolve::<jni::errors::LogErrorAndDefault>();
+}
+
+/// `Ponte.nativeDownloadPublicado(texto)`: o download foi (ou não) para `Download/TailDesk`
+/// (`ok\tnome` ou `erro\tnome`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_santech_taildesk_Ponte_nativeDownloadPublicado<'c>(
+    mut env: EnvUnowned<'c>,
+    _classe: JClass<'c>,
+    texto: JString<'c>,
+) {
+    env.with_env(|_env| -> jni::errors::Result<()> {
+        let t = texto.to_string();
+        no_app(move |a| a.download_publicado(&t));
         Ok(())
     })
     .resolve::<jni::errors::LogErrorAndDefault>();
