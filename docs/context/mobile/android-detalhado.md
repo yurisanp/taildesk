@@ -205,7 +205,7 @@ Resumo do `requisitos.md` §4, já no formato de implementação:
 | 09 `monitores` | Troca de monitor | Lista, ◀ ▶ e deslizar com 3 dedos; um monitor por vez no celular |
 | 10 `arquivos` (M3) | Folha de arquivos | Navegar raízes do host, baixar, enviar |
 | 11 `compartilhar` (M3) | Menu de compartilhar | Escolher computador e enviar sem abrir sessão |
-| 12 `teste-conexao` | Teste de conexão | M1 mínimo (latência, caminho do host, decode HW); M3 completo |
+| 12 `teste-conexao` | Teste de conexão | M1 mínimo (latência, caminho do host, decode HW); M3 completo: o host atende `TestRequest` (`07-protocolo.md` §3.6) e a tela mostra caminho, latência mín/mediana/p95, variação, perda, banda, encoders do host, perfil e porquê, com "Copiar relatório" (#115). Demonstração e simulação de rede ainda faltam |
 | 13 `configuracoes` | Configurações | MF-100 |
 | 14 `tablet` (M3) | Tablet | Toque direto padrão, 2 monitores em tela dividida |
 | 15–17 (M4) | Host Android | Ativar, pedido de acesso, desktop controlando o celular |
