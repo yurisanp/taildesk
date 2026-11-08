@@ -114,6 +114,10 @@ if ! grep -q '^teclado: sim, mouse: sim' "$saida"; then
     echo "::error::o portal não liberou teclado e mouse"
     falhou=1
 fi
+if ! grep -q '^libei: disponível' "$saida"; then
+    echo "::error::o portal não ofereceu o libei (ConnectToEIS)"
+    falhou=1
+fi
 medidos=$(grep -Ec '^monitor [0-9]+: [1-9][0-9]* quadros' "$saida" || true)
 if [[ $medidos -ne $MONITORES ]]; then
     echo "::error::$medidos de $MONITORES monitores entregaram quadros"

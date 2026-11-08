@@ -105,11 +105,6 @@ async fn rodar(com_input: bool, video: bool) -> Result<(), ErroPortal> {
         Err(e) => println!("captura: {e}"),
     }
     if d.ponteiro {
-        match sessao.conectar_eis().await {
-            Ok(Some(_)) => println!("libei: disponível (ConnectToEIS)"),
-            Ok(None) => println!("libei: o portal não oferece ConnectToEIS"),
-            Err(e) => println!("libei: {e}"),
-        }
         for m in sessao.monitores() {
             println!(
                 "movendo o ponteiro para o centro do monitor {}",
@@ -119,6 +114,13 @@ async fn rodar(com_input: bool, video: bool) -> Result<(), ErroPortal> {
                 .ponteiro_absoluto(m.display_id, u16::MAX / 2, u16::MAX / 2)
                 .await?;
             tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        // Por último: depois do ConnectToEIS o portal recusa os NotifyPointer* do D-Bus
+        // ("Session is not allowed to call NotifyPointer methods").
+        match sessao.conectar_eis().await {
+            Ok(Some(_)) => println!("libei: disponível (ConnectToEIS)"),
+            Ok(None) => println!("libei: o portal não oferece ConnectToEIS"),
+            Err(e) => println!("libei: {e}"),
         }
     }
     println!("Sessão aberta por 5 s; o compositor deve mostrar o indicador de compartilhamento.");

@@ -124,7 +124,8 @@ Receita (`.github/scripts/wayland-kde.sh`):
    3 s, liga o libei (ConnectToEIS) e move o ponteiro.
 
 Resultado no container Arch (KWin 6.8.2, xdg-desktop-portal 1.22.1, xdp-kde 6.8.2, PipeWire
-1.6.10): ver §10.
+1.6.10): ver §11. O KWin precisa de um render node para compor em OpenGL (só aí tem ScreenCast):
+no runner, `sudo modprobe vgem` + `--device /dev/dri`, com Mesa llvmpipe.
 
 Próximos passos sobre a mesma base: conferir a injeção (uma janela Wayland de teste que grava
 teclas e cliques recebidos, com layouts ABNT2/US-Intl pelo `kxkbrc`), restore_token e
@@ -261,7 +262,18 @@ de cada versão.
 
 ## 11. Resultado da prova (08/11/2026)
 
-Preenchido em §4.2 abaixo do PR (ver resultado do job `wayland-kde` no CI).
+- **Local (container Arch, sem GPU)**: a pré-autorização funciona: o backend KDE consulta
+  `kde-authorized`/`remote-desktop`, recebe "yes" e não abre diálogo. Sem render node o KWin
+  compõe em QPainter e o Start falha com "Unsupported compositing type".
+- **Runner `ubuntu-latest` com `modprobe vgem`** (primeira rodada do PR #119): o portal liberou
+  os 2 monitores (nodes PipeWire, posição, região libei `Virtual-0`/`Virtual-1`), teclado e mouse,
+  a captura PipeWire entregou quadros BGRx 1920x1080 com metadado de cursor, e o ConnectToEIS
+  respondeu. O KWin só manda quadro quando a tela muda, então numa área de trabalho parada vem
+  ~1 quadro por monitor; o teste aceita ≥ 1.
+- **Achado**: depois do `ConnectToEIS`, o portal recusa `NotifyPointerMotionAbsolute` pelo D-Bus
+  ("Session is not allowed to call NotifyPointer methods"). O `taildesk-cli portal` chamava nessa
+  ordem; corrigido no PR. O host do app não chama `conectar_eis`, então não é afetado hoje, mas
+  quando a injeção passar para o libei é preciso escolher um dos dois caminhos por sessão.
 
 ## Fontes
 
