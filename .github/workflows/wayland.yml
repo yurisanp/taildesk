@@ -1,0 +1,71 @@
+# Wayland de verdade sem as máquinas do Yuri (docs/context/18-testes-multiplataforma.md §4.2):
+# KWin sem tela com 2 monitores, PipeWire e o portal KDE pré-autorizado, num container Arch
+# (pacotes do Plasma mais novos). Pega regressão em SessaoPortal, captura PipeWire e libei.
+# Roda também toda noite, para pegar quebra vinda de atualização do Arch/Plasma.
+name: Wayland
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/taildesk-platform/**"
+      - "crates/taildesk-media/**"
+      - "crates/taildesk-codec/**"
+      - "apps/taildesk-cli/**"
+      - "Cargo.lock"
+      - ".github/scripts/wayland-kde*.sh"
+      - ".github/workflows/wayland.yml"
+  pull_request:
+    paths:
+      - "crates/taildesk-platform/**"
+      - "crates/taildesk-media/**"
+      - "crates/taildesk-codec/**"
+      - "apps/taildesk-cli/**"
+      - "Cargo.lock"
+      - ".github/scripts/wayland-kde*.sh"
+      - ".github/workflows/wayland.yml"
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: wayland-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kde:
+    name: KDE Wayland (KWin virtual, portal, PipeWire)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      # Render node sem GPU: o KWin só compõe em OpenGL (e só aí tem ScreenCast) com um.
+      - name: vgem
+        run: |
+          sudo modprobe vgem || {
+            sudo apt-get update
+            sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+            sudo modprobe vgem
+          }
+          ls -l /dev/dri
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cache
+          key: wayland-kde-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: wayland-kde-
+      - name: Teste no container Arch
+        run: |
+          mkdir -p "$RUNNER_TEMP/cache" "$RUNNER_TEMP/logs"
+          docker run --rm --device /dev/dri \
+            -v "$PWD:/src" -w /src \
+            -v "$RUNNER_TEMP/cache:/cache" \
+            -v "$RUNNER_TEMP/logs:/logs" -e TAILDESK_LOGS=/logs \
+            archlinux:latest .github/scripts/wayland-kde-container.sh
+      - name: Permissões do cache
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cache" "$RUNNER_TEMP/logs"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-wayland-kde
+          path: ${{ runner.temp }}/logs
