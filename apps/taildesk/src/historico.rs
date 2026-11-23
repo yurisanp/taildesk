@@ -118,13 +118,13 @@ fn alerta(a: &Acesso) -> bool {
 }
 
 fn quando(ts_ms: i64) -> String {
-    use chrono::{Local, TimeZone};
-    match Local.timestamp_millis_opt(ts_ms) {
-        chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) => {
-            t.format("%d/%m %H:%M").to_string()
-        }
-        chrono::LocalResult::None => String::new(),
-    }
+    jiff::Timestamp::from_millisecond(ts_ms)
+        .map(|t| {
+            t.to_zoned(jiff::tz::TimeZone::system())
+                .strftime("%d/%m %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default()
 }
 
 fn linha(a: &Acesso) -> LinhaAcesso {

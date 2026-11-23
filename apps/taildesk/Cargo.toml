@@ -24,7 +24,7 @@ taildesk-media = { workspace = true, features = ["audio", "openh264"] }
 taildesk-render.workspace = true
 quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 slint = { version = "=1.18.1", features = ["unstable-winit-030", "unstable-wgpu-30", "renderer-femtovg-wgpu"] }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+jiff = "0.2"
 # QR de pareamento do celular (MIT OR Apache-2.0), sem o `image`: os módulos viram pixels aqui.
 qrcode = { version = "0.14", default-features = false }
 # Código de uso único do pareamento (MIT OR Apache-2.0).
