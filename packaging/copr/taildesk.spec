@@ -67,5 +67,8 @@ appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.yuri
 %{_metainfodir}/io.github.yurisanp.TailDesk.metainfo.xml
 
 %changelog
-* Fri Oct 17 2026 TailDesk contributors - 0.2.0-1
+* Mon Nov 23 2026 TailDesk contributors - 0.2.0-1
+- Versão 0.2.0: primeira versão gráfica (veja CHANGELOG.md).
+
+* Fri Oct 17 2026 TailDesk contributors - 0.2.0-0
 - Empacotamento inicial para o COPR (fase 5).

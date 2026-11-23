@@ -79,6 +79,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.0" date="2026-11-23">
+      <description>
+        <p>First graphical release: remote desktop and file transfer between Windows and Linux computers on the same tailnet, with hardware video codecs, keyboard layout translation, multiple monitors, shared clipboard, system audio and chat.</p>
+        <p xml:lang="pt_BR">Primeira versão gráfica: área de trabalho remota e troca de arquivos entre computadores Windows e Linux da mesma tailnet, com codecs de vídeo por hardware, tradução de layout de teclado, vários monitores, área de transferência compartilhada, som do computador e chat.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-15">
       <description>
         <p>First command-line release.</p>
