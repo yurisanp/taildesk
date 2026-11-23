@@ -30,6 +30,28 @@ use ashpd::desktop::screencast::{
 use ashpd::desktop::{CreateSessionOptions, PersistMode, ResponseError, Session};
 use ashpd::enumflags2::BitFlags;
 
+/// Apresenta o app aos portais com `app_id` (`org.freedesktop.host.portal.Registry`, portal
+/// ≥ 1.19). Chame no início, antes de qualquer outra chamada de portal: o portal fixa o id da
+/// conexão na primeira chamada.
+///
+/// Sem isso o portal adivinha o id pela unidade do systemd que abriu o processo: pelo menu do
+/// KDE é `io.github.yurisanp.TailDesk`, por um serviço com outro nome é `""`. A permissão de
+/// tela lembrada (o `restore_token`) fica presa ao id de quando foi dada, e o diálogo voltava
+/// sempre que o app abria pelo outro caminho. No Flatpak o id já vem do sandbox e isto não faz
+/// nada.
+///
+/// Bloqueia (D-Bus). Falha só com log: em portal antigo vale o id pela unidade
+/// ([`crate::inicio::UNIDADE`] já leva o mesmo id).
+pub fn registrar_app(app_id: &str) {
+    let r = pollster::block_on(async {
+        let id = ashpd::AppID::try_from(app_id)?;
+        ashpd::register_host_app(id).await
+    });
+    if let Err(e) = r {
+        eprintln!("taildesk: portal não registrou o app como {app_id}: {e}");
+    }
+}
+
 /// Coordenada normalizada máxima do protocolo (`taildesk_proto::control::limits::COORD_MAX`).
 const COORD_MAX: f64 = u16::MAX as f64;
 
@@ -627,6 +649,13 @@ fn estado(pressionado: bool) -> KeyState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// O id que vai para o Registry do portal tem que ser um id de app válido (D-Bus, com
+    /// pontos), senão o registro falha e a permissão de tela volta a depender do jeito de abrir.
+    #[test]
+    fn id_do_app_vale_para_o_portal() {
+        assert!(ashpd::AppID::try_from(crate::APP_ID).is_ok());
+    }
 
     #[test]
     fn streams_viram_monitores_na_ordem() {

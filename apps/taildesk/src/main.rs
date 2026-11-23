@@ -47,7 +47,7 @@ const INTERVALO: Duration = Duration::from_secs(3);
 
 /// Nome do `.desktop` (`packaging/linux/io.github.yurisanp.TailDesk.desktop`), do ícone e do
 /// MetaInfo: app_id no Wayland, WM_CLASS no X11 e id do Flatpak, que o Flathub exige iguais.
-const APP_ID: &str = "io.github.yurisanp.TailDesk";
+const APP_ID: &str = taildesk_platform::APP_ID;
 
 /// Estado que vive na thread da interface. A janela só existe enquanto está aberta.
 struct App {
@@ -368,6 +368,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+
+    // O id do app nos portais antes de qualquer chamada a eles: a permissão de tela lembrada
+    // fica presa a esse id, seja o app aberto pelo menu ou pelo início com o sistema.
+    #[cfg(target_os = "linux")]
+    taildesk_platform::wayland::registrar_app(APP_ID);
 
     // Outra instância já aberta: ela mostra a janela (com o nosso token) e esta sai.
     let _guarda = match instancia::garantir("app", token.as_deref(), |t| {

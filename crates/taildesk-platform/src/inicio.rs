@@ -2,7 +2,7 @@
 //! desde que a pessoa entra no computador, para o acesso com senha funcionar sem ninguém abrir
 //! o app.
 //!
-//! - Linux: serviço do usuário no systemd (`~/.config/systemd/user/taildesk.service`), preso ao
+//! - Linux: serviço do usuário no systemd (`~/.config/systemd/user/`[`UNIDADE`]), preso ao
 //!   `graphical-session.target`, para ter o Wayland, o D-Bus e o portal da sessão gráfica.
 //! - Flatpak: o sandbox não tem `systemctl`; o portal Background cria a entrada de início
 //!   automático (`taildesk --oculto`), e um marcador na pasta de configuração do app lembra que
@@ -13,8 +13,14 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Nome da unidade do systemd.
-pub const UNIDADE: &str = "taildesk.service";
+/// Nome da unidade do systemd, no padrão `app-<id>-autostart.service` das entradas de início
+/// automático: o portal tira dele o id do app ([`crate::APP_ID`]), o mesmo de quando o app abre
+/// pelo menu. Com outro nome o id virava `""` e a permissão de tela lembrada não valia.
+pub const UNIDADE: &str = "app-io.github.yurisanp.TailDesk-autostart.service";
+
+/// Nome até a v0.2.0-beta: migrada para [`UNIDADE`] no próximo [`ligar`].
+#[cfg(target_os = "linux")]
+const UNIDADE_ANTIGA: &str = "taildesk.service";
 
 /// O executável a iniciar: o AppImage inteiro quando o app roda de dentro de um (o caminho do
 /// binário montado muda a cada execução).
@@ -111,6 +117,32 @@ fn caminho_unidade() -> io::Result<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
+fn caminho_unidade_antiga() -> io::Result<PathBuf> {
+    Ok(pasta_config()?.join("systemd/user").join(UNIDADE_ANTIGA))
+}
+
+/// A unidade em disco precisa ser regravada: ainda há a de nome antigo, ou o texto não é o que
+/// [`unidade`] gera hoje (app movido ou atualizado).
+#[cfg(any(target_os = "linux", test))]
+fn precisa_regravar(tem_antiga: bool, atual: Option<&str>, esperado: &str) -> bool {
+    tem_antiga || atual.is_some_and(|t| t != esperado)
+}
+
+/// Desabilita e apaga a unidade de nome antigo, se houver.
+#[cfg(target_os = "linux")]
+fn apagar_antiga() -> io::Result<()> {
+    let p = caminho_unidade_antiga()?;
+    if !p.exists() {
+        return Ok(());
+    }
+    let _ = systemctl(&["disable", UNIDADE_ANTIGA]);
+    match std::fs::remove_file(p) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn systemctl(args: &[&str]) -> io::Result<()> {
     let s = std::process::Command::new("systemctl")
         .arg("--user")
@@ -150,6 +182,7 @@ pub fn ligar() -> io::Result<()> {
     let tmp = p.with_extension("tmp");
     std::fs::write(&tmp, unidade(&executavel()?))?;
     std::fs::rename(&tmp, &p)?;
+    apagar_antiga()?;
     systemctl(&["daemon-reload"])?;
     systemctl(&["enable", UNIDADE])
 }
@@ -170,6 +203,7 @@ pub fn desligar() -> io::Result<()> {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
         _ => {}
     }
+    apagar_antiga()?;
     let _ = systemctl(&["daemon-reload"]);
     Ok(())
 }
@@ -180,18 +214,21 @@ pub fn ligado() -> bool {
     if em_flatpak() {
         return marcador_flatpak().is_ok_and(|m| m.exists());
     }
-    caminho_unidade().is_ok_and(|p| p.exists())
-        && std::process::Command::new("systemctl")
-            .args(["--user", "is-enabled", "--quiet", UNIDADE])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+    let habilitada = |caminho: io::Result<PathBuf>, nome: &str| {
+        caminho.is_ok_and(|p| p.exists())
+            && std::process::Command::new("systemctl")
+                .args(["--user", "is-enabled", "--quiet", nome])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+    };
+    habilitada(caminho_unidade(), UNIDADE) || habilitada(caminho_unidade_antiga(), UNIDADE_ANTIGA)
 }
 
 /// Se a unidade aponta para outro executável (o app foi movido ou atualizado para outro
-/// caminho): ligue de novo para corrigir.
+/// caminho) ou ainda tem o nome antigo: ligue de novo para corrigir.
 #[cfg(target_os = "linux")]
 pub fn desatualizado() -> bool {
     // No Flatpak o comando é sempre `taildesk` dentro do sandbox.
@@ -201,7 +238,9 @@ pub fn desatualizado() -> bool {
     let (Ok(p), Ok(exe)) = (caminho_unidade(), executavel()) else {
         return false;
     };
-    std::fs::read_to_string(p).is_ok_and(|t| t != unidade(&exe))
+    let antiga = caminho_unidade_antiga().is_ok_and(|p| p.exists());
+    let atual = std::fs::read_to_string(p).ok();
+    precisa_regravar(antiga, atual.as_deref(), &unidade(&exe))
 }
 
 /// Liga: instala o serviço (o Windows pede administrador).
@@ -266,5 +305,34 @@ mod tests {
             "{u}"
         );
         assert!(u.contains("WantedBy=graphical-session.target"));
+    }
+
+    /// O portal tira o id do app do nome da unidade (`app-<id>-autostart.service`, regex de
+    /// `xdp-app-info-host.c`): tem que dar o mesmo id da janela e do `.desktop`.
+    #[test]
+    fn unidade_leva_o_id_do_app() {
+        let id = UNIDADE
+            .strip_prefix("app-")
+            .and_then(|u| u.strip_suffix(".service"))
+            .and_then(|u| u.strip_suffix("-autostart"));
+        assert_eq!(id, Some(crate::APP_ID));
+    }
+
+    #[test]
+    fn regrava_unidade_antiga_ou_velha() {
+        let novo = unidade(Path::new("/opt/taildesk"));
+        // Só a antiga (`taildesk.service`): migra.
+        assert!(precisa_regravar(true, None, &novo));
+        // As duas: migra e apaga a antiga.
+        assert!(precisa_regravar(true, Some(&novo), &novo));
+        // Nova apontando para outro executável.
+        assert!(precisa_regravar(
+            false,
+            Some(&unidade(Path::new("/velho"))),
+            &novo
+        ));
+        // Em dia, ou desligado.
+        assert!(!precisa_regravar(false, Some(&novo), &novo));
+        assert!(!precisa_regravar(false, None, &novo));
     }
 }

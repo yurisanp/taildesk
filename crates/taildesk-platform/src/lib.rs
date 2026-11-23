@@ -40,6 +40,11 @@ pub mod x11;
 use std::io;
 use std::process::{Command, Stdio};
 
+/// Id do app no desktop: nome do `.desktop` (`packaging/linux/io.github.yurisanp.TailDesk.desktop`),
+/// do ícone e do MetaInfo, `app_id` da janela no Wayland, `WM_CLASS` no X11, id do Flatpak e o id
+/// com que o app se apresenta aos portais ([`wayland::registrar_app`]).
+pub const APP_ID: &str = "io.github.yurisanp.TailDesk";
+
 /// Se o sistema mostra ícones na bandeja. Quando não mostra, o app deve fechar ao fechar a
 /// janela, em vez de ficar escondido sem ter como voltar.
 ///
